@@ -138,6 +138,7 @@ function fixture(feed: { text: string } = { text: FEED }) {
     fetchFeed: (text: string) => { feed.text = text; },
     fetched,
     time: (value: string) => { clock = new Date(value); },
+    raw: async (path: string, method = "GET") => api.handle(new Request(`http://localhost/api${path}`, { method })),
     call: async (path: string, method = "GET", body?: unknown) => {
       const response = await api.handle(new Request(`http://localhost/api${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }) }));
       const result: unknown = await response.json();
@@ -235,4 +236,52 @@ test("removing a subscription removes its occurrences and survives export and wi
   await f.call("/data/all", "DELETE", { confirm: "DELETE_ALL" });
   expect(f.store.count("calendars")).toBe(0);
   expect(f.store.count("calendar_events")).toBe(0);
+});
+
+test("an event reopens the saved records that overlap with it, and says so when none do", async () => {
+  const f = fixture();
+  const calendar = await subscribe(f);
+  const entry = z.object({ entry: z.object({ id: z.string(), text: z.string() }) }).parse(
+    await f.call("/entries", "POST", {
+      kind: "interest",
+      text: "주간 회의에서 다룰 기억 오염 측정 비용 문제",
+      scope: "research",
+      context: { kind: "interest", why_it_matters: "논문 3장", known_obstacle: "측정 비용", interruption: "when_strong" },
+    }),
+  );
+  const events = eventsResult.parse(await f.call("/calendar/events?days=60")).events.filter((e) => e.calendar_id === calendar.id);
+
+  const meeting = events.find((e) => e.summary === "주간 회의");
+  if (!meeting) throw new Error("fixture did not sync the weekly meeting");
+  const context = z.object({
+    question: z.string(),
+    query: z.object({ epistemic_status: z.string(), citations: z.array(z.object({ entity_type: z.string(), entity_id: z.string(), quote: z.string() })) }),
+  }).parse(await f.call(`/calendar/events/${meeting.id}/context`));
+  expect(context.question).toBe("주간 회의");
+  expect(context.query.epistemic_status).toBe("insufficient_record");
+  expect(context.query.citations).toEqual([{ entity_type: "entry", entity_id: entry.entry.id, quote: entry.entry.text }]);
+
+  const workshop = events.find((e) => e.summary === "워크숍");
+  if (!workshop) throw new Error("fixture did not sync the workshop");
+  const quiet = z.object({ query: z.object({ citations: z.array(z.unknown()) }) })
+    .parse(await f.call(`/calendar/events/${workshop.id}/context`));
+  expect(quiet.query.citations).toEqual([]);
+});
+
+test("an unknown occurrence has no context", async () => {
+  const f = fixture();
+  const response = await f.raw("/calendar/events/does-not-exist/context");
+  expect(response.status).toBe(404);
+});
+
+test("reading an event context writes nothing", async () => {
+  const f = fixture();
+  const calendar = await subscribe(f);
+  const events = eventsResult.parse(await f.call("/calendar/events?days=60")).events.filter((e) => e.calendar_id === calendar.id);
+  const [first] = events;
+  if (!first) throw new Error("fixture did not sync any occurrence");
+  const before = f.store.count("history_events");
+  await f.call(`/calendar/events/${first.id}/context`);
+  expect(f.store.count("history_events")).toBe(before);
+  expect(f.store.count("entries")).toBe(0);
 });

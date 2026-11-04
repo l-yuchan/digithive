@@ -3,6 +3,7 @@ import type {
   CalendarOccurrence,
   CalendarSubscription,
   CalendarSyncResult,
+  Preference,
 } from "../../shared";
 import { createCalendarRequestSchema, updateCalendarRequestSchema } from "../../shared";
 import type { Ctx, Route } from "../api_util";
@@ -14,8 +15,9 @@ import {
   recordSyncFailure,
   syncCalendar,
 } from "../calendar";
-import type { CalendarRow, Store } from "../store";
-import { calendarView, eq } from "../store";
+import type { CalendarEventRow, CalendarRow, Store } from "../store";
+import { calendarEventView, calendarView, eq } from "../store";
+import { groundedQuery } from "../retrieval";
 import { deleteCalendar } from "../deletion";
 import { localParts, zonedTimeToUtc } from "../time";
 
@@ -168,6 +170,32 @@ export const calendarRoutes: Route[] = [
         else failures.push({ calendar_id: row.id, name: row.name, error: synced.error ?? "unknown error" });
       }
       return { body: { calendars, results, failures } };
+    },
+  },
+  {
+    // Context recovery for one occurrence: the same grounded retrieval the
+    // query box uses, asked with the event title, so an upcoming meeting
+    // reopens whatever was already written about it. Read-only: nothing is
+    // created and no citation is treated as a decision.
+    method: "GET",
+    path: "/api/calendar/events/:id/context",
+    handler: async (ctx) => {
+      const id = ctx.params["id"] ?? "";
+      const row = ctx.store.byId<CalendarEventRow>("calendar_events", id);
+      if (!row) throw notFound(`calendar event ${id} not found`);
+      const event = calendarEventView(row);
+      const calendar = mustGetCalendar(ctx.store, event.calendar_id);
+      const question = event.summary;
+      const prefs = ctx.store.list<Preference>("preferences");
+      const query = groundedQuery(ctx.store, question, ctx.now(), prefs);
+      return {
+        body: {
+          event,
+          calendar: viewOf(ctx.store, calendar),
+          question,
+          query,
+        },
+      };
     },
   },
   {

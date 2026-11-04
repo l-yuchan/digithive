@@ -1,7 +1,8 @@
 import { api } from "./api-client";
 import type { CalendarAgenda } from "./api-client";
-import { confirmAction, emptyState, field, formatDate, html, openDialog, text } from "./dom";
+import { confirmAction, emptyState, errorMessage, field, formatDate, html, openDialog, text } from "./dom";
 import { capture } from "./entries";
+import { CITATION_LABELS } from "./labels";
 import type { CalendarOccurrence, CalendarSubscription } from "../shared";
 
 // Calendar screen. Subscribed feeds are read-only reference data: the app
@@ -56,7 +57,10 @@ function eventLine(event: CalendarOccurrence, calendar: CalendarSubscription | u
       <span class="agenda-title"><span class="cal-dot" data-color="${html(calendar?.color ?? "neutral")}" aria-hidden="true"></span>${html(event.summary)}</span>
       <span class="small faint">${detail}</span>
     </span>
-    <button class="button button-small" type="button" data-record="${html(event.id)}">기록</button>
+    <span class="cluster agenda-actions">
+      <button class="button button-small" type="button" data-context="${html(event.id)}">맥락</button>
+      <button class="button button-small" type="button" data-record="${html(event.id)}">기록</button>
+    </span>
   </li>`;
 }
 
@@ -83,21 +87,75 @@ function agendaHtml(events: readonly CalendarOccurrence[], calendars: readonly C
   }).join("");
 }
 
-function wireRecordButtons(root: HTMLElement, events: readonly CalendarOccurrence[], calendars: readonly CalendarSubscription[], timeZone: string, refresh: () => Promise<void>): void {
+function eventWhen(event: CalendarOccurrence, timeZone: string): string {
+  return event.all_day
+    ? dayLabel(event.starts_at, timeZone) + " 종일"
+    : dayLabel(event.starts_at, timeZone) + " " + timeLabel(event, timeZone);
+}
+
+function draftFromEvent(event: CalendarOccurrence, calendar: CalendarSubscription | undefined, timeZone: string, refresh: () => Promise<void>): void {
+  capture(refresh, undefined, {
+    kind: "commitment",
+    text: event.summary,
+    due_at: event.all_day ? null : event.starts_at,
+    note: "일정에서 시작한 초안입니다 · " + eventWhen(event, timeZone) + (calendar ? " · " + calendar.name : "") + ". 저장 전에 문장을 고쳐도 됩니다.",
+  });
+}
+
+const CONTEXT_STATUS: Record<string, string> = {
+  recorded_facts: "확인한 사실이 저장되어 있습니다.",
+  includes_inferences: "일부 인용은 추론된 기록입니다. 결정으로 읽지 마세요.",
+  insufficient_record: "확정된 결정은 없습니다. 아래 인용은 참고용 기록입니다.",
+};
+
+/**
+ * Context recovery for one occurrence: what was already written about it,
+ * quoted verbatim from the saved records, with the same honesty rules as the
+ * query box. Opening this creates nothing.
+ */
+function openEventContext(event: CalendarOccurrence, calendar: CalendarSubscription | undefined, timeZone: string, refresh: () => Promise<void>): void {
+  const dialog = openDialog({ title: "일정의 맥락", body: '<div data-context-body><p class="loading" role="status">저장된 기록을 확인하는 중입니다.</p></div>' });
+  const body = dialog.querySelector<HTMLElement>("[data-context-body]");
+  if (!body) return;
+  void api.calendarEventContext(event.id).then(result => {
+    const { query } = result;
+    const citations = query.citations.length === 0
+      ? emptyState("겹치는 저장 기록이 없습니다", "이 일정 제목과 겹치는 기록이 아직 없습니다. 필요하면 아래에서 기록을 남기세요.")
+      : `<ul class="list">${query.citations.map(citation => `<li class="list-row"><div class="cluster"><span class="badge">${html(CITATION_LABELS[citation.entity_type])}</span><small class="faint">${html(formatDate(citation.at, false))}</small></div><blockquote>${html(citation.quote)}</blockquote></li>`).join("")}</ul>`;
+    body.innerHTML = `<div class="stack">
+      <p class="small muted">${html(eventWhen(event, timeZone))}${calendar ? " · " + html(calendar.name) : ""}</p>
+      <p>저장된 기록에서 "${html(result.question)}"과 겹치는 문장을 찾았습니다. 판단은 직접 하고, 인용은 그대로 보여 줍니다.</p>
+      ${citations}
+      <p class="small faint">${html(query.citations.length === 0
+        ? "저장된 기록이 없다는 뜻이며, 앱이 새로 추론한 내용은 없습니다."
+        : CONTEXT_STATUS[query.epistemic_status] ?? "")}</p>
+    </div>`;
+    const actions = dialog.querySelector(".dialog-actions");
+    if (actions) {
+      actions.insertAdjacentHTML("afterbegin", '<button class="button button-primary" type="button" data-draft>이 일정으로 기록</button>');
+      actions.querySelector("[data-draft]")?.addEventListener("click", () => {
+        dialog.close();
+        draftFromEvent(event, calendar, timeZone, refresh);
+      });
+    }
+  }).catch(error => {
+    body.innerHTML = `<p class="error-box" role="alert">${html(errorMessage(error))}</p>`;
+  });
+}
+
+function wireAgendaActions(root: HTMLElement, events: readonly CalendarOccurrence[], calendars: readonly CalendarSubscription[], timeZone: string, refresh: () => Promise<void>): void {
   root.querySelectorAll<HTMLButtonElement>("[data-record]").forEach(button => {
     button.addEventListener("click", () => {
       const event = events.find(item => item.id === button.dataset["record"]);
       if (!event) return;
-      const calendar = calendarOf(calendars, event.calendar_id);
-      const when = event.all_day
-        ? dayLabel(event.starts_at, timeZone) + " 종일"
-        : dayLabel(event.starts_at, timeZone) + " " + timeLabel(event, timeZone);
-      capture(refresh, undefined, {
-        kind: "commitment",
-        text: event.summary,
-        due_at: event.all_day ? null : event.starts_at,
-        note: "일정에서 시작한 초안입니다 · " + when + (calendar ? " · " + calendar.name : "") + ". 저장 전에 문장을 고쳐도 됩니다.",
-      });
+      draftFromEvent(event, calendarOf(calendars, event.calendar_id), timeZone, refresh);
+    });
+  });
+  root.querySelectorAll<HTMLButtonElement>("[data-context]").forEach(button => {
+    button.addEventListener("click", () => {
+      const event = events.find(item => item.id === button.dataset["context"]);
+      if (!event) return;
+      openEventContext(event, calendarOf(calendars, event.calendar_id), timeZone, refresh);
     });
   });
 }
@@ -161,7 +219,7 @@ export async function calendarView(el: HTMLElement, refresh: () => Promise<void>
         : `<ul class="list">${calendars.map(subscriptionRow).join("")}</ul>`}
     </section>`;
 
-  wireRecordButtons(el, agenda.events, agenda.calendars, agenda.timezone, refresh);
+  wireAgendaActions(el, agenda.events, agenda.calendars, agenda.timezone, refresh);
 
   el.querySelector("[data-add]")?.addEventListener("click", () => subscriptionDialog(undefined, refresh));
   el.querySelector<HTMLSelectElement>("[data-range]")?.addEventListener("change", event => {
@@ -216,5 +274,5 @@ export async function todayAgenda(el: HTMLElement, refresh: () => Promise<void>)
     ${agenda.events.length === 0
       ? emptyState("구독한 일정이 없습니다", "일정 화면에서 iCal 주소를 추가하면 이 주의 일정이 여기에 나타납니다.")
       : `<div class="stack">${agendaHtml(shown, agenda.calendars, agenda.timezone)}</div>${agenda.events.length > shown.length ? `<p class="small faint">${agenda.events.length - shown.length}개 더 있습니다.</p>` : ""}`}`;
-  wireRecordButtons(el, shown, agenda.calendars, agenda.timezone, refresh);
+  wireAgendaActions(el, shown, agenda.calendars, agenda.timezone, refresh);
 }

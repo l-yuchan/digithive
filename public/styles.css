@@ -147,6 +147,7 @@ input[type="checkbox"], input[type="radio"] { width: var(--space-5); min-height:
 .agenda-time { color: var(--ink-soft); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .agenda-body { min-width: 0; display: grid; gap: var(--space-1); }
 .agenda-title { display: flex; align-items: center; gap: var(--space-2); font-weight: 650; overflow-wrap: anywhere; }
+.agenda-actions { flex-wrap: nowrap; justify-content: flex-end; }
 .empty { padding: var(--space-8); border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); text-align: center; color: var(--ink-soft); }
 .empty p { margin-block-end: var(--space-2); }
 .loading { display: flex; align-items: center; gap: var(--space-3); color: var(--ink-soft); }

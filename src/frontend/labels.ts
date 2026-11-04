@@ -19,6 +19,7 @@ export const STATUS_LABELS: Record<EntryStatus, string> = { active: "활성", pa
 export const SUGGESTION_STATUS_LABELS: Record<SuggestionStatus, string> = { queued: "조용히 보관", held: "보류", surfaced: "살펴 볼 제안", accepted: "수락", dismissed: "닫음", deferred: "나중에", expired: "만료" };
 export const PREFERENCE_LABELS: Record<PreferenceKey, string> = { report_style: "설명 방식", interruption: "알림 시점", delivery: "전달 방식", proactivity: "능동성" };
 export const INTERRUPTION_LABELS = { never: "알리지 않음", digest_only: "다이제스트만", when_strong: "강한 연결만", immediate: "즉시" } as const;
+export const CITATION_LABELS = { entry: "기록", source: "출처", development: "변화", suggestion: "제안" } as const;
 export const ROUTE_LABELS = { today: "오늘", calendar: "일정", entries: "내 기록", sources: "자료와 변화", review: "제안 검토", evaluation: "한 달 일지", settings: "설정", history: "기록 · 백업" } as const;
 export const EFFORT_FIELDS = [
   ["context_recovery_minutes", "맥락 복원", "이전 맥락을 다시 떠올리고 찾는 데 쓴 분"],

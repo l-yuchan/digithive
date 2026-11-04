@@ -33,6 +33,7 @@ function send<T>(path: string, method: string, body?: unknown): Promise<T> {
 export interface AuthStatus { enabled: boolean; authenticated: boolean; }
 export interface CalendarMutation { calendar: CalendarSubscription; sync: CalendarSyncResult | null; sync_error: string | null }
 export interface CalendarAgenda { from: string; to: string; timezone: string; events: CalendarOccurrence[]; calendars: CalendarSubscription[] }
+export interface CalendarEventContext { event: CalendarOccurrence; calendar: CalendarSubscription; question: string; query: QueryResponse }
 export const api = {
   authStatus: () => request<AuthStatus>("/api/auth/status"),
   login: (passphrase: string) => send<{ authenticated: true }>("/api/auth/login", "POST", { passphrase }),
@@ -74,6 +75,7 @@ export const api = {
   syncCalendar: (id: string) => send<CalendarMutation>(`/api/calendars/${id}/sync`, "POST"),
   syncAllCalendars: () => send<{ calendars: CalendarSubscription[]; results: CalendarSyncResult[]; failures: Array<{ calendar_id: string; name: string; error: string }> }>("/api/calendars/sync-all", "POST"),
   calendarAgenda: (params: Query = {}) => request<CalendarAgenda>(`/api/calendar/events${query({ days: 14, ...params })}`),
+  calendarEventContext: (id: string) => request<CalendarEventContext>(`/api/calendar/events/${id}/context`),
   createPreparation: (body: CreatePreparationRequest) => send<{ preparation: Preparation }>("/api/preparations", "POST", body),
   preparations: (params: Query = {}) => request<List<Preparation, "preparations">>(`/api/preparations${query({ limit: 100, ...params })}`),
   preparation: (id: string) => request<{ preparation: Preparation }>(`/api/preparations/${id}`),
