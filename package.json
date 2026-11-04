@@ -1,0 +1,20 @@
+{
+  "name": "digithive",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run build:ui && bun src/server/server.ts",
+    "dev": "bun --watch src/server/server.ts",
+    "build:ui": "bun scripts/build-ui.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run typecheck && bun run build:ui && bun test"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}
