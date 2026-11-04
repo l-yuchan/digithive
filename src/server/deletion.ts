@@ -1,5 +1,5 @@
 import type { Entry, Preparation, Source } from "../shared";
-import type { DevelopmentRow, Store, SuggestionRow } from "./store";
+import type { CalendarRow, DevelopmentRow, Store, SuggestionRow } from "./store";
 import { eq, inCol } from "./store";
 
 // R10: deletion actually removes content. Deleting an entry/source/development
@@ -119,6 +119,22 @@ export function deleteSource(store: Store, source: Source, now: Date): void {
   marker(store, "source", source.id, "source", now);
 }
 
+/** Removing a subscription removes every occurrence it contributed. */
+export function deleteCalendar(store: Store, calendar: CalendarRow, now: Date): void {
+  store.removeWhere("calendar_events", [eq("calendar_id", calendar.id)]);
+  store.removeWhere("history_events", [eq("entity_type", "calendar"), eq("entity_id", calendar.id)]);
+  store.remove("calendars", calendar.id);
+  store.addHistory({
+    entity_type: "calendar",
+    entity_id: calendar.id,
+    action: "deleted",
+    actor: "user",
+    summary: `calendar subscription "${calendar.name}" deleted with its synced occurrences`,
+    details: null,
+    at: now.toISOString(),
+  });
+}
+
 /** DELETE /api/data/all: drops every domain row and resets settings. */
 export function wipeAllData(store: Store, defaultSettings: () => import("../shared").Settings): void {
   for (const table of [
@@ -132,6 +148,8 @@ export function wipeAllData(store: Store, defaultSettings: () => import("../shar
     "history_events",
     "evaluations",
     "backup_snapshots",
+    "calendar_events",
+    "calendars",
   ] as const) {
     store.removeWhere(table, []);
   }

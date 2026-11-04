@@ -5,6 +5,7 @@ import { recordRoutes } from "./api/records";
 import { assistRoutes } from "./api/assist";
 import { systemRoutes } from "./api/system";
 import { evaluationRoutes } from "./api/evaluation";
+import { calendarRoutes } from "./api/calendar";
 
 // JSON API router (contract §7). Routes are matched by method + path pattern
 // (`:param` segments); unknown /api paths answer 404 not_found.
@@ -24,6 +25,7 @@ const ROUTES: CompiledRoute[] = [
   ...recordRoutes,
   ...assistRoutes,
   ...evaluationRoutes,
+  ...calendarRoutes,
 ].map(compile);
 
 function normalizePath(pathname: string): string {

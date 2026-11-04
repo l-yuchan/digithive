@@ -1,6 +1,6 @@
 import type { CapabilitiesResponse, Settings } from "../shared/types";
 
-export type Route = "today" | "entries" | "sources" | "review" | "evaluation" | "settings" | "history";
+export type Route = "today" | "calendar" | "entries" | "sources" | "review" | "evaluation" | "settings" | "history";
 
 export interface ViewContext {
   capabilities: CapabilitiesResponse | null;

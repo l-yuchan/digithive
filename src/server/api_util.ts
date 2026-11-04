@@ -1,5 +1,6 @@
 import { ZodError, type ZodType } from "zod";
 import type { ApiError } from "../shared";
+import type { CalendarFetcher } from "./calendar";
 import type { Store } from "./store";
 
 // HTTP plumbing shared by all route modules: error mapping (contract §5),
@@ -32,6 +33,8 @@ export interface CtxDeps {
   store: Store;
   now: () => Date;
   backupDir: string;
+  /** Transport override used by tests; defaults to a bounded HTTP GET. */
+  fetchCalendar?: CalendarFetcher;
 }
 
 export interface Ctx extends CtxDeps {

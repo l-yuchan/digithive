@@ -1,4 +1,4 @@
-import type { ApiError, BackupSnapshotInfo, CapabilitiesResponse, CreateDevelopmentRequest, CreateEntryRequest, CreatePreferenceRequest, CreatePreparationRequest, CreateSourceRequest, DeleteAllRequest, Development, DigestResponse, Entry, EvaluationEntry, EvaluationEntryInput, ExportBundle, FocusWindow, HistoryEvent, Preference, Preparation, PromoteRequest, QueryRequest, QueryResponse, Settings, Source, Suggestion, SuggestionResponseRequest, TriageEvent, UpdateDevelopmentRequest, UpdateEntryRequest, UpdatePreferenceRequest, UpdateSourceRequest, WithdrawRequest, CancelScheduleRequest } from "../shared/types";
+import type { ApiError, BackupSnapshotInfo, CalendarOccurrence, CalendarSubscription, CalendarSyncResult, CapabilitiesResponse, CreateCalendarRequest, CreateDevelopmentRequest, CreateEntryRequest, CreatePreferenceRequest, CreatePreparationRequest, CreateSourceRequest, DeleteAllRequest, Development, DigestResponse, Entry, EvaluationEntry, EvaluationEntryInput, ExportBundle, FocusWindow, HistoryEvent, Preference, Preparation, PromoteRequest, QueryRequest, QueryResponse, Settings, Source, Suggestion, SuggestionResponseRequest, TriageEvent, UpdateDevelopmentRequest, UpdateEntryRequest, UpdatePreferenceRequest, UpdateSourceRequest, WithdrawRequest, CancelScheduleRequest, UpdateCalendarRequest } from "../shared/types";
 
 export interface EvaluationSummary {
   from: string; to: string; days_logged: { baseline: number; secretary: number };
@@ -31,6 +31,8 @@ function send<T>(path: string, method: string, body?: unknown): Promise<T> {
 }
 
 export interface AuthStatus { enabled: boolean; authenticated: boolean; }
+export interface CalendarMutation { calendar: CalendarSubscription; sync: CalendarSyncResult | null; sync_error: string | null }
+export interface CalendarAgenda { from: string; to: string; timezone: string; events: CalendarOccurrence[]; calendars: CalendarSubscription[] }
 export const api = {
   authStatus: () => request<AuthStatus>("/api/auth/status"),
   login: (passphrase: string) => send<{ authenticated: true }>("/api/auth/login", "POST", { passphrase }),
@@ -65,6 +67,13 @@ export const api = {
   triageEvents: (params: Query = {}) => request<List<TriageEvent, "triage_events">>(`/api/triage-events${query({ limit: 100, ...params })}`),
   retrieval: (body: QueryRequest) => send<QueryResponse>("/api/retrieval/query", "POST", body),
   digest: (date: string) => request<DigestResponse>(`/api/digest${query({ date })}`),
+  calendars: () => request<List<CalendarSubscription, "calendars">>("/api/calendars"),
+  createCalendar: (body: CreateCalendarRequest) => send<CalendarMutation>("/api/calendars", "POST", body),
+  updateCalendar: (id: string, body: UpdateCalendarRequest) => send<CalendarMutation>(`/api/calendars/${id}`, "PATCH", body),
+  deleteCalendar: (id: string) => send<{ deleted: true; id: string }>(`/api/calendars/${id}`, "DELETE"),
+  syncCalendar: (id: string) => send<CalendarMutation>(`/api/calendars/${id}/sync`, "POST"),
+  syncAllCalendars: () => send<{ calendars: CalendarSubscription[]; results: CalendarSyncResult[]; failures: Array<{ calendar_id: string; name: string; error: string }> }>("/api/calendars/sync-all", "POST"),
+  calendarAgenda: (params: Query = {}) => request<CalendarAgenda>(`/api/calendar/events${query({ days: 14, ...params })}`),
   createPreparation: (body: CreatePreparationRequest) => send<{ preparation: Preparation }>("/api/preparations", "POST", body),
   preparations: (params: Query = {}) => request<List<Preparation, "preparations">>(`/api/preparations${query({ limit: 100, ...params })}`),
   preparation: (id: string) => request<{ preparation: Preparation }>(`/api/preparations/${id}`),

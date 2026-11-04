@@ -1,5 +1,8 @@
 import type { Database } from "bun:sqlite";
 import type {
+  CalendarEventStatus,
+  CalendarOccurrence,
+  CalendarSubscription,
   Development,
   Entry,
   EvaluationEntry,
@@ -19,6 +22,22 @@ import type {
 export type DevelopmentRow = Development & { addresses_obstacle_entry_ids: string[] };
 export type SuggestionRow = Suggestion & { hold_reason: string | null };
 
+/** SQLite stores booleans as INTEGER; the API always speaks real booleans. */
+export type CalendarRow = Omit<CalendarSubscription, "enabled" | "event_count"> & { enabled: number };
+export type CalendarEventRow = Omit<CalendarOccurrence, "all_day"> & { all_day: number };
+
+export function calendarView(row: CalendarRow, eventCount: number): CalendarSubscription {
+  return { ...row, enabled: row.enabled !== 0, event_count: eventCount };
+}
+
+export function calendarEventView(row: CalendarEventRow): CalendarOccurrence {
+  return {
+    ...row,
+    all_day: row.all_day !== 0,
+    status: row.status as CalendarEventStatus,
+  };
+}
+
 export function suggestionView(s: SuggestionRow): Suggestion {
   const { hold_reason: _hold_reason, ...view } = s;
   return { ...view, why_now: { ...view.why_now, obstacle_link: view.why_now.obstacle_link.replace(/^stored obstacle:/, "기록된 장애물:") } };
@@ -34,7 +53,9 @@ export type TableName =
   | "preparations"
   | "history_events"
   | "evaluations"
-  | "backup_snapshots";
+  | "backup_snapshots"
+  | "calendars"
+  | "calendar_events";
 
 interface TableDef {
   columns: readonly string[];
@@ -80,6 +101,14 @@ const TABLES: Record<TableName, TableDef> = {
   },
   backup_snapshots: {
     columns: ["id", "created_at", "file_name", "size_bytes"],
+    json: [],
+  },
+  calendars: {
+    columns: ["id", "name", "url", "color", "enabled", "last_synced_at", "last_error", "created_at", "updated_at"],
+    json: [],
+  },
+  calendar_events: {
+    columns: ["id", "calendar_id", "uid", "summary", "location", "starts_at", "ends_at", "all_day", "status", "created_at", "updated_at"],
     json: [],
   },
 };

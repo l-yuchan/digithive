@@ -62,4 +62,12 @@ export const createPreparationRequestSchema = z.object({
   request: z.string(), delegation_id: id.nullable().optional(), suggestion_id: id.nullable().optional(),
   scope: z.string(), max_steps: z.number().int().min(1).max(10).optional(), local_only: z.literal(true),
 });
+const calendarColors = ["accent", "info", "amber", "danger", "neutral"] as const;
+export const createCalendarRequestSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  url: z.string().trim().min(1).max(2048),
+  color: z.enum(calendarColors).optional(),
+  enabled: z.boolean().optional(),
+});
+export const updateCalendarRequestSchema = createCalendarRequestSchema.partial();
 export const deleteAllRequestSchema = z.object({ confirm: z.literal("DELETE_ALL") });

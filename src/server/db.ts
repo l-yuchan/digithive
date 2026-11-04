@@ -74,6 +74,25 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         size_bytes INTEGER NOT NULL);
     `,
   },
+  {
+    // Subscribed iCal feeds and the occurrences expanded from them. Synced
+    // rows are reference data: they never become entries on their own.
+    version: 2,
+    sql: `
+      CREATE TABLE calendars (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL, color TEXT NOT NULL,
+        enabled INTEGER NOT NULL, last_synced_at TEXT, last_error TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE calendar_events (
+        id TEXT PRIMARY KEY, calendar_id TEXT NOT NULL, uid TEXT NOT NULL,
+        summary TEXT NOT NULL, location TEXT, starts_at TEXT NOT NULL, ends_at TEXT,
+        all_day INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL);
+      CREATE INDEX calendar_events_calendar ON calendar_events(calendar_id);
+      CREATE INDEX calendar_events_start ON calendar_events(starts_at);
+      CREATE UNIQUE INDEX calendar_events_occurrence ON calendar_events(calendar_id, uid, starts_at);
+    `,
+  },
 ];
 
 export function openDatabase(path: string): Database {

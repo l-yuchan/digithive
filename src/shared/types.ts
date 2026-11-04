@@ -40,7 +40,7 @@ export type PreparationStatus = "pending" | "in_progress" | "done" | "stopped" |
 export interface Preparation { id: Id; request: string; delegation_id: Id | null; suggestion_id: Id | null; scope: string; max_steps: number; status: PreparationStatus; produced_actions: string[]; result_summary: string | null; model: "rules" | "llm"; created_at: IsoDateTime; updated_at: IsoDateTime }
 export interface FocusWindow { id: Id; label: string; days: number[]; start: TimeOfDay; end: TimeOfDay }
 export interface Settings { quiet_mode: boolean; quiet_until: IsoDateTime | null; delivery: "immediate" | "digest"; digest_time: TimeOfDay; timezone: string; focus_windows: FocusWindow[] }
-export type HistoryEntityType = "entry" | "preference" | "source" | "development" | "suggestion" | "preparation" | "settings" | "evaluation" | "system";
+export type HistoryEntityType = "entry" | "preference" | "source" | "development" | "suggestion" | "preparation" | "settings" | "evaluation" | "system" | "calendar";
 export type HistoryActor = "user" | "system_rules" | "llm";
 export interface HistoryEvent { id: Id; entity_type: HistoryEntityType; entity_id: Id; action: string; actor: HistoryActor; summary: string; details: Record<string, unknown> | null; at: IsoDateTime }
 export type EvaluationCondition = "baseline" | "secretary";
@@ -51,8 +51,31 @@ export interface QueryRequest { question: string; at?: IsoDateTime }
 export interface QueryResponse { answer: string; epistemic_status: "recorded_facts" | "includes_inferences" | "insufficient_record"; citations: Citation[]; unpinned_claims: string[]; mode: "rules" | "llm"; limitations: string }
 export interface DigestResponse { date: LocalDate; generated_at: IsoDateTime; held: Suggestion[]; surfaced_today: Suggestion[]; counts: { held: number; surfaced: number; suppressed: number } }
 export interface CapabilitiesResponse { app: "digithive"; schema_version: 1; mode: "offline_rules" | "llm_assisted"; llm: { enabled: boolean; provider: string | null; model: string | null }; limitations_notice: string }
+export type CalendarColor = "accent" | "info" | "amber" | "danger" | "neutral";
+export type CalendarEventStatus = "confirmed" | "tentative";
+/** One subscribed iCal feed. The URL is usually a private, token-bearing address. */
+export interface CalendarSubscription {
+  id: Id; name: string; url: string; color: CalendarColor; enabled: boolean;
+  last_synced_at: IsoDateTime | null; last_error: string | null; event_count: number;
+  created_at: IsoDateTime; updated_at: IsoDateTime;
+}
+/**
+ * One expanded occurrence of a calendar event inside the sync window.
+ * Recurring feeds are expanded on the server, so every row is a single dated
+ * occurrence. All-day rows carry the instant of local midnight in the app
+ * timezone; timed rows carry the UTC instant of the occurrence start.
+ */
+export interface CalendarOccurrence {
+  id: Id; calendar_id: Id; uid: string; summary: string; location: string | null;
+  starts_at: IsoDateTime; ends_at: IsoDateTime | null; all_day: boolean;
+  status: CalendarEventStatus; created_at: IsoDateTime; updated_at: IsoDateTime;
+}
+export interface CalendarSyncResult {
+  calendar_id: Id; synced_at: IsoDateTime; window: { from: IsoDateTime; to: IsoDateTime };
+  added: number; updated: number; removed: number; total: number;
+}
 export interface BackupSnapshotInfo { id: Id; created_at: IsoDateTime; file_name: string; size_bytes: number }
-export interface ExportBundle { schema_version: 1; exported_at: IsoDateTime; settings: Settings; entries: Entry[]; preferences: Preference[]; sources: Source[]; developments: Development[]; suggestions: Suggestion[]; preparations: Preparation[]; triage_events: TriageEvent[]; history: HistoryEvent[]; evaluations: EvaluationEntry[] }
+export interface ExportBundle { schema_version: 1; exported_at: IsoDateTime; settings: Settings; calendars: CalendarSubscription[]; calendar_events: CalendarOccurrence[]; entries: Entry[]; preferences: Preference[]; sources: Source[]; developments: Development[]; suggestions: Suggestion[]; preparations: Preparation[]; triage_events: TriageEvent[]; history: HistoryEvent[]; evaluations: EvaluationEntry[] }
 export interface ApiError { error: { code: "validation_error" | "not_found" | "conflict" | "invalid_transition" | "forbidden_external_action" | "llm_unavailable" | "auth_required" | "auth_invalid" | "internal_error"; message: string; details?: unknown } }
 export interface CreateEntryRequest { kind: EntryKind; text: string; context: EntryContext; source_ids?: Id[]; scope?: string }
 export interface UpdateEntryRequest { text?: string; correction_note?: string; context?: Partial<EntryContext> }
@@ -72,4 +95,6 @@ export type SuggestionResponseRequest =
   | { action: "correct"; correction: UpdateEntryRequest }
   | { action: "explore"; request: string; max_steps?: number };
 export interface CreatePreparationRequest { request: string; delegation_id?: Id | null; suggestion_id?: Id | null; scope: string; max_steps?: number; local_only: true }
+export interface CreateCalendarRequest { name: string; url: string; color?: CalendarColor; enabled?: boolean }
+export type UpdateCalendarRequest = Partial<CreateCalendarRequest>;
 export interface DeleteAllRequest { confirm: "DELETE_ALL" }

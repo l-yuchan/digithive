@@ -11,8 +11,8 @@ import type {
   TriageEvent,
   EvaluationEntry,
 } from "../shared";
-import type { DevelopmentRow, Store, SuggestionRow } from "./store";
-import { suggestionView } from "./store";
+import type { CalendarEventRow, CalendarRow, DevelopmentRow, Store, SuggestionRow } from "./store";
+import { calendarEventView, calendarView, eq, suggestionView } from "./store";
 
 // Durable export (full JSON bundle) and SQLite snapshots via VACUUM INTO.
 // Restore (documented in .omo/handoffs/backend-done.md): stop the server, copy
@@ -25,6 +25,10 @@ export function buildExportBundle(store: Store, now: Date): ExportBundle {
     schema_version: 1,
     exported_at: now.toISOString(),
     settings: store.getSettings(),
+    calendars: store
+      .dump<CalendarRow>("calendars")
+      .map((row) => calendarView(row, store.count("calendar_events", [eq("calendar_id", row.id)]))),
+    calendar_events: store.dump<CalendarEventRow>("calendar_events").map(calendarEventView),
     entries: store.dump<Entry>("entries"),
     preferences: store.dump<Preference>("preferences"),
     sources: store.dump<Source>("sources"),

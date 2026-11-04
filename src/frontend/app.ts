@@ -7,6 +7,7 @@ import { sourcesView, reviewView } from "./review";
 import { errorMessage, field, text } from "./dom";
 import { journalView, historyView } from "./journal";
 import { settingsView } from "./settings";
+import { calendarView, todayAgenda } from "./calendar";
 
 const routes = Object.keys(ROUTE_LABELS) as Route[];
 let route: Route = routes.find(item => item === location.hash.slice(1)) ?? "today";
@@ -43,11 +44,16 @@ function render(): void {
     content.innerHTML = "<p role='status'>기록을 불러오는 중입니다.</p>";
     try {
       switch (route) {
+        case "calendar": await calendarView(content, refresh); break;
         case "entries": await entriesView(content, refresh); break;
         case "sources": await sourcesView(content, refresh); break;
         case "review": await reviewView(content, refresh); break;
         case "today":
-          content.innerHTML = `<h2>맥락 복원</h2><button class="button button-primary" id="today-capture">생각 기록</button><form id="query" class="stack">${field("question", "저장된 기록에 질문하기", { required: true, placeholder: "기억 오염에 대해 무엇을 남겼지?" })}<button class="button">기록에서 찾기</button></form><div id="answer" aria-live="polite"></div>`;
+          content.innerHTML = `<section class="stack" id="today-agenda" aria-label="이번 주 일정"></section><h2>맥락 복원</h2><button class="button button-primary" id="today-capture">생각 기록</button><form id="query" class="stack">${field("question", "저장된 기록에 질문하기", { required: true, placeholder: "기억 오염에 대해 무엇을 남겼지?" })}<button class="button">기록에서 찾기</button></form><div id="answer" aria-live="polite"></div>`;
+          const agendaSlot = content.querySelector<HTMLElement>("#today-agenda");
+          if (agendaSlot) await todayAgenda(agendaSlot, refresh).catch(() => {
+            agendaSlot.innerHTML = '<p class="error-box" role="alert">일정을 불러오지 못했습니다. 일정 화면에서 구독 상태를 확인하세요.</p>';
+          });
           content.querySelector("#today-capture")?.addEventListener("click", () => capture(refresh));
           content.querySelector<HTMLFormElement>("#query")?.addEventListener("submit", async event => {
             event.preventDefault();

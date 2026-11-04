@@ -21,7 +21,7 @@ import { LIMITATIONS_NOTICE, llmStatus } from "../llm";
 
 const HISTORY_ENTITY_TYPES = [
   "entry", "preference", "source", "development", "suggestion",
-  "preparation", "settings", "evaluation", "system",
+  "preparation", "settings", "evaluation", "system", "calendar",
 ] as const;
 
 function parseSettingsPatch(raw: unknown, existing: Settings): Settings {

@@ -13,7 +13,14 @@ export function localDate(date = new Date()): string {
   const offset = date.getTimezoneOffset() * 60_000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 10);
 }
-export function dateTimeValue(value: string | null): string { return value ? value.slice(0, 16) : ""; }
+/** ISO instant -> the wall-clock value a datetime-local input expects. */
+export function dateTimeValue(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part: number): string => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 export function text(form: FormData, key: string): string { return String(form.get(key) ?? "").trim(); }
 export function optionalText(form: FormData, key: string): string | null { return text(form, key) || null; }
 export function numberValue(form: FormData, key: string): number { return Number(text(form, key) || 0); }
@@ -29,13 +36,38 @@ export function errorMessage(error: unknown): string {
 export function emptyState(title: string, guidance: string): string {
   return `<div class="empty"><p><strong>${html(title)}</strong></p><p>${html(guidance)}</p></div>`;
 }
-export function field(name: string, label: string, options: { value?: unknown; type?: string; required?: boolean; hint?: string; full?: boolean; min?: number; max?: number; step?: number; placeholder?: string } = {}): string {
+interface FieldOptions {
+  value?: unknown; type?: string; required?: boolean; hint?: string; full?: boolean;
+  min?: number; max?: number; step?: number; placeholder?: string;
+  /** Longer explanation: hover on desktop, tap/click (native details) anywhere. */
+  help?: string;
+  choices?: readonly (readonly [string, string])[];
+}
+/**
+ * Labelled control with two layers of explanation: a one-line hint that is
+ * always visible, and a question-mark disclosure that opens on click or tap
+ * and shows the same text as a hover tooltip on desktop.
+ */
+export function field(name: string, label: string, options: FieldOptions = {}): string {
   const id = `field-${name}-${crypto.randomUUID().slice(0, 8)}`;
   const value = options.value === null || options.value === undefined ? "" : String(options.value);
   const attrs = `${options.required ? "required" : ""} ${options.min !== undefined ? `min="${options.min}"` : ""} ${options.max !== undefined ? `max="${options.max}"` : ""} ${options.step !== undefined ? `step="${options.step}"` : ""}`;
-  const hintAttr = options.hint ? ` aria-describedby="${id}-hint"` : "";
-  const control = options.type === "textarea" ? `<textarea id="${id}" name="${html(name)}"${hintAttr} ${options.required ? "required" : ""} placeholder="${html(options.placeholder ?? "")}">${html(value)}</textarea>` : `<input id="${id}" name="${html(name)}" type="${html(options.type ?? "text")}"${hintAttr} value="${html(value)}" ${attrs} placeholder="${html(options.placeholder ?? "")}">`;
-  return `<div class="field ${options.full ? "field-full" : ""}"><label for="${id}">${html(label)}${options.required ? " <span aria-hidden=\"true\">*</span>" : ""}</label>${control}${options.hint ? `<p class="field-hint" id="${id}-hint">${html(options.hint)}</p>` : ""}</div>`;
+  const described = options.hint ? ` aria-describedby="${id}-hint"` : "";
+  let control: string;
+  if (options.type === "textarea") {
+    control = `<textarea id="${id}" name="${html(name)}"${described} ${options.required ? "required" : ""} placeholder="${html(options.placeholder ?? "")}">${html(value)}</textarea>`;
+  } else if (options.type === "select") {
+    const choices = options.choices ?? [];
+    control = `<select id="${id}" name="${html(name)}"${described} ${options.required ? "required" : ""}>${choices
+      .map(([choice, choiceLabel]) => `<option value="${html(choice)}"${choice === value ? " selected" : ""}>${html(choiceLabel)}</option>`)
+      .join("")}</select>`;
+  } else {
+    control = `<input id="${id}" name="${html(name)}" type="${html(options.type ?? "text")}"${described} value="${html(value)}" ${attrs} placeholder="${html(options.placeholder ?? "")}">`;
+  }
+  const help = options.help
+    ? `<details class="field-help"><summary title="${html(options.help)}" aria-label="${html(label)} 설명 보기">?</summary><p>${html(options.help)}</p></details>`
+    : "";
+  return `<div class="field ${options.full ? "field-full" : ""}"><div class="field-label-row"><label for="${id}">${html(label)}${options.required ? " <span aria-hidden=\"true\">*</span>" : ""}</label>${help}</div>${control}${options.hint ? `<p class="field-hint" id="${id}-hint">${html(options.hint)}</p>` : ""}</div>`;
 }
 interface DialogOptions { title: string; body: string; submitLabel?: string; danger?: boolean; onSubmit?: (form: FormData, dialog: HTMLDialogElement) => Promise<void>; }
 export function openDialog(options: DialogOptions): HTMLDialogElement {
