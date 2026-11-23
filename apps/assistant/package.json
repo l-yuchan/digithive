@@ -15,6 +15,7 @@
     "doctor": "bun scripts/doctor.ts"
   },
   "dependencies": {
+    "ical.js": "2.2.1",
     "ky": "2.2.0",
     "mammoth": "1.13.0",
     "unpdf": "2.2.1",

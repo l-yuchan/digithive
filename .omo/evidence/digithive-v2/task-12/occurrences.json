@@ -1,0 +1,52 @@
+{
+  "window": {
+    "from": "2026-11-01",
+    "to": "2026-12-31"
+  },
+  "count": 8,
+  "sample": [
+    {
+      "summary": "주간 회의",
+      "startsAt": "2026-11-03T09:00:00+09:00",
+      "allDay": false,
+      "overridden": false,
+      "cancelled": false
+    },
+    {
+      "summary": "주간 회의",
+      "startsAt": "2026-11-10T09:00:00+09:00",
+      "allDay": false,
+      "overridden": false,
+      "cancelled": false
+    },
+    {
+      "summary": "학회 발표",
+      "startsAt": "2026-11-20T00:00:00+00:00",
+      "allDay": true,
+      "overridden": false,
+      "cancelled": false
+    },
+    {
+      "summary": "주간 회의 (오후로 이동)",
+      "startsAt": "2026-11-24T14:00:00+09:00",
+      "allDay": false,
+      "overridden": true,
+      "cancelled": false
+    },
+    {
+      "summary": "주간 회의",
+      "startsAt": "2026-12-01T09:00:00+09:00",
+      "allDay": false,
+      "overridden": false,
+      "cancelled": false
+    },
+    {
+      "summary": "주간 회의",
+      "startsAt": "2026-12-08T09:00:00+09:00",
+      "allDay": false,
+      "overridden": false,
+      "cancelled": false
+    }
+  ],
+  "movedInstanceCount": 1
+}

@@ -328,7 +328,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario oauth-state-revocation --evidence ../../.omo/evidence/digithive-v2/task-11`; 틀린 state·재사용 code·invalid_grant; PASS iff 403/재인증 상태, 기존 비밀 비노출. Evidence: failures.json.
   - Commit: Y — `Connect Google accounts with scoped offline authorization`.
 
-- [ ] 12. Google Calendar 동기화와 occurrence view를 구현한다
+- [x] 12. Google Calendar 동기화와 occurrence view를 구현한다
   - Recommended task executor category: deep-high — 반복 일정·증분·삭제의 일관성.
   - Closes: GAP-3. Wave W3. Depends on: 11. Blocks: 15,17,25.
   - Paths: `src/integrations/calendar.ts`, `src/knowledge/calendar-occurrences.ts`, tests/calendar.

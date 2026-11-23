@@ -18,6 +18,7 @@ import { chatBrowser, chatOfflineCancel } from "../qa/browser/chat";
 import { filesBrowserRoundtrip, filesHttpFailures } from "../qa/scenarios/files";
 import { memoryCorrectBrowser, memoryRevokeInflight } from "../qa/scenarios/memory";
 import { oauthCodeRefresh, oauthStateRevocation, oauthTokenFetch, setOauthFixture } from "../qa/scenarios/oauth";
+import { calendar410PageFailure, calendarFetch, calendarSyncRecurrence, setCalendarPages } from "../qa/scenarios/calendar";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -40,7 +41,7 @@ const Arguments = z.object({
     "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
     "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
     "files-browser-roundtrip", "files-path-size-corrupt", "memory-correct-browser", "memory-revoke-inflight",
-    "oauth-code-refresh", "oauth-state-revocation",
+    "oauth-code-refresh", "oauth-state-revocation", "calendar-sync-recurrence", "calendar-410-pagefailure",
   ]),
   evidence: z.string().min(1),
 });
@@ -105,6 +106,8 @@ async function run(): Promise<void> {
         const path = new URL(request.url).pathname;
         if (path === "/health") return Response.json({ ok: false, schemaVersion: -1 });
         if (path === "/oauth/token") return oauthTokenFetch(request);
+        if (path.startsWith("/v1/")) return providerFetch(request);
+        if (path.startsWith("/calendar/v3/")) return calendarFetch(request);
         return providerFetch(request);
       },
     });
@@ -140,6 +143,16 @@ async function run(): Promise<void> {
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
         break;
+      case "calendar-sync-recurrence":
+      case "calendar-410-pagefailure": {
+        const vault = new SecretVault(Buffer.alloc(32, 1).toString("base64"));
+        const calendar = { db, vault, evidence, fixtureBase: FIXTURE };
+        setCalendarPages([]);
+        process.env["GOOGLE_CALENDAR_BASE"] = FIXTURE;
+        if (input.scenario === "calendar-sync-recurrence") await calendarSyncRecurrence(calendar);
+        else await calendar410PageFailure(calendar);
+        break;
+      }
       case "oauth-code-refresh":
       case "oauth-state-revocation": {
         process.env["GOOGLE_CLIENT_ID"] = "qa-client";

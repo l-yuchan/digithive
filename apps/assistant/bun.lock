@@ -5,6 +5,7 @@
     "": {
       "name": "@digithive/assistant",
       "dependencies": {
+        "ical.js": "2.2.1",
         "ky": "2.2.0",
         "mammoth": "1.13.0",
         "unpdf": "2.2.1",
@@ -34,6 +35,8 @@
     "dingbat-to-unicode": ["dingbat-to-unicode@1.0.2", "", {}, "sha512-R0bRerYzy/EZP6QzD3Hkl6JjUDA1Mnn+pd928w0nWjPzihnbAR6dcjGJGiRyznj5E4S1duEKzWrTqw02DPcdzg=="],
 
     "duck": ["duck@0.1.12", "", { "dependencies": { "underscore": "^1.13.1" } }, "sha512-wkctla1O6VfP89gQ+J/yDesM0S7B7XLXjKGzXxMDVFg7uEn706niAtyYovKbyq1oT9YwDcly721/iUWoc8MVRg=="],
+
+    "ical.js": ["ical.js@2.2.1", "", {}, "sha512-yK/UlPbEs316igb/tjRgbFA8ZV75rCsBJp/hWOatpyaPNlgw0dGDmU+FoicOcwX4xXkeXOkYiOmCqNPFpNPkQg=="],
 
     "immediate": ["immediate@3.0.6", "", {}, "sha512-XXOFtyqDjNDAQxVfYxuF7g9Il/IbWmmlQg2MYKOH8ExIT1qg6xc4zyS3HaEEATgs1btfzxq15ciUiY7gjSXRGQ=="],
 

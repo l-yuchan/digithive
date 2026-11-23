@@ -1,0 +1,18 @@
+{
+  "firstSync": {
+    "pages": 2,
+    "inserted": 3,
+    "full": true
+  },
+  "secondSync": {
+    "inserted": 0,
+    "sentSyncToken": "sync-1"
+  },
+  "requests": [
+    {
+      "path": "/calendar/v3/calendars/primary/events",
+      "syncToken": "sync-1",
+      "pageToken": null
+    }
+  ]
+}
