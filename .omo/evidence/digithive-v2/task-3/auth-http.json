@@ -1,0 +1,14 @@
+{
+  "wrongOrigin": 403,
+  "malformed": 422,
+  "expired": 401,
+  "loginThrottle": [
+    401,
+    401,
+    401,
+    401,
+    401,
+    429
+  ],
+  "sessionTokenInBody": false
+}

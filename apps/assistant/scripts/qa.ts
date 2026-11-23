@@ -7,11 +7,12 @@ import { createServer } from "node:net";
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import { Health } from "../src/contracts/api";
+import { AuthGate, hashPassphrase } from "../src/server/auth";
 import { migrate, openDatabase, schemaVersion } from "../src/db/store";
 import { handler } from "../src/server/main";
 
 const Arguments = z.object({
-  scenario: z.enum(["foundation-health", "foundation-bad-migration", "foundation-fixture-failure"]),
+  scenario: z.enum(["foundation-health", "foundation-bad-migration", "foundation-fixture-failure", "auth-origin-and-expiry"]),
   evidence: z.string().min(1),
 });
 type Context = {
@@ -105,6 +106,55 @@ async function foundationFixtureFailure(context: Context): Promise<void> {
   Health.parse(payload);
 }
 
+async function authOriginAndExpiry(context: Context): Promise<void> {
+  const url = "http://127.0.0.1:4317";
+  const wrongOrigin = await fetch(`${url}/api/conversations`, {
+    method: "POST",
+    headers: { origin: "https://evil.invalid" },
+  });
+  assert.equal(wrongOrigin.status, 403);
+  const malformed = await fetch(`${url}/api/session`, {
+    method: "POST",
+    headers: { origin: url, "content-type": "application/json" },
+    body: "{broken",
+  });
+  assert.equal(malformed.status, 422);
+  const loggedIn = await fetch(`${url}/api/session`, {
+    method: "POST",
+    headers: { origin: url, "content-type": "application/json" },
+    body: JSON.stringify({ passphrase: "qa-only-long-passphrase" }),
+  });
+  assert.equal(loggedIn.status, 200);
+  const sessionCookie = loggedIn.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(sessionCookie);
+  const sessionToken = sessionCookie.slice(sessionCookie.indexOf("=") + 1);
+  const loginBody = await loggedIn.text();
+  const sessionTokenInBody = loginBody.includes(sessionToken);
+  assert.equal(sessionTokenInBody, false);
+  context.db.exec("UPDATE sessions SET expires_at = '2000-01-01T00:00:00.000Z'");
+  const expired = await fetch(`${url}/api/conversations`, {
+    headers: { cookie: sessionCookie },
+  });
+  assert.equal(expired.status, 401);
+  const failures: number[] = [];
+  for (let index = 0; index < 6; index++) {
+    const result = await fetch(`${url}/api/session`, {
+      method: "POST",
+      headers: { origin: url, "content-type": "application/json" },
+      body: JSON.stringify({ passphrase: "wrong" }),
+    });
+    failures.push(result.status);
+  }
+  assert.deepEqual(failures, [401, 401, 401, 401, 401, 429]);
+  await record(context.evidence, "auth-http.json", {
+    wrongOrigin: wrongOrigin.status,
+    malformed: malformed.status,
+    expired: expired.status,
+    loginThrottle: failures,
+    sessionTokenInBody,
+  });
+}
+
 async function run(): Promise<void> {
   const input = options(process.argv.slice(2));
   const evidence = resolve(input.evidence);
@@ -115,7 +165,13 @@ async function run(): Promise<void> {
   let fixture: ReturnType<typeof Bun.serve> | undefined;
   try {
     db = openDatabase(join(temporary, "assistant.sqlite"));
-    app = Bun.serve({ hostname: "127.0.0.1", port: 4317, fetch: handler(db) });
+    const auth = new AuthGate(db, {
+      origin: "http://127.0.0.1:4317",
+      passphraseHash: hashPassphrase("qa-only-long-passphrase"),
+      sessionKey: "qa-only-session-key-exactly-32-bytes",
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+    });
+    app = Bun.serve({ hostname: "127.0.0.1", port: 4317, fetch: handler(db, auth) });
     fixture = Bun.serve({
       hostname: "127.0.0.1",
       port: 4318,
@@ -131,6 +187,9 @@ async function run(): Promise<void> {
         break;
       case "foundation-fixture-failure":
         await foundationFixtureFailure(context);
+        break;
+      case "auth-origin-and-expiry":
+        await authOriginAndExpiry(context);
         break;
       default:
         throw new QaArgumentError("Unknown scenario");

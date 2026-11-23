@@ -1,0 +1,21 @@
+{
+  "browser": "owned headless Chrome with disposable profile",
+  "steps": [
+    "GET / rendered passphrase and login controls",
+    "Filled data-testid=passphrase with QA-only passphrase",
+    "Clicked data-testid=login; main heading changed to 대화",
+    "Captured fresh 1440px desktop and 390px mobile login/result screenshots",
+    "DELETE /api/session in the browser returned HTTP 200",
+    "GET / after logout rendered 로그인 again"
+  ],
+  "desktop": ["desktop-login.png", "desktop-after-login.png"],
+  "mobile": ["mobile-login.png", "mobile-after-login.png"],
+  "mobileViewport": 390,
+  "mobileDocumentWidth": 390,
+  "cleanup": {
+    "browserClosed": true,
+    "profileRemoved": true,
+    "serverStopped": true,
+    "temporaryDbRemoved": true
+  }
+}

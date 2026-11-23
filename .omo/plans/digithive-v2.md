@@ -229,7 +229,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario foundation-bad-migration --evidence ../../.omo/evidence/digithive-v2/task-2`; PASS iff 잘못된 migration 실패 뒤 기존 row·version 보존. 미정의 scenario는 exit 2임도 검증. Evidence: task-2/rollback.json, cleanup.json.
   - Commit: Y — `Add assistant storage contracts and executable QA infrastructure`.
 
-- [ ] 3. 인증·정책 검사·비밀값 저장을 구현한다
+- [x] 3. 인증·정책 검사·비밀값 저장을 구현한다
   - Recommended task executor category: deep-high — 세션·CSRF·권한의 공통 경계.
   - Closes: GAP-1, GAP-5. Wave W1. Depends on: 2. Blocks: 8,11,18,21,24.
   - Paths: `src/server/{auth,secrets}.ts`, `src/server/routes/session.ts`, `src/contracts/config.ts`, `tests/integration/auth.test.ts`.
