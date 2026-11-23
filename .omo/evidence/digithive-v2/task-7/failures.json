@@ -1,0 +1,23 @@
+{
+  "malformedToolCalls": [
+    {
+      "name": "delete_everything",
+      "ok": false
+    },
+    {
+      "name": "read_note",
+      "ok": false
+    },
+    {
+      "name": "read_note",
+      "ok": false
+    }
+  ],
+  "handlersExecuted": 0,
+  "truncated": {
+    "status": "failed",
+    "reason": "truncated"
+  },
+  "unknownCharges": 1,
+  "toolCallsPersisted": 0
+}

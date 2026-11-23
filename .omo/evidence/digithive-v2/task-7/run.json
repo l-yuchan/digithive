@@ -1,0 +1,11 @@
+{
+  "status": "succeeded",
+  "steps": 2,
+  "toolCalls": [
+    {
+      "name": "read_note",
+      "ok": true
+    }
+  ],
+  "output": "The release notes say the sandbox runner was verified."
+}

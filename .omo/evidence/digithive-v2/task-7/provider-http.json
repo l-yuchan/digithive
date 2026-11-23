@@ -1,0 +1,98 @@
+{
+  "requests": [
+    {
+      "model": "fixture-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "what do the release notes say?"
+        }
+      ],
+      "max_tokens": 1024,
+      "stream": false,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_note",
+            "description": "Read one internal note by id",
+            "parameters": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    },
+    {
+      "model": "fixture-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "what do the release notes say?"
+        },
+        {
+          "role": "assistant",
+          "content": ""
+        },
+        {
+          "role": "tool",
+          "content": "release notes: sandbox runner verified",
+          "tool_call_id": "call-1"
+        }
+      ],
+      "max_tokens": 1024,
+      "stream": false,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "read_note",
+            "description": "Read one internal note by id",
+            "parameters": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id"
+              ],
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+  ],
+  "toolCallCount": 2,
+  "modelCalls": 2,
+  "noteReads": [
+    "release-notes"
+  ],
+  "paidReservations": [
+    {
+      "status": "settled",
+      "settled_micro_usd": 240
+    },
+    {
+      "status": "settled",
+      "settled_micro_usd": 320
+    }
+  ]
+}

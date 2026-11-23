@@ -15,6 +15,7 @@
     "doctor": "bun scripts/doctor.ts"
   },
   "dependencies": {
+    "ky": "2.2.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

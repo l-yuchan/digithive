@@ -12,6 +12,7 @@ import { handler } from "../src/server/main";
 import { runLeaseCrashCancel, runReconnect } from "../qa/scenarios/runs";
 import { budgetConcurrentUnknown, budgetSettle } from "../qa/scenarios/budget";
 import { scriptApproved, scriptEscapeAndTimeout } from "../qa/scenarios/sandbox";
+import { agentMalformedAndDisconnect, agentToolRoundtrip, providerFetch } from "../qa/scenarios/provider";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -32,6 +33,7 @@ const Arguments = z.object({
     "foundation-health", "foundation-bad-migration", "foundation-fixture-failure",
     "auth-origin-and-expiry", "run-reconnect", "run-lease-crash-cancel",
     "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
+    "agent-tool-roundtrip", "agent-malformed-and-disconnect",
   ]),
   evidence: z.string().min(1),
 });
@@ -92,7 +94,9 @@ async function run(): Promise<void> {
     fixture = Bun.serve({
       hostname: "127.0.0.1",
       port: 4318,
-      fetch: () => Response.json({ ok: false, schemaVersion: -1 }),
+      fetch: (request) => new URL(request.url).pathname === "/health"
+        ? Response.json({ ok: false, schemaVersion: -1 })
+        : providerFetch(request),
     });
     const context = { db, dbPath, evidence, fixtureBase: FIXTURE };
     switch (input.scenario) {
@@ -125,6 +129,12 @@ async function run(): Promise<void> {
         break;
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
+        break;
+      case "agent-tool-roundtrip":
+        await agentToolRoundtrip(context);
+        break;
+      case "agent-malformed-and-disconnect":
+        await agentMalformedAndDisconnect(context);
         break;
       default:
         throw new QaArgumentError("Unknown scenario");

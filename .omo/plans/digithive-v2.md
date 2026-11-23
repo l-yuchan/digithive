@@ -273,7 +273,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario script-escape-and-timeout --evidence ../../.omo/evidence/digithive-v2/task-6`; script가 secret path 읽기·외부 HTTP·무한 loop를 시도; PASS iff 읽기/네트워크 차단·시간 제한 종료와 호스트 파일 변화 0. Evidence: sandbox.json, cleanup.json.
   - Commit: Y — `Run approved scripts inside bounded isolated workspaces`.
 
-- [ ] 7. 모델 adapter와 제한된 도구 호출 루프를 구현한다
+- [x] 7. 모델 adapter와 제한된 도구 호출 루프를 구현한다
   - Recommended task executor category: deep-low — 공식 호환 API와 실행 계약 구현.
   - Closes: GAP-2. Wave W2. Depends on: 4,5. Blocks: 8,10,15,17,19,20.
   - Paths: `src/agents/{provider,tools,context}.ts`, `src/runtime/executors/agent.ts`, tests/provider.
