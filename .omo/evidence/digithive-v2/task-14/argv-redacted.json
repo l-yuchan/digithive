@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "api",
+    "GET",
+    "/api/v1/courses/101/assignments?per_page=100",
+    "--paginate",
+    "-o",
+    "json",
+    "--no-cache"
+  ],
+  "hostPinned": "lxp-canvas.hanyang.ac.kr",
+  "containsToken": false,
+  "containsAsUser": false,
+  "containsWriteVerb": false
+}

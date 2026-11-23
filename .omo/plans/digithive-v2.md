@@ -350,7 +350,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario gmail-404-and-partial --evidence ../../.omo/evidence/digithive-v2/task-13`; stale history·중간 detail 실패·메일 HTML injection; PASS iff cursor 보존/복구, 외부 write 0. Evidence: db-diff.json, tool-audit.json.
   - Commit: Y — `Read Gmail changes and preserve bounded message evidence`.
 
-- [ ] 14. Canvas CLI 기반 LMS 수집기를 구현한다
+- [x] 14. Canvas CLI 기반 LMS 수집기를 구현한다
   - Recommended task executor category: deep-low — 실제 CLI 계약과 명확한 오류 경계.
   - Closes: GAP-3. Wave W3. Depends on: 6. Blocks: 15,17,25.
   - Paths: `src/integrations/canvas.ts`, `src/integrations/canvas-cli.ts`, tests/canvas, setup docs.

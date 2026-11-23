@@ -1,0 +1,13 @@
+{
+  "responses": {
+    "unauthorized": "auth_required",
+    "forbidden": "forbidden",
+    "notfound": "not_found",
+    "broken": "invalid_json",
+    "otherhost": "forbidden"
+  },
+  "tombstonesBefore": 0,
+  "tombstonesAfter": 0,
+  "falseDeletions": 0,
+  "sealedSecretInArgv": false
+}

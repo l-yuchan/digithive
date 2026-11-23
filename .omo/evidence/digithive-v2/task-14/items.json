@@ -1,0 +1,16 @@
+{
+  "stored": 5,
+  "tombstones": 0,
+  "remoteIds": [
+    "announcement:101:11",
+    "assignment:101:1",
+    "assignment:101:2",
+    "assignment:101:3",
+    "course:101"
+  ],
+  "installedCli": {
+    "ok": true,
+    "version": "canvas-cli 1.15.8"
+  },
+  "allowsTwoPageMerge": true
+}

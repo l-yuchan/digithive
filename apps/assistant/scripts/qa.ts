@@ -20,6 +20,7 @@ import { memoryCorrectBrowser, memoryRevokeInflight } from "../qa/scenarios/memo
 import { oauthCodeRefresh, oauthStateRevocation, oauthTokenFetch, setOauthFixture } from "../qa/scenarios/oauth";
 import { calendar410PageFailure, calendarFetch, calendarSyncRecurrence, setCalendarPages } from "../qa/scenarios/calendar";
 import { gmail404AndPartial, gmailFetch, gmailHistoryMime, setGmailFixture } from "../qa/scenarios/gmail";
+import { canvasAuthPartialHost, canvasCliPages } from "../qa/scenarios/canvas";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -43,7 +44,7 @@ const Arguments = z.object({
     "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
     "files-browser-roundtrip", "files-path-size-corrupt", "memory-correct-browser", "memory-revoke-inflight",
     "oauth-code-refresh", "oauth-state-revocation", "calendar-sync-recurrence", "calendar-410-pagefailure",
-    "gmail-history-mime", "gmail-404-and-partial",
+    "gmail-history-mime", "gmail-404-and-partial", "canvas-cli-pages", "canvas-auth-partial-host",
   ]),
   evidence: z.string().min(1),
 });
@@ -146,6 +147,12 @@ async function run(): Promise<void> {
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
         break;
+      case "canvas-cli-pages":
+      case "canvas-auth-partial-host": {
+        if (input.scenario === "canvas-cli-pages") await canvasCliPages(context);
+        else await canvasAuthPartialHost(context);
+        break;
+      }
       case "gmail-history-mime":
       case "gmail-404-and-partial": {
         const vault = new SecretVault(Buffer.alloc(32, 1).toString("base64"));
