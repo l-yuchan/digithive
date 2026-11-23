@@ -1,0 +1,6 @@
+{
+  "wrongState": 403,
+  "replayedState": 403,
+  "refreshGrantRejected": "needs_reauth",
+  "leakedSecretInResponses": false
+}

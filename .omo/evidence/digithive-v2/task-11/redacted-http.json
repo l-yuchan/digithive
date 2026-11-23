@@ -1,0 +1,25 @@
+{
+  "startStatus": 302,
+  "authorizeParams": {
+    "access_type": "offline",
+    "prompt": "consent",
+    "code_challenge_method": "S256",
+    "redirect_uri": "http://127.0.0.1:4317/api/oauth/google/callback",
+    "scope": "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly"
+  },
+  "callbackStatus": 303,
+  "tokenGrants": [
+    {
+      "grant_type": "authorization_code",
+      "hasVerifier": true,
+      "hasRefresh": false
+    },
+    {
+      "grant_type": "refresh_token",
+      "hasVerifier": false,
+      "hasRefresh": true
+    }
+  ],
+  "connectionStatus": "valid",
+  "refreshProducedToken": "refreshed"
+}

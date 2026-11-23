@@ -8,6 +8,7 @@ import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import { AuthGate, hashPassphrase } from "../src/server/auth";
 import { openDatabase } from "../src/db/store";
+import { SecretVault } from "../src/server/secrets";
 import { handler } from "../src/server/main";
 import { runLeaseCrashCancel, runReconnect } from "../qa/scenarios/runs";
 import { budgetConcurrentUnknown, budgetSettle } from "../qa/scenarios/budget";
@@ -16,6 +17,7 @@ import { agentMalformedAndDisconnect, agentToolRoundtrip, providerFetch, setProv
 import { chatBrowser, chatOfflineCancel } from "../qa/browser/chat";
 import { filesBrowserRoundtrip, filesHttpFailures } from "../qa/scenarios/files";
 import { memoryCorrectBrowser, memoryRevokeInflight } from "../qa/scenarios/memory";
+import { oauthCodeRefresh, oauthStateRevocation, oauthTokenFetch, setOauthFixture } from "../qa/scenarios/oauth";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -38,6 +40,7 @@ const Arguments = z.object({
     "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
     "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
     "files-browser-roundtrip", "files-path-size-corrupt", "memory-correct-browser", "memory-revoke-inflight",
+    "oauth-code-refresh", "oauth-state-revocation",
   ]),
   evidence: z.string().min(1),
 });
@@ -98,9 +101,12 @@ async function run(): Promise<void> {
     fixture = Bun.serve({
       hostname: "127.0.0.1",
       port: 4318,
-      fetch: (request) => new URL(request.url).pathname === "/health"
-        ? Response.json({ ok: false, schemaVersion: -1 })
-        : providerFetch(request),
+      fetch: (request) => {
+        const path = new URL(request.url).pathname;
+        if (path === "/health") return Response.json({ ok: false, schemaVersion: -1 });
+        if (path === "/oauth/token") return oauthTokenFetch(request);
+        return providerFetch(request);
+      },
     });
     const context = { db, dbPath, evidence, fixtureBase: FIXTURE };
     switch (input.scenario) {
@@ -134,6 +140,20 @@ async function run(): Promise<void> {
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
         break;
+      case "oauth-code-refresh":
+      case "oauth-state-revocation": {
+        process.env["GOOGLE_CLIENT_ID"] = "qa-client";
+        process.env["GOOGLE_CLIENT_SECRET"] = "qa-secret";
+        process.env["GOOGLE_REDIRECT_URI"] = `${ORIGIN}/api/oauth/google/callback`;
+        process.env["GOOGLE_AUTH_URL"] = `${FIXTURE}/oauth/auth`;
+        process.env["GOOGLE_TOKEN_URL"] = `${FIXTURE}/oauth/token`;
+        const vault = new SecretVault(Buffer.alloc(32, 1).toString("base64"));
+        const oauth = { db, vault, evidence, base: ORIGIN, cookie: await loginCookie(), fixtureBase: FIXTURE };
+        setOauthFixture();
+        if (input.scenario === "oauth-code-refresh") await oauthCodeRefresh(oauth);
+        else await oauthStateRevocation(oauth);
+        break;
+      }
       case "memory-correct-browser":
         await memoryCorrectBrowser({ db, evidence, base: ORIGIN, cookie: await loginCookie() });
         break;

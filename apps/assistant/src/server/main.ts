@@ -12,15 +12,18 @@ import { settingsRoute, usageRoute } from "./routes/usage";
 import { conversationsRoute } from "./routes/conversations";
 import { filesRoute } from "./routes/files";
 import { memoriesRoute } from "./routes/memories";
+import { oauthRoute } from "./routes/oauth";
 import { FileStore } from "../files/store";
 import { chatShell } from "../web/views/chat";
 import { filesShell } from "../web/views/files";
 import { memoryShell } from "../web/views/memory";
+import { connectionsShell } from "../web/views/connections";
 
 export function handler(
   db: Database,
   auth: AuthGate,
   store = new FileStore(db, process.env["ASSISTANT_FILES_ROOT"] ?? "./data/files"),
+  vault = new SecretVault(process.env["ENCRYPTION_KEY"] ?? Buffer.alloc(32, 1).toString("base64")),
 ): (request: Request) => Response | Promise<Response> {
   return async (request) => {
     const path = new URL(request.url).pathname;
@@ -40,7 +43,10 @@ export function handler(
     if (request.method === "GET" && path === "/memory") {
       return auth.authenticated(request) ? memoryShell() : shell(false);
     }
-    if (request.method === "GET" && (path === "/app.js" || path === "/files.js" || path === "/memory.js" || path === "/styles.css")) {
+    if (request.method === "GET" && path === "/connections") {
+      return auth.authenticated(request) ? connectionsShell() : shell(false);
+    }
+    if (request.method === "GET" && (path === "/app.js" || path === "/files.js" || path === "/memory.js" || path === "/connections.js" || path === "/styles.css")) {
       const file = Bun.file(resolve(import.meta.dir, "../../dist/public", path.slice(1)));
       if (!(await file.exists())) return Response.json({ error: "not_built" }, { status: 503 });
       return new Response(file, {
@@ -58,6 +64,9 @@ export function handler(
     }
     if (path === "/api/runs" || path.startsWith("/api/runs/")) {
       return runsRoute(db, request, path);
+    }
+    if (path.startsWith("/api/oauth/") || path === "/api/connections" || path.startsWith("/api/connections/")) {
+      return oauthRoute(db, vault, request, path);
     }
     if (path === "/api/memories" || path.startsWith("/api/memories/")) {
       return memoriesRoute(db, request, path);

@@ -317,7 +317,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario memory-revoke-inflight --evidence ../../.omo/evidence/digithive-v2/task-10`; 답변 생성 중 기억 삭제·가정문 추출·stale revision 수정; PASS iff 409 충돌, 관심의 의무화 0, 철회된 근거 게시 0. Evidence: events.json, retrieval.json.
   - Commit: Y — `Keep correctable memories with source and revision propagation`.
 
-- [ ] 11. Google 연결과 offline OAuth 수명주기를 구현한다
+- [x] 11. Google 연결과 offline OAuth 수명주기를 구현한다
   - Recommended task executor category: deep-high — 개인 계정·토큰과 callback 보안.
   - Closes: GAP-3. Wave W3. Depends on: 3. Blocks: 12,13.
   - Paths: `src/integrations/google-auth.ts`, `src/server/routes/oauth.ts`, connection settings UI, tests/oauth.

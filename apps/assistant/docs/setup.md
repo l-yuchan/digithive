@@ -34,6 +34,25 @@ Do not put credentials into a config fixture. Pass them as server-side
 environment variables at deployment. `ASSISTANT_DATA_ROOT` can select the
 data volume; the default local probe uses an OS temporary directory.
 
+## Google connection
+
+The app uses one OAuth client for Calendar and Gmail read-only scopes with
+PKCE and offline access. Supply credentials either as
+`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` plus `GOOGLE_REDIRECT_URI`, or point
+`GOOGLE_CLIENT_SECRET_FILE` at an installed-app client JSON (the same shape the
+`gws` CLI stores). The redirect defaults to `${APP_ORIGIN}/api/oauth/google/callback`.
+
+A workstation already has a `gws` project (`apis-502710`) whose installed-app
+client secret sits at `~/.config/gws/client_secret.json`. That file stays
+outside this repository and is never copied in; deployment passes the path or
+the two values through the environment. Note that an *installed* client only
+accepts loopback redirect URIs: for the HTTPS deployment origin, register a
+*Web application* client with that exact redirect URI first, or complete the
+consent step through a loopback tunnel. Refresh tokens are encrypted with
+`ENCRYPTION_KEY`; a reconnect that omits the refresh token keeps the previous
+one, and a rejected refresh marks the connection `needs_reauth` instead of
+pretending it still works.
+
 ## Sandbox runner for approved scripts
 
 Generated scripts never execute on the web or worker host. They run through
