@@ -12,7 +12,8 @@ import { handler } from "../src/server/main";
 import { runLeaseCrashCancel, runReconnect } from "../qa/scenarios/runs";
 import { budgetConcurrentUnknown, budgetSettle } from "../qa/scenarios/budget";
 import { scriptApproved, scriptEscapeAndTimeout } from "../qa/scenarios/sandbox";
-import { agentMalformedAndDisconnect, agentToolRoundtrip, providerFetch } from "../qa/scenarios/provider";
+import { agentMalformedAndDisconnect, agentToolRoundtrip, providerFetch, setProviderScript } from "../qa/scenarios/provider";
+import { chatBrowser, chatOfflineCancel } from "../qa/browser/chat";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -33,7 +34,7 @@ const Arguments = z.object({
     "foundation-health", "foundation-bad-migration", "foundation-fixture-failure",
     "auth-origin-and-expiry", "run-reconnect", "run-lease-crash-cancel",
     "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
-    "agent-tool-roundtrip", "agent-malformed-and-disconnect",
+    "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
   ]),
   evidence: z.string().min(1),
 });
@@ -136,6 +137,50 @@ async function run(): Promise<void> {
       case "agent-malformed-and-disconnect":
         await agentMalformedAndDisconnect(context);
         break;
+      case "chat-browser":
+      case "chat-offline-cancel": {
+        setProviderScript([{
+          body: {
+            choices: [{ message: { role: "assistant", content: "fixture answer: 이 단어는 라틴어 어원에서 왔습니다." }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 120, completion_tokens: 20 },
+          },
+        }, {
+          body: {
+            choices: [{ message: { role: "assistant", content: "fixture answer: 이 단어는 라틴어 어원에서 왔습니다." }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 140, completion_tokens: 20 },
+          },
+        }]);
+        const workers: (typeof Bun.spawn.prototype | Awaited<ReturnType<typeof Bun.spawn>>)[] = [];
+        const startWorker = async (): Promise<void> => {
+          workers.push(Bun.spawn([process.execPath, "scripts/worker.ts"], {
+            env: {
+              ...process.env,
+              ASSISTANT_DB_PATH: dbPath,
+              MODEL_BASE_URL: `${FIXTURE}/v1`,
+              MODEL_NAME: "fixture-model",
+              MODEL_API_KEY: "fixture-key",
+              MODEL_PRICE_VERSION: "fixture-v1",
+              MODEL_INPUT_MICRO_USD_PER_TOKEN: "1",
+              MODEL_OUTPUT_MICRO_USD_PER_TOKEN: "2",
+            },
+            stdout: "ignore",
+            stderr: "pipe",
+          }));
+        };
+        try {
+          const browserContext = { base: ORIGIN, evidence, passphrase: PASSPHRASE };
+          if (input.scenario === "chat-browser") {
+            await startWorker();
+            await chatBrowser(browserContext);
+          } else {
+            await chatOfflineCancel({ ...browserContext, startWorker });
+          }
+        } finally {
+          for (const worker of workers) worker.kill();
+          await Promise.all(workers.map((worker) => worker.exited));
+        }
+        break;
+      }
       default:
         throw new QaArgumentError("Unknown scenario");
     }

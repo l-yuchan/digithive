@@ -1,0 +1,13 @@
+{
+  "steps": [
+    "logged in and opened the conversation view",
+    "sent a message from the composer",
+    "assistant answer appeared",
+    "reload restored the question and exactly one answer",
+    "mobile 390px kept the conversation with zero horizontal overflow"
+  ],
+  "answers": 1,
+  "restoredAfterReload": true,
+  "mobileWidth": 390,
+  "documentWidth": 390
+}

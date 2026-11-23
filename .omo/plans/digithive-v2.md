@@ -284,7 +284,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario agent-malformed-and-disconnect --evidence ../../.omo/evidence/digithive-v2/task-7`; 잘못된 args·지원 안 되는 tool·응답 절단 주입; PASS iff 임의 도구 실행 0, failure/unknown 비용 보존. Evidence: failures.json.
   - Commit: Y — `Add configurable model calls and bounded agent tool execution`.
 
-- [ ] 8. 대화·작업 상태와 재접속 가능한 웹 흐름을 만든다
+- [x] 8. 대화·작업 상태와 재접속 가능한 웹 흐름을 만든다
   - Recommended task executor category: visual-engineering — 실제 PC·모바일 대화 경험.
   - Closes: GAP-2. Wave W2. Depends on: 3,7. Blocks: 20,23.
   - Paths: `src/web/{app,api}.ts`, `src/web/views/{chat,runs}.ts`, styles, `src/server/routes/conversations.ts`.

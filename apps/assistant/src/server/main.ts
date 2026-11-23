@@ -9,6 +9,8 @@ import { sessionRoute, shell } from "./routes/session";
 import { authorized } from "./policy";
 import { runsRoute } from "./routes/runs";
 import { settingsRoute, usageRoute } from "./routes/usage";
+import { conversationsRoute } from "./routes/conversations";
+import { chatShell } from "../web/views/chat";
 
 export function handler(db: Database, auth: AuthGate): (request: Request) => Response | Promise<Response> {
   return async (request) => {
@@ -21,7 +23,17 @@ export function handler(db: Database, auth: AuthGate): (request: Request) => Res
       return Response.json({ error: "origin_rejected" }, { status: 403 });
     }
     if (request.method === "GET" && path === "/") {
-      return shell(auth.authenticated(request));
+      return auth.authenticated(request) ? chatShell() : shell(false);
+    }
+    if (request.method === "GET" && (path === "/app.js" || path === "/styles.css")) {
+      const file = Bun.file(resolve(import.meta.dir, "../../dist/public", path.slice(1)));
+      if (!(await file.exists())) return Response.json({ error: "not_built" }, { status: 503 });
+      return new Response(file, {
+        headers: {
+          "content-type": path.endsWith(".js") ? "text/javascript; charset=utf-8" : "text/css; charset=utf-8",
+          "cache-control": "no-cache",
+        },
+      });
     }
     if (path === "/api/session") {
       return sessionRoute(request, auth);
@@ -31,6 +43,9 @@ export function handler(db: Database, auth: AuthGate): (request: Request) => Res
     }
     if (path === "/api/runs" || path.startsWith("/api/runs/")) {
       return runsRoute(db, request, path);
+    }
+    if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
+      return conversationsRoute(db, request, path);
     }
     if (path === "/api/settings") {
       return settingsRoute(db, request);
