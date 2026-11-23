@@ -2,3 +2,4 @@ data/
 backups/
 public/app.js
 node_modules/
+.env
