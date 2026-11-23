@@ -1,0 +1,28 @@
+{
+  "command": "cd apps/assistant && bun run doctor -- --mode live --config tests/fixtures/config/missing-secrets.json --json",
+  "exitCode": 1,
+  "status": "NEEDS_SETUP",
+  "missing": [
+    "docker",
+    "linux_target",
+    "app_origin",
+    "passphrase_hash",
+    "session_key",
+    "encryption_key",
+    "google_client_id",
+    "google_client_secret",
+    "vapid_private_key",
+    "model_api_key",
+    "model_base_url",
+    "model_name",
+    "search_api_key",
+    "provider_capabilities",
+    "search_capabilities"
+  ],
+  "externalRequests": 0,
+  "malformedMode": {
+    "command": "bun run doctor -- --mode bogus --json",
+    "exitCode": 1,
+    "error": "invalid_mode"
+  }
+}

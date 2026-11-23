@@ -207,7 +207,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
 ## Todos
 > Implementation + Test = ONE todo. Never separate.
 <!-- APPEND TASK BATCHES BELOW THIS LINE WITH edit/apply_patch - never rewrite the headers above. -->
-- [ ] 1. 새 애플리케이션 경계와 실행 사전 점검을 만든다
+- [x] 1. 새 애플리케이션 경계와 실행 사전 점검을 만든다
   - Recommended task executor category: deep-low — 새 패키지·개발 도구의 독립적인 기반 구현.
   - Closes: GAP-1. Wave W1. Depends on: none. Blocks: 2–25.
   - Paths: `apps/assistant/package.json`, `tsconfig.json`, `scripts/{build,doctor}.ts`, `docs/setup.md`. 기존 루트 명령·src/tests를 변경하지 않는다.

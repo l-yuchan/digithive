@@ -1,0 +1,21 @@
+{
+  "command": "cd apps/assistant && bun run typecheck && bun run build && bun run doctor -- --mode local --json",
+  "exitCode": 0,
+  "typecheck": "tsc --noEmit: passed",
+  "build": "Built 1 runnable preflight artifact(s).",
+  "report": {
+    "status": "READY",
+    "mode": "local",
+    "checks": [
+      {"id": "bun", "status": "READY", "detail": "Bun 1.4.4"},
+      {"id": "os", "status": "READY", "detail": "win32"},
+      {"id": "data_volume", "status": "READY", "detail": "Writable data boundary"},
+      {"id": "port", "status": "READY", "detail": "Loopback port available"},
+      {"id": "docker", "status": "NEEDS_SETUP", "detail": "Executable unavailable or timed out"},
+      {"id": "canvas", "status": "READY", "detail": "Executable available"},
+      {"id": "lockfile", "status": "READY", "detail": "Configured"}
+    ],
+    "missing": [],
+    "externalRequests": 0
+  }
+}
