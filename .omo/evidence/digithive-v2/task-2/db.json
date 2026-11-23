@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "foreignKeys": {
+    "foreign_keys": 1
+  },
+  "journalMode": {
+    "journal_mode": "wal"
+  },
+  "synchronous": {
+    "synchronous": 2
+  }
+}

@@ -218,7 +218,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: PTY `bun run doctor -- --mode live --config tests/fixtures/config/missing-secrets.json --json`; PASS iff nonzero와 missing requirements 목록, 실제 API 요청 0. Evidence: task-1/missing.json.
   - Commit: Y — `Create an isolated assistant application and preflight checks`.
 
-- [ ] 2. 저장 스키마·HTTP 계약과 실제 QA 실행기를 구축한다
+- [x] 2. 저장 스키마·HTTP 계약과 실제 QA 실행기를 구축한다
   - Recommended task executor category: deep-high — 여러 모듈의 트랜잭션·공통 계약을 고정.
   - Closes: GAP-1. Wave W1. Depends on: 1. Blocks: 3–25.
   - Paths: `src/contracts/*`, `src/db/*`, `src/server/main.ts`, `scripts/qa.ts`, `qa/scenarios/*`, `tests/integration/migrations.test.ts`.
