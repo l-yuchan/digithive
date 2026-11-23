@@ -1,0 +1,13 @@
+{
+  "first": {
+    "stored": 2,
+    "full": true
+  },
+  "second": {
+    "touched": 1,
+    "full": false
+  },
+  "profileFetched": true,
+  "catchUpRequested": true,
+  "versionCount": 3
+}

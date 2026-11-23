@@ -19,6 +19,7 @@ import { filesBrowserRoundtrip, filesHttpFailures } from "../qa/scenarios/files"
 import { memoryCorrectBrowser, memoryRevokeInflight } from "../qa/scenarios/memory";
 import { oauthCodeRefresh, oauthStateRevocation, oauthTokenFetch, setOauthFixture } from "../qa/scenarios/oauth";
 import { calendar410PageFailure, calendarFetch, calendarSyncRecurrence, setCalendarPages } from "../qa/scenarios/calendar";
+import { gmail404AndPartial, gmailFetch, gmailHistoryMime, setGmailFixture } from "../qa/scenarios/gmail";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -42,6 +43,7 @@ const Arguments = z.object({
     "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
     "files-browser-roundtrip", "files-path-size-corrupt", "memory-correct-browser", "memory-revoke-inflight",
     "oauth-code-refresh", "oauth-state-revocation", "calendar-sync-recurrence", "calendar-410-pagefailure",
+    "gmail-history-mime", "gmail-404-and-partial",
   ]),
   evidence: z.string().min(1),
 });
@@ -108,6 +110,7 @@ async function run(): Promise<void> {
         if (path === "/oauth/token") return oauthTokenFetch(request);
         if (path.startsWith("/v1/")) return providerFetch(request);
         if (path.startsWith("/calendar/v3/")) return calendarFetch(request);
+        if (path.startsWith("/gmail/v1/")) return gmailFetch(request);
         return providerFetch(request);
       },
     });
@@ -143,6 +146,16 @@ async function run(): Promise<void> {
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
         break;
+      case "gmail-history-mime":
+      case "gmail-404-and-partial": {
+        const vault = new SecretVault(Buffer.alloc(32, 1).toString("base64"));
+        const gmail = { db, vault, evidence, fixtureBase: FIXTURE };
+        setGmailFixture({ messages: {}, history: [] });
+        process.env["GMAIL_BASE"] = FIXTURE;
+        if (input.scenario === "gmail-history-mime") await gmailHistoryMime(gmail);
+        else await gmail404AndPartial(gmail);
+        break;
+      }
       case "calendar-sync-recurrence":
       case "calendar-410-pagefailure": {
         const vault = new SecretVault(Buffer.alloc(32, 1).toString("base64"));

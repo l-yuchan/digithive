@@ -339,7 +339,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario calendar-410-pagefailure --evidence ../../.omo/evidence/digithive-v2/task-12`; expired token→full resync, 중간 page 500; PASS iff 이전 snapshot 유지·stale 표시·다른 출처 데이터 보존. Evidence: db-diff.json.
   - Commit: Y — `Synchronize calendar changes without losing recurrence history`.
 
-- [ ] 13. Gmail 증분 수집과 메시지 자료화를 구현한다
+- [x] 13. Gmail 증분 수집과 메시지 자료화를 구현한다
   - Recommended task executor category: deep-low — 공식 history·MIME 계약 기반 adapter.
   - Closes: GAP-3. Wave W3. Depends on: 11. Blocks: 15,19,25.
   - Paths: `src/integrations/gmail.ts`, `src/knowledge/mail-body.ts`, tests/gmail.
