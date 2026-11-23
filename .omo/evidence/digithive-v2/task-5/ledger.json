@@ -1,0 +1,16 @@
+{
+  "processes": 2,
+  "accepted": 1,
+  "refused": 1,
+  "winner": "5e804fe3-5c3d-4c8e-835a-e522ad7a7fdd",
+  "usage": {
+    "monthBucket": "2026-11",
+    "settledMicroUsd": 0,
+    "reservedMicroUsd": 99900000,
+    "unknownMicroUsd": 100000,
+    "committedMicroUsd": 100000000,
+    "limitMicroUsd": 100000000
+  },
+  "boundary": "2026-11",
+  "nextMonthCommitted": 0
+}

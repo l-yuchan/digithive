@@ -1,0 +1,15 @@
+{
+  "monthBucket": "2026-11",
+  "settledMicroUsd": 400000,
+  "reservedMicroUsd": 0,
+  "unknownMicroUsd": 0,
+  "limitMicroUsd": 100000000,
+  "priceVersions": [
+    "price-v1"
+  ],
+  "proposals": {
+    "noticeMicroUsd": 70000000,
+    "reduceMicroUsd": 90000000,
+    "pauseMicroUsd": 100000000
+  }
+}

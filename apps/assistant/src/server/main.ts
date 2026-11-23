@@ -8,6 +8,7 @@ import { SecretVault } from "./secrets";
 import { sessionRoute, shell } from "./routes/session";
 import { authorized } from "./policy";
 import { runsRoute } from "./routes/runs";
+import { settingsRoute, usageRoute } from "./routes/usage";
 
 export function handler(db: Database, auth: AuthGate): (request: Request) => Response | Promise<Response> {
   return async (request) => {
@@ -30,6 +31,12 @@ export function handler(db: Database, auth: AuthGate): (request: Request) => Res
     }
     if (path === "/api/runs" || path.startsWith("/api/runs/")) {
       return runsRoute(db, request, path);
+    }
+    if (path === "/api/settings") {
+      return settingsRoute(db, request);
+    }
+    if (path === "/api/usage" && request.method === "GET") {
+      return usageRoute(db);
     }
     return Response.json({ error: "not_found" }, { status: 404 });
   };

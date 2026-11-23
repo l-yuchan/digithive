@@ -251,7 +251,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario run-lease-crash-cancel --evidence ../../.omo/evidence/digithive-v2/task-4`; 두 worker 경합, 한 worker 강제 종료, clock lease 경과, stale completion·cancel race 주입; PASS iff 하나의 terminal 결과와 stale write 0. Evidence: db-diff.json, process-cleanup.json.
   - Commit: Y — `Persist assistant runs with fenced attempts and cancellation`.
 
-- [ ] 5. 비용 예약·정산과 운영 설정을 구현한다
+- [x] 5. 비용 예약·정산과 운영 설정을 구현한다
   - Recommended task executor category: deep-high — 동시 호출·불명확 청구의 예산 불변식.
   - Closes: GAP-1, GAP-5. Wave W1. Depends on: 2. Blocks: 7,17,19.
   - Paths: `src/runtime/budget.ts`, `src/server/routes/{settings,usage}.ts`, tests/budget.
