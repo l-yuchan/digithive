@@ -6,9 +6,13 @@
       "work_id": "digithive-v2",
       "active_plan": ".omo/plans/digithive-v2.md",
       "plan_name": "digithive-v2",
-      "session_ids": ["senpi:01a20385-c740-709c-8e81-7f8f79e2a9ba"],
-      "status": "active",
-      "worktree_path": null
+      "session_ids": [
+        "senpi:01a206c3-c1a2-7e6f-ae9b-0323fea2d63a"
+      ],
+      "status": "blocked",
+      "worktree_path": "C:/Users/chabun/Documents/code/util/digithive-wt/digithive-v2-w4",
+      "blocked_reason": "Task 25 needs owner-only live inputs (deployed HTTPS URL + passphrase, Google client id/secret/refresh token, CANVAS_CLI_TOKEN, model provider key/model, push device); recorded in .omo/evidence/digithive-v2/task-25/live-inputs.json. Tasks 1-24 are committed and verified (app verify 120 tests, root verify 158, 45/45 QA scenarios); F2 passed, F1/F3/F4 cannot pass while the live run is pending.",
+      "blocked_at": "2026-11-23"
     }
   }
 }
