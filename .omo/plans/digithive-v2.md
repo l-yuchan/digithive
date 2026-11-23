@@ -361,7 +361,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario canvas-auth-partial-host --evidence ../../.omo/evidence/digithive-v2/task-14`; 401/403/404·깨진 JSON·다른 host Link; PASS iff stale 상태와 cursor 보존, false deletion·secret 전달 0. Evidence: failures.json.
   - Commit: Y — `Collect LMS changes through a bounded Canvas CLI adapter`.
 
-- [ ] 15. 출처 사건과 일정·작업 후보 추출을 연결한다
+- [x] 15. 출처 사건과 일정·작업 후보 추출을 연결한다
   - Recommended task executor category: deep-high — 여러 출처의 의미·시간·확정 상태 구분.
   - Closes: GAP-3. Wave W3. Depends on: 10,12,13,14. Blocks: 17,20,25.
   - Paths: `src/knowledge/{ingest,candidates}.ts`, `src/server/routes/candidates.ts`, tests/ingest.

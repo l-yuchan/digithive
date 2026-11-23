@@ -1,0 +1,37 @@
+{
+  "firstCreated": 3,
+  "secondCreated": 0,
+  "total": 3,
+  "candidates": [
+    {
+      "kind": "task",
+      "subject": "기말 보고서 제출 안내",
+      "dueAt": "2026-12-05T23:59:00+09:00",
+      "startsAt": null,
+      "confidence": "confirmed",
+      "evidence": "gmail:m-100",
+      "previousDueAt": null,
+      "status": "proposed"
+    },
+    {
+      "kind": "schedule",
+      "subject": "다음 주에 만나요",
+      "dueAt": null,
+      "startsAt": null,
+      "confidence": "tentative",
+      "evidence": "gmail:m-101",
+      "previousDueAt": null,
+      "status": "proposed"
+    },
+    {
+      "kind": "deadline_change",
+      "subject": "중간 보고서",
+      "dueAt": "2026-11-15T14:59:00Z",
+      "startsAt": null,
+      "confidence": "confirmed",
+      "evidence": "lms:101:7",
+      "previousDueAt": "2026-11-20T14:59:00Z",
+      "status": "proposed"
+    }
+  ]
+}

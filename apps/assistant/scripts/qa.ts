@@ -21,6 +21,7 @@ import { oauthCodeRefresh, oauthStateRevocation, oauthTokenFetch, setOauthFixtur
 import { calendar410PageFailure, calendarFetch, calendarSyncRecurrence, setCalendarPages } from "../qa/scenarios/calendar";
 import { gmail404AndPartial, gmailFetch, gmailHistoryMime, setGmailFixture } from "../qa/scenarios/gmail";
 import { canvasAuthPartialHost, canvasCliPages } from "../qa/scenarios/canvas";
+import { candidateDedupeStale, candidateMailLms } from "../qa/scenarios/candidates";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -45,6 +46,7 @@ const Arguments = z.object({
     "files-browser-roundtrip", "files-path-size-corrupt", "memory-correct-browser", "memory-revoke-inflight",
     "oauth-code-refresh", "oauth-state-revocation", "calendar-sync-recurrence", "calendar-410-pagefailure",
     "gmail-history-mime", "gmail-404-and-partial", "canvas-cli-pages", "canvas-auth-partial-host",
+    "candidate-mail-lms", "candidate-dedupe-stale",
   ]),
   evidence: z.string().min(1),
 });
@@ -147,6 +149,12 @@ async function run(): Promise<void> {
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
         break;
+      case "candidate-mail-lms":
+      case "candidate-dedupe-stale": {
+        if (input.scenario === "candidate-mail-lms") await candidateMailLms(context);
+        else await candidateDedupeStale(context);
+        break;
+      }
       case "canvas-cli-pages":
       case "canvas-auth-partial-host": {
         if (input.scenario === "canvas-cli-pages") await canvasCliPages(context);
