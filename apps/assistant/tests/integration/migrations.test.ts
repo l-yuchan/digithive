@@ -26,14 +26,14 @@ test("keeps the previous row and schema version when a later migration fails", (
     .run("keep", '"before"', "qa", new Date(0).toISOString());
 
   assert.throws(() => migrate(db, [{
-    version: 2,
+    version: 3,
     sql: "UPDATE settings SET value_json='\"after\"' WHERE key='keep'; INSERT INTO missing_table VALUES (1);",
   }]));
 
   assert.deepEqual(db.query("SELECT value_json FROM settings WHERE key='keep'").get(), {
     value_json: '"before"',
   });
-  assert.equal(schemaVersion(db), 1);
+  assert.equal(schemaVersion(db), 2);
 });
 
 test("rejects source records without a referenced connection", () => {

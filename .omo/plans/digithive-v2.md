@@ -240,7 +240,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario auth-origin-and-expiry --evidence ../../.omo/evidence/digithive-v2/task-3`; POST /api/conversations with Origin `https://evil.invalid`→403, 만료 cookie→401, 반복 로그인→429. Evidence: http.json.
   - Commit: Y — `Enforce authenticated assistant sessions and execution scopes`.
 
-- [ ] 4. Run·Attempt 큐와 재시작·취소 계약을 구현한다
+- [x] 4. Run·Attempt 큐와 재시작·취소 계약을 구현한다
   - Recommended task executor category: deep-high — 경합과 side effect를 분리하는 핵심 상태 기계.
   - Closes: GAP-2. Wave W1. Depends on: 2. Blocks: 6,9,16,20,21.
   - Paths: `src/runtime/{queue,attempts}.ts`, `scripts/worker.ts`, `src/server/routes/runs.ts`, tests/runtime.

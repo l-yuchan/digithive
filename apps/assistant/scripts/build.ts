@@ -1,5 +1,5 @@
 const result = await Bun.build({
-  entrypoints: ["scripts/doctor.ts", "src/server/main.ts"],
+  entrypoints: ["scripts/doctor.ts", "src/server/main.ts", "scripts/worker.ts"],
   outdir: "dist",
   target: "bun",
 });

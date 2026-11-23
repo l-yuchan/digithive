@@ -1,0 +1,13 @@
+{
+  "lostStatus": "interrupted",
+  "cancelledStatus": "cancelled",
+  "lostEvents": [
+    "queued",
+    "interrupted"
+  ],
+  "cancelledEvents": [
+    "queued",
+    "cancelled"
+  ],
+  "staleWrites": 0
+}

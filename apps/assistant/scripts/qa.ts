@@ -10,13 +10,15 @@ import { Health } from "../src/contracts/api";
 import { AuthGate, hashPassphrase } from "../src/server/auth";
 import { migrate, openDatabase, schemaVersion } from "../src/db/store";
 import { handler } from "../src/server/main";
+import { runLeaseCrashCancel, runReconnect } from "../qa/scenarios/runs";
 
 const Arguments = z.object({
-  scenario: z.enum(["foundation-health", "foundation-bad-migration", "foundation-fixture-failure", "auth-origin-and-expiry"]),
+  scenario: z.enum(["foundation-health", "foundation-bad-migration", "foundation-fixture-failure", "auth-origin-and-expiry", "run-reconnect", "run-lease-crash-cancel"]),
   evidence: z.string().min(1),
 });
 type Context = {
   readonly db: Database;
+  readonly dbPath: string;
   readonly evidence: string;
   readonly fixtureBase: string;
 };
@@ -82,7 +84,7 @@ async function foundationBadMigration(context: Context): Promise<void> {
   let rejected = false;
   try {
     migrate(context.db, [{
-      version: 2,
+      version: 3,
       sql: "UPDATE settings SET value_json = '\"changed\"' WHERE key = 'survivor'; INSERT INTO missing_table VALUES (1);",
     }]);
   } catch (error) {
@@ -92,7 +94,7 @@ async function foundationBadMigration(context: Context): Promise<void> {
   const row = context.db.query("SELECT value_json FROM settings WHERE key = 'survivor'").get();
   assert.equal(rejected, true);
   assert.deepEqual(row, { value_json: '"original"' });
-  assert.equal(schemaVersion(context.db), 1);
+  assert.equal(schemaVersion(context.db), 2);
   await record(context.evidence, "rollback.json", {
     migrationFailed: rejected,
     row,
@@ -164,7 +166,8 @@ async function run(): Promise<void> {
   let app: ReturnType<typeof Bun.serve> | undefined;
   let fixture: ReturnType<typeof Bun.serve> | undefined;
   try {
-    db = openDatabase(join(temporary, "assistant.sqlite"));
+    const dbPath = join(temporary, "assistant.sqlite");
+    db = openDatabase(dbPath);
     const auth = new AuthGate(db, {
       origin: "http://127.0.0.1:4317",
       passphraseHash: hashPassphrase("qa-only-long-passphrase"),
@@ -177,7 +180,7 @@ async function run(): Promise<void> {
       port: 4318,
       fetch: () => Response.json({ ok: false, schemaVersion: -1 }),
     });
-    const context = { db, evidence, fixtureBase: "http://127.0.0.1:4318" };
+    const context = { db, dbPath, evidence, fixtureBase: "http://127.0.0.1:4318" };
     switch (input.scenario) {
       case "foundation-health":
         await foundationHealth(context);
@@ -190,6 +193,12 @@ async function run(): Promise<void> {
         break;
       case "auth-origin-and-expiry":
         await authOriginAndExpiry(context);
+        break;
+      case "run-reconnect":
+        await runReconnect(context);
+        break;
+      case "run-lease-crash-cancel":
+        await runLeaseCrashCancel(context);
         break;
       default:
         throw new QaArgumentError("Unknown scenario");

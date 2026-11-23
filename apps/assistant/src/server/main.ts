@@ -7,6 +7,7 @@ import { AuthGate } from "./auth";
 import { SecretVault } from "./secrets";
 import { sessionRoute, shell } from "./routes/session";
 import { authorized } from "./policy";
+import { runsRoute } from "./routes/runs";
 
 export function handler(db: Database, auth: AuthGate): (request: Request) => Response | Promise<Response> {
   return async (request) => {
@@ -26,6 +27,9 @@ export function handler(db: Database, auth: AuthGate): (request: Request) => Res
     }
     if (path.startsWith("/api/") && !authorized(db, auth, request, { kind: "session" })) {
       return Response.json({ error: "authentication_required" }, { status: 401 });
+    }
+    if (path === "/api/runs" || path.startsWith("/api/runs/")) {
+      return runsRoute(db, request, path);
     }
     return Response.json({ error: "not_found" }, { status: 404 });
   };
