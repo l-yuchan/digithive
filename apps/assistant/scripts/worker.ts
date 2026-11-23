@@ -7,7 +7,7 @@ import { runAgent } from "../src/runtime/executors/agent";
 import { createRegistry } from "../src/agents/tools";
 import { appendAssistant } from "../src/server/routes/conversations";
 import { readSettings } from "../src/server/routes/settings";
-import type { ProviderOptions } from "../src/agents/provider";
+import { contextEpoch } from "../src/knowledge/memory";import type { ProviderOptions } from "../src/agents/provider";
 
 const db = openDatabase(resolve(process.env["ASSISTANT_DB_PATH"] ?? "./data/assistant.sqlite"));
 const workerId = randomUUID();
@@ -44,6 +44,7 @@ async function executeAgent(attemptId: string, runId: string, goal: string): Pro
     maxSteps: Number(process.env["AGENT_MAX_STEPS"] ?? "6"),
     maxOutputTokens: Number(process.env["AGENT_MAX_OUTPUT_TOKENS"] ?? "1024"),
     timeoutMs: Number(process.env["AGENT_TIMEOUT_MS"] ?? "60000"),
+    epoch: () => contextEpoch(db),
   });
   const conversation = db.query("SELECT conversation_id FROM runs WHERE id = ?").get(runId);
   const conversationId = z.object({ conversation_id: z.string().nullable() }).parse(conversation).conversation_id;

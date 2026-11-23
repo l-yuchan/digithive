@@ -11,9 +11,11 @@ import { runsRoute } from "./routes/runs";
 import { settingsRoute, usageRoute } from "./routes/usage";
 import { conversationsRoute } from "./routes/conversations";
 import { filesRoute } from "./routes/files";
+import { memoriesRoute } from "./routes/memories";
 import { FileStore } from "../files/store";
 import { chatShell } from "../web/views/chat";
 import { filesShell } from "../web/views/files";
+import { memoryShell } from "../web/views/memory";
 
 export function handler(
   db: Database,
@@ -35,7 +37,10 @@ export function handler(
     if (request.method === "GET" && path === "/files") {
       return auth.authenticated(request) ? filesShell() : shell(false);
     }
-    if (request.method === "GET" && (path === "/app.js" || path === "/files.js" || path === "/styles.css")) {
+    if (request.method === "GET" && path === "/memory") {
+      return auth.authenticated(request) ? memoryShell() : shell(false);
+    }
+    if (request.method === "GET" && (path === "/app.js" || path === "/files.js" || path === "/memory.js" || path === "/styles.css")) {
       const file = Bun.file(resolve(import.meta.dir, "../../dist/public", path.slice(1)));
       if (!(await file.exists())) return Response.json({ error: "not_built" }, { status: 503 });
       return new Response(file, {
@@ -53,6 +58,9 @@ export function handler(
     }
     if (path === "/api/runs" || path.startsWith("/api/runs/")) {
       return runsRoute(db, request, path);
+    }
+    if (path === "/api/memories" || path.startsWith("/api/memories/")) {
+      return memoriesRoute(db, request, path);
     }
     if (path === "/api/files" || path.startsWith("/api/files/")) {
       return filesRoute(db, store, request, path);

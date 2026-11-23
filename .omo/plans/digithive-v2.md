@@ -306,7 +306,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario files-path-size-corrupt --evidence ../../.omo/evidence/digithive-v2/task-9`; traversal filename·초과 업로드·깨진 PDF·symlink 시도; PASS iff 경계 밖 파일 접근 0, 명시적 4xx/extraction failure. Evidence: http.json, disk-diff.json.
   - Commit: Y — `Store accessible user files with bounded text extraction`.
 
-- [ ] 10. 자동 기억·검색·정정 전파를 구현한다
+- [x] 10. 자동 기억·검색·정정 전파를 구현한다
   - Recommended task executor category: deep-high — 파생 기억과 삭제·동시 작업의 무결성.
   - Closes: GAP-2. Wave W2. Depends on: 7,9. Blocks: 15,17,20.
   - Paths: `src/knowledge/{memory,retrieval,citations}.ts`, `src/server/routes/memories.ts`, `src/web/views/memory.ts`.

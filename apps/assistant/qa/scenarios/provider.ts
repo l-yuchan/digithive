@@ -13,7 +13,7 @@ type ProviderContext = {
   readonly evidence: string;
 };
 
-type Step = { status?: number; body: unknown };
+type Step = { status?: number; body: unknown; delayMs?: number };
 
 let script: Step[] = [];
 const transcript: { request: unknown; response: unknown }[] = [];
@@ -28,6 +28,7 @@ export async function providerFetch(request: Request): Promise<Response> {
   if (path !== "/v1/chat/completions") return Response.json({ error: "not_found" }, { status: 404 });
   const body: unknown = await request.json();
   const step = script.shift() ?? { body: { choices: [{ message: { role: "assistant", content: "done" }, finish_reason: "stop" }] } };
+  if (step.delayMs) await Bun.sleep(step.delayMs);
   transcript.push({ request: body, response: step.body });
   return Response.json(step.body, { status: step.status ?? 200 });
 }

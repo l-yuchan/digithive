@@ -73,9 +73,14 @@ a.ghost.link:hover { background: var(--wash); }
 }
 .upload label { font-weight: 600; font-size: 0.9375rem; margin-top: 0.35rem; }
 .upload input[type="text"],
-.upload input[type="file"] {
+.upload input[type="file"],
+.upload select {
   font: inherit; min-height: 44px; padding: 0.5rem 0.7rem; border-radius: 8px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.inline-edit {
+  font: inherit; min-width: 14rem; flex: 1; min-height: 44px; padding: 0.4rem 0.6rem;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
 }
 .upload input[type="file"] { padding: 0.4rem; }
 .upload button { justify-self: start; min-width: 8rem; margin-top: 0.5rem; }

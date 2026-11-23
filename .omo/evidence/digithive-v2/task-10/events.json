@@ -1,0 +1,7 @@
+{
+  "runStatus": "failed",
+  "reason": "context_changed",
+  "epochBefore": 2,
+  "epochAfter": 3,
+  "publishedAnswer": ""
+}

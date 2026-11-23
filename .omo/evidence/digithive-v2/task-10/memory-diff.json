@@ -1,0 +1,12 @@
+{
+  "original": {
+    "statement": "아침에는 길게 설명해줘",
+    "revision": 1
+  },
+  "corrected": {
+    "statement": "아침에는 짧게 설명해줘",
+    "revision": 2
+  },
+  "searchCitationRevision": 2,
+  "oldWordingMatches": 0
+}

@@ -23,6 +23,7 @@ export type AgentInput = {
   readonly timeoutMs?: number;
   readonly limitMicroUsd: number;
   readonly timeZone: string;
+  readonly epoch?: () => number;
 };
 
 const MAX_TOOL_CALLS = 8;
@@ -34,6 +35,7 @@ export async function runAgent(
   input: AgentInput,
   now = () => Date.now(),
 ): Promise<AgentOutcome> {
+  const startEpoch = input.epoch?.();
   const maxSteps = input.maxSteps ?? 6;
   const maxOutputTokens = input.maxOutputTokens ?? 1_024;
   const timeoutMs = input.timeoutMs ?? 60_000;
@@ -74,6 +76,9 @@ export async function runAgent(
     if (!message) return { status: "failed", output: "", steps: step, toolCalls: calls, reason: "malformed" };
     const requested = message.tool_calls ?? [];
     if (requested.length === 0) {
+      if (input.epoch !== undefined && startEpoch !== undefined && input.epoch() !== startEpoch) {
+        return { status: "failed", output: "", steps: step, toolCalls: calls, reason: "context_changed" };
+      }
       return { status: "succeeded", output: message.content ?? "", steps: step, toolCalls: calls };
     }
     messages.push({ role: "assistant", content: message.content ?? "" });

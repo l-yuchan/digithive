@@ -15,6 +15,7 @@ import { scriptApproved, scriptEscapeAndTimeout } from "../qa/scenarios/sandbox"
 import { agentMalformedAndDisconnect, agentToolRoundtrip, providerFetch, setProviderScript } from "../qa/scenarios/provider";
 import { chatBrowser, chatOfflineCancel } from "../qa/browser/chat";
 import { filesBrowserRoundtrip, filesHttpFailures } from "../qa/scenarios/files";
+import { memoryCorrectBrowser, memoryRevokeInflight } from "../qa/scenarios/memory";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -36,7 +37,7 @@ const Arguments = z.object({
     "auth-origin-and-expiry", "run-reconnect", "run-lease-crash-cancel",
     "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
     "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
-    "files-browser-roundtrip", "files-path-size-corrupt",
+    "files-browser-roundtrip", "files-path-size-corrupt", "memory-correct-browser", "memory-revoke-inflight",
   ]),
   evidence: z.string().min(1),
 });
@@ -132,6 +133,12 @@ async function run(): Promise<void> {
         break;
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
+        break;
+      case "memory-correct-browser":
+        await memoryCorrectBrowser({ db, evidence, base: ORIGIN, cookie: await loginCookie() });
+        break;
+      case "memory-revoke-inflight":
+        await memoryRevokeInflight({ db, evidence, base: ORIGIN, cookie: await loginCookie() });
         break;
       case "files-browser-roundtrip":
       case "files-path-size-corrupt": {

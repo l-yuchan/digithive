@@ -22,18 +22,19 @@ function database(): Database {
 
 test("keeps the previous row and schema version when a later migration fails", () => {
   const db = database();
+  const version = schemaVersion(db);
   db.query("INSERT INTO settings (key,value_json,updated_by,updated_at) VALUES (?,?,?,?)")
     .run("keep", '"before"', "qa", new Date(0).toISOString());
 
   assert.throws(() => migrate(db, [{
-    version: 3,
+    version: version + 1,
     sql: "UPDATE settings SET value_json='\"after\"' WHERE key='keep'; INSERT INTO missing_table VALUES (1);",
   }]));
 
   assert.deepEqual(db.query("SELECT value_json FROM settings WHERE key='keep'").get(), {
     value_json: '"before"',
   });
-  assert.equal(schemaVersion(db), 2);
+  assert.equal(schemaVersion(db), version);
 });
 
 test("rejects source records without a referenced connection", () => {
