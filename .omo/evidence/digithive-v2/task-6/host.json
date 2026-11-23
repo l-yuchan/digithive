@@ -1,0 +1,36 @@
+{
+  "host": "mini (Debian 6.12, Docker 29.6.1)",
+  "images": {
+    "runner": "dg-sandbox-runner:qa@9a62cb5195a6",
+    "sandbox": "dg-script:base@6b83058320b2"
+  },
+  "hardening": [
+    "--network none",
+    "--read-only",
+    "--tmpfs /tmp:rw,noexec,nosuid,size=16m",
+    "--cap-drop ALL",
+    "--security-opt no-new-privileges",
+    "--pids-limit 32",
+    "--memory 128m",
+    "--cpus 0.5",
+    "--user 65534:65534",
+    "--ulimit nofile=64",
+    "input directory mounted read-only at /in",
+    "only the per-run /out directory mounted writable",
+    "no DB, credential, host source or Docker socket mount inside the sandbox"
+  ],
+  "canary": {
+    "path": "/tmp/dg-qa/work/host-canary.txt",
+    "before": "032048804812beea7aa536d2e442f6220a7c732f258ee61e7b669949204e51fb",
+    "after": "032048804812beea7aa536d2e442f6220a7c732f258ee61e7b669949204e51fb",
+    "unchanged": true
+  },
+  "timeout": {
+    "limitMs": 5000,
+    "observedSeconds": 6,
+    "resultTimedOut": true,
+    "containerRemainingAfter": 0
+  },
+  "containerCountAfterRun": 1,
+  "containerCountNote": "1 is the runner container itself; sandbox containers are removed with docker rm -f in the finally block"
+}

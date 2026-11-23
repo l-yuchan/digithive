@@ -1,0 +1,12 @@
+{
+  "exitCode": 0,
+  "timedOut": false,
+  "stdout": "TRANSFORMED 13",
+  "outputs": [
+    {
+      "path": "result.txt",
+      "sha256": "439c264e90d0afc41b7c8515b9aae30f9637bb58585bd37902813384b7e64ef5",
+      "bytes": 14
+    }
+  ]
+}

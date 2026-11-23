@@ -1,0 +1,12 @@
+{
+  "escape": {
+    "uid": 65534,
+    "secret_read": "blocked",
+    "network": "blocked",
+    "rootfs_write": "blocked"
+  },
+  "timeout": {
+    "timedOut": true,
+    "exitCode": -1
+  }
+}

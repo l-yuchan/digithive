@@ -11,6 +11,7 @@ import { openDatabase } from "../src/db/store";
 import { handler } from "../src/server/main";
 import { runLeaseCrashCancel, runReconnect } from "../qa/scenarios/runs";
 import { budgetConcurrentUnknown, budgetSettle } from "../qa/scenarios/budget";
+import { scriptApproved, scriptEscapeAndTimeout } from "../qa/scenarios/sandbox";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -30,7 +31,7 @@ const Arguments = z.object({
   scenario: z.enum([
     "foundation-health", "foundation-bad-migration", "foundation-fixture-failure",
     "auth-origin-and-expiry", "run-reconnect", "run-lease-crash-cancel",
-    "budget-settle", "budget-concurrent-unknown",
+    "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
   ]),
   evidence: z.string().min(1),
 });
@@ -118,6 +119,12 @@ async function run(): Promise<void> {
         break;
       case "budget-concurrent-unknown":
         await budgetConcurrentUnknown({ ...context, base: ORIGIN, cookie: await loginCookie() });
+        break;
+      case "script-approved":
+        await scriptApproved(context);
+        break;
+      case "script-escape-and-timeout":
+        await scriptEscapeAndTimeout(context);
         break;
       default:
         throw new QaArgumentError("Unknown scenario");

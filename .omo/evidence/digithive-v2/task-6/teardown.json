@@ -1,0 +1,18 @@
+{
+  "containersRemainingWithPrefix": 0,
+  "sandboxImagesRemaining": 0,
+  "temporaryRootRemoved": true,
+  "tunnelProcessKilled": true,
+  "unrelatedContainersPreserved": [
+    "chancreateive-minecraft-1", "digithive", "caddy_proxy", "immich_server",
+    "immich_machine_learning", "jupyter_server-cloudflared-1", "jupyter_server-jupyter-1",
+    "vaultwarden", "nextcloud", "nextcloud-redis", "pgadmin", "postgres-vchord",
+    "immich_postgres", "immich_redis", "n8n_worker_runner", "n8n_runner",
+    "n8n_worker", "n8n", "n8n_postgres", "n8n_redis"
+  ],
+  "notes": [
+    "two containers from a superseded runner build were still spinning and were removed explicitly",
+    "root-owned sandbox temp dirs were deleted through a throwaway alpine container, which was then removed",
+    "sudo was not available non-interactively; no password was requested or used"
+  ]
+}

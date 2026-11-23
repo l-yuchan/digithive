@@ -262,7 +262,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario budget-concurrent-unknown --evidence ../../.omo/evidence/digithive-v2/task-5`; USD99.9 상태에서 각각 USD0.1 예약 2개 동시 요청·usage 누락; PASS iff 하나만 실행되고 unknown 부채 보존, 월 경계 정산 중복 0. Evidence: ledger.json.
   - Commit: Y — `Track reserved and uncertain API costs before execution`.
 
-- [ ] 6. 등록 스크립트와 격리된 생성 코드 실행기를 구현한다
+- [x] 6. 등록 스크립트와 격리된 생성 코드 실행기를 구현한다
   - Recommended task executor category: deep-high — 스크립트도 agent와 같은 권한·내구성 경계를 준수.
   - Closes: GAP-2, GAP-5. Wave W2. Depends on: 4. Blocks: 14,20–22.
   - Paths: `src/runtime/executors/script.ts`, `src/contracts/tools.ts`, `deploy/script-runner.Dockerfile`, tests/scripts.

@@ -33,3 +33,25 @@ without performing their promised behavior.
 Do not put credentials into a config fixture. Pass them as server-side
 environment variables at deployment. `ASSISTANT_DATA_ROOT` can select the
 data volume; the default local probe uses an OS temporary directory.
+
+## Sandbox runner for approved scripts
+
+Generated scripts never execute on the web or worker host. They run through
+a separate runner that owns the Docker socket:
+
+- `deploy/sandbox-runner.Dockerfile` builds the runner (Bun + Docker CLI).
+  It needs `RUNNER_TOKEN` (16+ chars), `SANDBOX_ROOT` (its own view of the
+  sandbox volume) and `SANDBOX_HOST_ROOT` (the same volume as the daemon sees
+  it, only when the two paths differ).
+- `deploy/script-runner.Dockerfile` builds the sandbox image that supplies the
+  Bun runtime. The approved script is mounted read-only at `/in`, and only the
+  per-run `/out` directory is writable.
+- The worker calls the runner with `ASSISTANT_SANDBOX_URL` and
+  `ASSISTANT_SANDBOX_TOKEN`. Without them a script run fails closed with
+  `sandbox_unavailable`; there is no unisolated fallback, including in local
+  development.
+
+A generated script also needs an active, user-approved `tool_versions` row
+whose `artifact_digest` matches the manifest; a collector script (`kind:
+"collector"`) uses the same runner without that gate because it ships with
+the application.

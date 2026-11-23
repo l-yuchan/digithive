@@ -1,0 +1,1 @@
+032048804812beea7aa536d2e442f6220a7c732f258ee61e7b669949204e51fb  /tmp/dg-qa/work/host-canary.txt
