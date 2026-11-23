@@ -10,9 +10,16 @@ import { authorized } from "./policy";
 import { runsRoute } from "./routes/runs";
 import { settingsRoute, usageRoute } from "./routes/usage";
 import { conversationsRoute } from "./routes/conversations";
+import { filesRoute } from "./routes/files";
+import { FileStore } from "../files/store";
 import { chatShell } from "../web/views/chat";
+import { filesShell } from "../web/views/files";
 
-export function handler(db: Database, auth: AuthGate): (request: Request) => Response | Promise<Response> {
+export function handler(
+  db: Database,
+  auth: AuthGate,
+  store = new FileStore(db, process.env["ASSISTANT_FILES_ROOT"] ?? "./data/files"),
+): (request: Request) => Response | Promise<Response> {
   return async (request) => {
     const path = new URL(request.url).pathname;
     if (request.method === "GET" && path === "/health") {
@@ -25,7 +32,10 @@ export function handler(db: Database, auth: AuthGate): (request: Request) => Res
     if (request.method === "GET" && path === "/") {
       return auth.authenticated(request) ? chatShell() : shell(false);
     }
-    if (request.method === "GET" && (path === "/app.js" || path === "/styles.css")) {
+    if (request.method === "GET" && path === "/files") {
+      return auth.authenticated(request) ? filesShell() : shell(false);
+    }
+    if (request.method === "GET" && (path === "/app.js" || path === "/files.js" || path === "/styles.css")) {
       const file = Bun.file(resolve(import.meta.dir, "../../dist/public", path.slice(1)));
       if (!(await file.exists())) return Response.json({ error: "not_built" }, { status: 503 });
       return new Response(file, {
@@ -43,6 +53,9 @@ export function handler(db: Database, auth: AuthGate): (request: Request) => Res
     }
     if (path === "/api/runs" || path.startsWith("/api/runs/")) {
       return runsRoute(db, request, path);
+    }
+    if (path === "/api/files" || path.startsWith("/api/files/")) {
+      return filesRoute(db, store, request, path);
     }
     if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
       return conversationsRoute(db, request, path);

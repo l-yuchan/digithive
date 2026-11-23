@@ -295,7 +295,7 @@ W1 기반 1–5 → W2 실행·맥락 6–10 → W3 개인 정보 11–15 → W4
   - QA failure: `bun run qa --scenario chat-offline-cancel --evidence ../../.omo/evidence/digithive-v2/task-8`; 네트워크 끊기→재접속→page.getByTestId("run-cancel").click(); PASS iff 상태가 사실과 일치하고 중복 bubble/overlap 없음. Evidence: actions.json, mobile-error.png.
   - Commit: Y — `Provide persistent conversations and visible task control`.
 
-- [ ] 9. 내부 파일 저장소와 텍스트 추출을 구현한다
+- [x] 9. 내부 파일 저장소와 텍스트 추출을 구현한다
   - Recommended task executor category: deep-low — 업로드·파일 경계·산출물 일관성.
   - Closes: GAP-1, GAP-2. Wave W2. Depends on: 4. Blocks: 10,20,21,24.
   - Paths: `src/files/*`, `src/server/routes/files.ts`, `src/web/views/files.ts`, tests/files.

@@ -14,6 +14,7 @@ import { budgetConcurrentUnknown, budgetSettle } from "../qa/scenarios/budget";
 import { scriptApproved, scriptEscapeAndTimeout } from "../qa/scenarios/sandbox";
 import { agentMalformedAndDisconnect, agentToolRoundtrip, providerFetch, setProviderScript } from "../qa/scenarios/provider";
 import { chatBrowser, chatOfflineCancel } from "../qa/browser/chat";
+import { filesBrowserRoundtrip, filesHttpFailures } from "../qa/scenarios/files";
 import {
   authOriginAndExpiry, foundationBadMigration, foundationFixtureFailure, foundationHealth,
 } from "../qa/scenarios/foundation";
@@ -35,6 +36,7 @@ const Arguments = z.object({
     "auth-origin-and-expiry", "run-reconnect", "run-lease-crash-cancel",
     "budget-settle", "budget-concurrent-unknown", "script-approved", "script-escape-and-timeout",
     "agent-tool-roundtrip", "agent-malformed-and-disconnect", "chat-browser", "chat-offline-cancel",
+    "files-browser-roundtrip", "files-path-size-corrupt",
   ]),
   evidence: z.string().min(1),
 });
@@ -131,6 +133,18 @@ async function run(): Promise<void> {
       case "script-escape-and-timeout":
         await scriptEscapeAndTimeout(context);
         break;
+      case "files-browser-roundtrip":
+      case "files-path-size-corrupt": {
+        const cookie = await loginCookie();
+        const fixtureDir = resolve(import.meta.dir, "../tests/fixtures/files");
+        const files = { evidence, base: ORIGIN, cookie, fixtureDir };
+        if (input.scenario === "files-browser-roundtrip") {
+          await filesBrowserRoundtrip(files);
+        } else {
+          await filesHttpFailures({ ...files, oversized: new Uint8Array(26 * 1024 * 1024) });
+        }
+        break;
+      }
       case "agent-tool-roundtrip":
         await agentToolRoundtrip(context);
         break;

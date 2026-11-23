@@ -5,7 +5,7 @@ const result = await Bun.build({
 });
 
 const assets = Bun.build({
-  entrypoints: ["src/web/app.ts"],
+  entrypoints: ["src/web/app.ts", "src/web/files.ts"],
   outdir: "dist/public",
   target: "browser",
   naming: "[name].js",

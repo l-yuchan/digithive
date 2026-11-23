@@ -1,0 +1,10 @@
+{
+  "traversal": 422,
+  "oversized": 413,
+  "corrupt": "failed",
+  "htmlRejected": 415,
+  "stored": [
+    "symlink/escape",
+    "docs/broken.pdf"
+  ]
+}

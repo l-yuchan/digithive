@@ -1,0 +1,10 @@
+{
+  "steps": [
+    "opened the files screen",
+    "uploaded the PDF and saw the extraction status",
+    "download hash matches the original and the derived text is separate",
+    "reload kept the file in the list",
+    "mobile 390px showed the file row"
+  ],
+  "uploadStatus": 201
+}

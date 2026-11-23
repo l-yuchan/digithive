@@ -63,6 +63,30 @@ button { font: inherit; min-height: 44px; padding: 0 1rem; border-radius: 10px; 
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
   clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+.topnav { display: flex; align-items: center; gap: 0.5rem; }
+a.link { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; padding: 0 0.75rem; }
+a.ghost.link { border: 1px solid var(--line); border-radius: 10px; min-height: 44px; color: var(--ink); }
+a.ghost.link:hover { background: var(--wash); }
+.upload {
+  display: grid; gap: 0.4rem; max-width: 42rem; padding: 1rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+}
+.upload label { font-weight: 600; font-size: 0.9375rem; margin-top: 0.35rem; }
+.upload input[type="text"],
+.upload input[type="file"] {
+  font: inherit; min-height: 44px; padding: 0.5rem 0.7rem; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+}
+.upload input[type="file"] { padding: 0.4rem; }
+.upload button { justify-self: start; min-width: 8rem; margin-top: 0.5rem; }
+.file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; max-width: 42rem; }
+.file-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 1rem;
+  padding: 0.6rem 0.8rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+.file-name { font-weight: 600; overflow-wrap: anywhere; }
+.file-meta { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.file-row a.ghost.link { margin-left: auto; }
 @media (max-width: 720px) {
   .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .sidebar {
