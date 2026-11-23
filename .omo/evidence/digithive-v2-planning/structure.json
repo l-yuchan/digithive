@@ -1,0 +1,23 @@
+{
+  "kind": "plan_structure_check",
+  "plan": ".omo/plans/digithive-v2.md",
+  "sha256": "36feaad316914e73af33f5ec19ee7dde5ebf0a2f6618856c2e82ca77f6fb7698",
+  "implementationCount": 25,
+  "finalCount": 4,
+  "categories": {
+    "deep-low": 7,
+    "deep-high": 16,
+    "visual-engineering": 2
+  },
+  "checks": [
+    "consecutive column-zero implementation task rows",
+    "four column-zero final verification task rows",
+    "category, dependencies, paths and references in every implementation task",
+    "acceptance, happy/failure invocation, evidence and commit in every implementation task",
+    "template placeholders filled",
+    "standard top-level header order"
+  ],
+  "errors": [],
+  "status": "PASS",
+  "limits": "Structure validation is not product execution or semantic proof. See coverage.md and independent review."
+}
