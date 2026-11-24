@@ -51,30 +51,40 @@ Any published commit tag works; `latest` follows `main`.
 
 ## Self-hosted runner
 
-- Name `mini-digithive`, labels `self-hosted`, `Linux`, `X64`, `mini`, working
-  directory `/home/leefam/actions-runner/_work`.
-- Installed from `actions/runner` v2.338.2 into `/home/leefam/actions-runner`.
-- The box has no `libicu` and no passwordless sudo, so the runner runs with
-  `LD_LIBRARY_PATH=/home/leefam/libicu/usr/lib/x86_64-linux-gnu`, pointing at
-  an unprivileged `dpkg-deb -x` extraction of `libicu76`.
-- Start command: `LD_LIBRARY_PATH=... ./run.sh` inside `~/actions-runner`.
+The runner is a container on `mini`, not a host process:
 
-### Known gap: no boot autostart yet
+| piece | value |
+| --- | --- |
+| container | `digithive-runner`, `--restart unless-stopped` |
+| image | `ghcr.io/actions/actions-runner:latest` |
+| name / labels | `mini-digithive` / `self-hosted`, `Linux`, `X64`, `mini` |
+| state | `/home/leefam/runner-container` on the host, mounted at `/home/runner` |
+| mounts | docker socket, host `/usr/bin/docker`, host compose plugin, `/home/leefam/digithive-harness` |
+| work dir | `/home/runner/_work` |
 
-Both usual unattended-start paths are blocked on that box right now, and both
-need the owner:
+Because the container carries `--restart unless-stopped`, dockerd brings the
+runner back after a reboot; no systemd unit, linger or cron entry is involved.
+That matters on this box: `loginctl enable-linger` is refused by polkit and
+`crontab -` fails because `/var` (6.2 GB) sits at 100% with only root-reserved
+space left. Both of those host issues remain open for the owner.
 
-- `loginctl enable-linger leefam` answers "Access denied" (polkit), so a
-  `systemd --user` unit would stop when the last session ends.
-- `crontab -` fails with "No space left on device" because `/var` (6.2 GB) is
-  at 100% with only root-reserved space left, so no `@reboot` entry can be
-  written. Freeing `/var` or installing the runner as a system service needs
-  sudo.
+The container runs as root inside its namespace (`RUNNER_ALLOW_RUNASROOT=1`),
+which is required by the runner scripts and is equivalent to the `docker` group
+membership the host user already has.
 
-Until one of those is done, the runner is started by hand after a reboot:
+To reconfigure or re-register:
 
 ```bash
-ssh mini 'cd ~/actions-runner && setsid nohup env \
-  LD_LIBRARY_PATH=$HOME/libicu/usr/lib/x86_64-linux-gnu ./run.sh \
-  >> runner.log 2>&1 < /dev/null &'
+TOKEN=$(gh api -X POST repos/l-yuchan/digithive/actions/runners/registration-token --jq .token)
+ssh mini "docker run --rm --user 0 -e RUNNER_ALLOW_RUNASROOT=1 \
+  -v /home/leefam/runner-container:/home/runner -w /home/runner \
+  ghcr.io/actions/actions-runner:latest ./config.sh --unattended \
+  --url https://github.com/l-yuchan/digithive --token $TOKEN \
+  --name mini-digithive --labels mini --work _work --replace"
+ssh mini 'docker restart digithive-runner'
 ```
+
+The previous host-installed runner at `/home/leefam/actions-runner` (with an
+unprivileged `libicu76` extraction because the box has no libicu) is stopped and
+superseded; the directory can be deleted.
+
