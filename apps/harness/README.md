@@ -121,5 +121,3 @@ dockerd가 부팅 때 함께 살린다. 러너 파일과 등록 상태는 호스
 - 수동 동기화: `POST /api/connections/sync` → 소스별 {ok,count,cursor,error}
 - Google 연결: `GET /api/oauth/google/start`가 돌려준 URL로 1회 동의하면 콜백이 토큰을 암호화 저장하고 즉시 1회 동기화한다.
 - 알림: 브라우저에서 구독하면 `POST /api/push/subscribe`로 저장되고, 브리핑 발행 시 전송된다. 점검은 `POST /api/push/test`.
-
-
