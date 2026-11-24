@@ -1,0 +1,26 @@
+{
+  "name": "@digithive/harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/server/main.ts",
+    "start": "bun src/server/main.ts",
+    "build:web": "bun scripts/build-web.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "mock": "bun scripts/mock-provider.ts",
+    "verify": "bun run typecheck && bun test"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.3"
+  }
+}

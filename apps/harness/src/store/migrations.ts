@@ -1,0 +1,108 @@
+export type Migration = {
+  readonly version: number;
+  readonly sql: string;
+};
+
+/**
+ * Schema from `.omo/plans/digithive-harness-rewrite.md` §3.
+ * Never edit a shipped migration: add the next version instead.
+ */
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    version: 1,
+    sql: `
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  deleted_at TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE entries (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  parent_id TEXT REFERENCES entries(id),
+  kind TEXT NOT NULL,
+  role TEXT,
+  status TEXT,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  seq INTEGER NOT NULL
+);
+CREATE INDEX entries_tree ON entries(session_id, parent_id);
+CREATE UNIQUE INDEX entries_seq ON entries(session_id, seq);
+
+CREATE TABLE parts (
+  entry_id TEXT NOT NULL REFERENCES entries(id),
+  idx INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  PRIMARY KEY (entry_id, idx)
+);
+
+CREATE TABLE runs (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions(id),
+  parent_run_id TEXT REFERENCES runs(id),
+  origin TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  status TEXT NOT NULL,
+  cancel_intent TEXT,
+  lease_owner TEXT,
+  lease_expires_at TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  budget_json TEXT NOT NULL,
+  result_json TEXT,
+  created_at TEXT NOT NULL,
+  settled_at TEXT
+);
+CREATE INDEX runs_live ON runs(status, lease_expires_at);
+
+CREATE TABLE tool_calls (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  entry_id TEXT REFERENCES entries(id),
+  name TEXT NOT NULL,
+  arguments_json TEXT NOT NULL,
+  decision TEXT,
+  decision_by TEXT,
+  status TEXT NOT NULL,
+  result_json TEXT,
+  started_at TEXT,
+  ended_at TEXT,
+  deadline_at TEXT
+);
+
+CREATE TABLE approvals (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id),
+  tool_call_id TEXT NOT NULL REFERENCES tool_calls(id),
+  status TEXT NOT NULL,
+  requested_at TEXT NOT NULL,
+  decided_at TEXT,
+  note TEXT
+);
+
+CREATE TABLE events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id TEXT,
+  session_id TEXT,
+  kind TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX events_run ON events(run_id, seq);
+CREATE INDEX events_session ON events(session_id, seq);
+
+CREATE TABLE saved_approvals (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  resource TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`,
+  },
+];
