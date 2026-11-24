@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: lint, types, build, tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/harness
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: install
+        run: bun install --frozen-lockfile
+      - name: lint
+        run: bun run lint
+      - name: typecheck
+        run: bun run typecheck
+      - name: web build
+        run: bun run build:web
+      - name: tests
+        run: bun test
+      - name: format
+        run: bun run fmt:check
+
+  image:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image without pushing
+        run: docker build -t digithive-harness:ci apps/harness
