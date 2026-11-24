@@ -18,8 +18,15 @@ Two jobs on `ubuntu-latest`:
 
 ## cd.yml
 
-Triggers: push to `main`, manual dispatch. `concurrency: cd-main` keeps one
-deployment at a time.
+Triggers: the completion of a `ci` run on `main`, or manual dispatch.
+`concurrency: cd-main` keeps one deployment at a time.
+
+A `workflow_run` trigger fires for failed CI runs too, so `publish` carries
+`if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'`:
+a red build never deploys. The deployed revision is `github.event.workflow_run.head_sha`
+(falling back to `github.sha` for a manual dispatch), which both jobs check out
+explicitly, so the image and the compose file come from the same commit even if
+`main` moved on.
 
 1. `publish` builds `apps/harness` and pushes
    `ghcr.io/l-yuchan/digithive-harness:<sha>` and `:latest`. It needs
