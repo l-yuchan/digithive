@@ -139,20 +139,30 @@ export async function syncGoogleCalendar(deps: GoogleDeps): Promise<SyncOutcome>
   try {
     const token = await accessToken(deps);
     const syncToken = cursorOf(deps.db, "calendar");
-    const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
-    url.searchParams.set("singleEvents", "true");
-    url.searchParams.set("maxResults", "250");
-    url.searchParams.set("timeMin", new Date(now - 24 * 60 * 60 * 1_000).toISOString());
-    if (syncToken) url.searchParams.set("syncToken", syncToken);
 
-    const fetchPage = async (): Promise<Response> => fetchImpl(url.toString(), { headers: { authorization: `Bearer ${token}` } });
-    let response = await fetchPage();
+    // Incremental and full sync take different parameters: Google rejects
+    // syncToken together with timeMin/singleEvents, so the incremental request
+    // carries the token alone and the full request carries the time window.
+    const buildUrl = (incremental: string | null): string => {
+      const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+      url.searchParams.set("maxResults", "250");
+      if (incremental) {
+        url.searchParams.set("syncToken", incremental);
+      } else {
+        url.searchParams.set("singleEvents", "true");
+        url.searchParams.set("timeMin", new Date(now - 24 * 60 * 60 * 1_000).toISOString());
+      }
+      return url.toString();
+    };
+
+    let response = await fetchImpl(buildUrl(syncToken), { headers: { authorization: `Bearer ${token}` } });
     let note: string | null = null;
-    if (response.status === 410 && syncToken) {
+    if ((response.status === 410 || response.status === 400) && syncToken) {
+      // An expired or unusable token means starting over, never failing forever.
+      const failureStatus = response.status;
       deps.db.query("UPDATE integration_state SET cursor = NULL WHERE source = 'calendar'").run();
-      url.searchParams.delete("syncToken");
-      response = await fetchPage();
-      note = "full_resync_after_410";
+      response = await fetchImpl(buildUrl(null), { headers: { authorization: `Bearer ${token}` } });
+      note = `full_resync_after_${failureStatus}`;
     }
     if (!response.ok) throw new Error(`calendar_http_${response.status}`);
     const body = (await response.json()) as { items?: unknown[]; nextSyncToken?: string };

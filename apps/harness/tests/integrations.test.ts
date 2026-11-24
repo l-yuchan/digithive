@@ -68,6 +68,35 @@ describe("google oauth + sync", () => {
     expect(calls.at(-1)).toContain("syncToken=st-1");
   });
 
+  test("the incremental calendar request carries the syncToken and no timeMin", async () => {
+    const calls: string[] = [];
+    const deps = googleDeps((async (input: string | URL | Request) => {
+      calls.push(decodeURIComponent(String(input)));
+      return jsonResponse({ items: [], nextSyncToken: "st-next" });
+    }) as unknown as typeof fetch);
+    deps.db.query("INSERT INTO integration_state (source, cursor, ok) VALUES ('calendar','st-old',1)").run();
+    const outcome = await syncGoogleCalendar(deps);
+    expect(outcome.ok).toBe(true);
+    expect(calls[0]).toContain("syncToken=st-old");
+    expect(calls[0]).not.toContain("timeMin=");
+    expect(calls[0]).not.toContain("singleEvents=");
+  });
+
+  test("a 400 on the incremental request restarts with a full sync", async () => {
+    const calls: string[] = [];
+    const deps = googleDeps((async (input: string | URL | Request) => {
+      const url = decodeURIComponent(String(input));
+      calls.push(url);
+      if (url.includes("syncToken=")) return jsonResponse({ error: "bad token" }, 400);
+      return jsonResponse({ items: [], nextSyncToken: "st-fresh" });
+    }) as unknown as typeof fetch);
+    deps.db.query("INSERT INTO integration_state (source, cursor, ok) VALUES ('calendar','st-bad',1)").run();
+    const outcome = await syncGoogleCalendar(deps);
+    expect(outcome).toMatchObject({ ok: true, error: "full_resync_after_400", cursor: "st-fresh" });
+    expect(calls[1]).not.toContain("syncToken=");
+    expect(calls[1]).toContain("timeMin=");
+  });
+
   test("calendar 410 falls back to a full resync without the cursor", async () => {
     const deps = googleDeps((async (input: string | URL | Request) => {
       if (String(input).includes("syncToken=")) return jsonResponse({ error: "expired" }, 410);
