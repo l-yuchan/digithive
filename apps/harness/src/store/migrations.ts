@@ -125,4 +125,40 @@ ALTER TABLE runs ADD COLUMN state_json TEXT;
 CREATE INDEX runs_origin ON runs(origin, status);
 `,
   },
+  {
+    version: 4,
+    sql: `
+CREATE TABLE memories (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  text TEXT NOT NULL,
+  source_json TEXT NOT NULL DEFAULT '{}',
+  superseded_by TEXT REFERENCES memories(id),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX memories_live ON memories(superseded_by);
+
+CREATE TABLE files (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  path TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'upload',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX files_sha ON files(sha256);
+
+CREATE TABLE integration_state (
+  source TEXT PRIMARY KEY,
+  cursor TEXT,
+  last_sync_at TEXT,
+  ok INTEGER NOT NULL DEFAULT 0,
+  error TEXT,
+  detail_json TEXT NOT NULL DEFAULT '{}'
+);
+`,
+  },
 ];
