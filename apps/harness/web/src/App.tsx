@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { apiUrl, getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
 import { Composer } from "./composer/Composer";
 import { WorkPanel } from "./work/WorkPanel";
+import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { Login } from "./auth/Login";
 
 type State = {
@@ -142,7 +143,7 @@ export function App() {
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"chat" | "work">("chat");
+  const [view, setView] = useState<"chat" | "work" | "connections">("chat");
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -419,8 +420,11 @@ export function App() {
           <button type="button" role="tab" aria-selected={view === "work"} data-testid="tab-work" onClick={() => setView("work")}>
             작업
           </button>
+          <button type="button" role="tab" aria-selected={view === "connections"} data-testid="tab-connections" onClick={() => setView("connections")}>
+            연결
+          </button>
         </nav>
-        {view === "work" ? <WorkPanel /> : (
+        {view === "work" ? <WorkPanel /> : view === "connections" ? <ConnectionsPanel /> : (
         <>
         <ol className="messages" data-testid="messages" aria-live="polite">
           {state.entries

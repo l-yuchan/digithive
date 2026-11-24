@@ -174,7 +174,10 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
 
     if (path === "/api/oauth/google/start" && request.method === "GET") {
       if (deps.google.config.clientId.length === 0) return json({ error: "google_not_configured" }, 409);
-      return json({ url: authUrl(deps.google.config, issueCookie(deps.auth)) });
+      return new Response(null, {
+        status: 302,
+        headers: { location: authUrl(deps.google.config, issueCookie(deps.auth)) },
+      });
     }
 
     if (path === "/api/oauth/google/callback" && request.method === "GET") {

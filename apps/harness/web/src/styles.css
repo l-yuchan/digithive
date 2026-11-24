@@ -180,7 +180,8 @@ body {
   font: inherit;
 }
 
-button.primary {
+button.primary,
+a.primary {
   background: var(--accent);
   color: white;
   border: none;
@@ -190,7 +191,8 @@ button.primary {
   cursor: pointer;
 }
 
-button.primary:disabled {
+button.primary:disabled,
+a.primary[aria-disabled="true"] {
   opacity: 0.5;
   cursor: default;
 }
@@ -515,5 +517,59 @@ button.ghost {
   margin: 0;
   color: var(--muted);
   font-size: 13px;
+}
+
+
+.connections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.card {
+  border: 1px solid #2b3444;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--panel);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.card-head h2 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.state-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.briefing {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  font-size: 14px;
+  margin: 8px 0 0;
+  color: var(--text);
+}
+
+.button-link {
+  display: inline-block;
+  text-decoration: none;
+  line-height: 1.4;
+  text-align: center;
 }
 

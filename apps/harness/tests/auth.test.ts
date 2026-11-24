@@ -91,6 +91,17 @@ describe("auth gate on the server", () => {
     expect(authed.status).toBe(200);
   });
 
+  test("the Google start endpoint redirects the browser instead of returning JSON", async () => {
+    const authed = createApp(deps());
+    const login = await authed(new Request("http://local/api/login", { method: "POST", body: JSON.stringify({ passphrase: auth.passphrase }) }));
+    const cookie = readCookie(login.headers.get("set-cookie"));
+    const response = await authed(new Request("http://local/api/oauth/google/start", { headers: { cookie: `${COOKIE_NAME}=${cookie}` } }));
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location") ?? "";
+    expect(location.startsWith("https://accounts.google.com/o/oauth2/v2/auth?")).toBe(true);
+    expect(location).toContain("redirect_uri=http%3A%2F%2Flocal%2Fapi%2Foauth%2Fgoogle%2Fcallback");
+  });
+
   test("the shell stays reachable so the client can render its gate", async () => {
     const response = await app(new Request("http://local/"));
     expect(response.status).toBe(404); // no build in the temp webRoot, but not 401
