@@ -1,5 +1,6 @@
 services:
   harness:
+    image: ${HARNESS_IMAGE:-ghcr.io/l-yuchan/digithive-harness:latest}
     build: ..
     environment:
       PORT: "4318"
@@ -30,6 +31,7 @@ services:
     restart: unless-stopped
 
   harness-worker:
+    image: ${HARNESS_IMAGE:-ghcr.io/l-yuchan/digithive-harness:latest}
     build: ..
     command: ["bun", "scripts/worker.ts"]
     environment:
