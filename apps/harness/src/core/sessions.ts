@@ -77,6 +77,33 @@ export function listSessions(db: Database): Session[] {
     .map((row) => SessionRow.parse(row));
 }
 
+export function renameSession(db: Database, id: string, title: string, now = Date.now()): Session | null {
+  const trimmed = title.trim().slice(0, 200);
+  if (trimmed.length === 0) return null;
+  db.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(
+    trimmed,
+    new Date(now).toISOString(),
+    id,
+  );
+  return getSession(db, id);
+}
+
+/** Soft delete: the row and its entries stay readable, live runs are cancelled. */
+export function softDeleteSession(db: Database, id: string, now = Date.now()): { cancelledRuns: number } {
+  const iso = new Date(now).toISOString();
+  const result = db.transaction(() => {
+    const live = db.query("SELECT id FROM runs WHERE session_id = ? AND status IN ('queued','running','awaiting_approval')").all(id) as {
+      id: string;
+    }[];
+    for (const run of live) {
+      db.query("UPDATE runs SET status = 'cancelled', cancel_intent = 'policy', settled_at = ? WHERE id = ?").run(iso, run.id);
+    }
+    db.query("UPDATE sessions SET deleted_at = ?, leaf_id = NULL WHERE id = ?").run(iso, id);
+    return live.length;
+  });
+  return { cancelledRuns: result() };
+}
+
 export function appendEntry(
   db: Database,
   input: {
@@ -109,6 +136,7 @@ export function appendEntry(
     seqRow.next,
   );
   db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(createdAt, input.sessionId);
+  indexParts(db, id, input.sessionId, input.parts);
   return {
     id,
     sessionId: input.sessionId,
@@ -127,8 +155,24 @@ export function updateEntryParts(
   entryId: string,
   parts: readonly Part[],
   status: "complete" | "aborted" | "failed",
+  sessionId?: string,
 ): void {
   db.query("UPDATE entries SET payload_json = ?, status = ? WHERE id = ?").run(JSON.stringify({ parts }), status, entryId);
+  if (sessionId) indexParts(db, entryId, sessionId, parts);
+}
+
+function indexParts(db: Database, entryId: string, sessionId: string, parts: readonly Part[]): void {
+  const text = parts
+    .filter((part): part is { type: "text"; text: string } => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .trim();
+  try {
+    db.query("DELETE FROM entries_fts WHERE entry_id = ?").run(entryId);
+    if (text.length >= 3) db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?, ?, ?)").run(entryId, sessionId, text);
+  } catch {
+    // an older database without the FTS table keeps working; search falls back to LIKE
+  }
 }
 
 export function listEntries(db: Database, sessionId: string): Entry[] {

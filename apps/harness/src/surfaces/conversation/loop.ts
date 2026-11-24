@@ -1,7 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { EventLog } from "../../events/log";
-import { appendEntry, historyMessages, updateEntryParts, type Part } from "../../core/sessions";
-import { systemPrompt } from "../../core/context";
+import { appendEntry, updateEntryParts, type Part } from "../../core/sessions";
+import { getLeaf, pathEntries, setLeaf } from "../../core/tree";
+import { systemPrompt, buildContext } from "../../core/context";
+import { latestCompaction, maybeCompact } from "../../core/compaction";
 import { BASE_POLICY, decide, type PolicyRule } from "../../core/policy";
 import { leaseExpiry } from "../../core/run-state";
 import { ProviderError, type ChatMessage, type StreamFn } from "../../providers/openai";
@@ -33,6 +35,9 @@ export type ConversationDeps = {
   readonly policy?: readonly PolicyRule[];
   readonly limits?: TurnLimits;
   readonly now?: () => number;
+  /** Optional: enables threshold compaction of older turns. */
+  readonly summarize?: (transcript: string) => Promise<string>;
+  readonly maxChars?: number;
 };
 
 export type TurnResult = {
@@ -55,7 +60,14 @@ function reason(error: unknown): string {
  */
 export async function runTurn(
   deps: ConversationDeps,
-  input: { readonly sessionId: string; readonly text: string },
+  input: {
+    readonly sessionId: string;
+    readonly text: string;
+    /** false when the user entry already exists (edit or regenerate). */
+    readonly appendUser?: boolean;
+    /** parent for the assistant entry; defaults to the leaf. */
+    readonly parentId?: string | null;
+  },
 ): Promise<TurnResult> {
   const now = deps.now ?? Date.now;
   const limits = deps.limits ?? DEFAULT_LIMITS;
@@ -71,22 +83,33 @@ export async function runTurn(
     .run(runId, input.sessionId, input.text.slice(0, 4096), leaseExpiry(startedAt), JSON.stringify({ maxOutputTokens: limits.maxOutputTokens }), new Date(startedAt).toISOString());
   deps.events.append({ kind: "run.started", runId, sessionId: input.sessionId, payload: { runId }, now: startedAt });
 
-  const userEntry = appendEntry(deps.db, {
-    sessionId: input.sessionId,
-    kind: "message",
-    role: "user",
-    parts: [{ type: "text", text: input.text }],
-    now: startedAt,
-  });
+  let userEntryId: string;
+  if (input.appendUser === false) {
+    userEntryId = input.parentId ?? getLeaf(deps.db, input.sessionId) ?? "";
+    if (userEntryId.length === 0) throw new Error("no_parent_entry");
+    setLeaf(deps.db, input.sessionId, userEntryId);
+  } else {
+    const userEntry = appendEntry(deps.db, {
+      sessionId: input.sessionId,
+      parentId: input.parentId ?? getLeaf(deps.db, input.sessionId),
+      kind: "message",
+      role: "user",
+      parts: [{ type: "text", text: input.text }],
+      now: startedAt,
+    });
+    userEntryId = userEntry.id;
+    setLeaf(deps.db, input.sessionId, userEntryId);
+  }
   const assistantEntry = appendEntry(deps.db, {
     sessionId: input.sessionId,
     kind: "message",
     role: "assistant",
     status: "streaming",
     parts: [],
-    parentId: userEntry.id,
+    parentId: userEntryId,
     now: startedAt,
   });
+  setLeaf(deps.db, input.sessionId, assistantEntry.id);
   deps.events.append({
     kind: "message.started",
     runId,
@@ -94,7 +117,7 @@ export async function runTurn(
     payload: { entryId: assistantEntry.id },
     now: startedAt,
   });
-  deps.events.append({ kind: "turn.started", runId, sessionId: input.sessionId, payload: { userEntryId: userEntry.id }, now: startedAt });
+  deps.events.append({ kind: "turn.started", runId, sessionId: input.sessionId, payload: { userEntryId }, now: startedAt });
 
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(new Error("turn_timeout")), limits.totalMs);
@@ -102,11 +125,35 @@ export async function runTurn(
   let text = "";
 
   try {
-    const messages: ChatMessage[] = [
-      { role: "system", content: systemPrompt(startedAt) },
-      ...historyMessages(deps.db, input.sessionId).filter((message) => message.role !== "assistant" || message.content.length > 0),
-    ];
-    // The assistant placeholder is not history yet; make sure the new user text is present exactly once.
+    if (deps.summarize) {
+      await maybeCompact({
+        db: deps.db,
+        sessionId: input.sessionId,
+        summarize: deps.summarize,
+        maxChars: deps.maxChars ?? 24_000,
+        now: startedAt,
+      }).catch(() => ({ compacted: false }));
+    }
+    const compaction = latestCompaction(deps.db, input.sessionId);
+    const history = pathEntries(deps.db, input.sessionId, userEntryId)
+      .filter((entry) => entry.kind === "message" && (entry.role === "user" || entry.role === "assistant"))
+      .filter((entry) => !compaction || entry.seq > compaction.coversSeq)
+      .map((entry) => ({
+        role: entry.role === "user" ? ("user" as const) : ("assistant" as const),
+        content: entry.parts
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text)
+          .join(""),
+      }))
+      .filter((message) => message.content.length > 0);
+    const built = buildContext({
+      now: startedAt,
+      history,
+      tools: specs(deps.tools).map((tool) => ({ name: tool.name, description: tool.description })),
+      compaction,
+      ...(deps.maxChars === undefined ? {} : { budget: { maxChars: deps.maxChars } }),
+    });
+    const messages: ChatMessage[] = [{ role: "system", content: built.system }, ...built.messages];
     if (messages.at(-1)?.content !== input.text) messages.push({ role: "user", content: input.text });
 
     let round = 0;
@@ -210,7 +257,7 @@ export async function runTurn(
       if (text.length > 0) messages.push({ role: "assistant", content: text });
     }
 
-    updateEntryParts(deps.db, assistantEntry.id, parts, "complete");
+    updateEntryParts(deps.db, assistantEntry.id, parts, "complete", input.sessionId);
     deps.events.append({ kind: "message.completed", runId, sessionId: input.sessionId, payload: { entryId: assistantEntry.id }, now: now() });
     deps.events.append({ kind: "turn.settled", runId, sessionId: input.sessionId, payload: { entryId: assistantEntry.id }, now: now() });
     deps.db.query("UPDATE runs SET status = 'succeeded', settled_at = ?, result_json = ? WHERE id = ?").run(
@@ -224,7 +271,7 @@ export async function runTurn(
     const kind = reason(error);
     const interrupted = controller.signal.aborted;
     if (text.length > 0) parts.push({ type: "text", text: "" });
-    updateEntryParts(deps.db, assistantEntry.id, parts, interrupted ? "aborted" : "failed");
+    updateEntryParts(deps.db, assistantEntry.id, parts, interrupted ? "aborted" : "failed", input.sessionId);
     deps.events.append({
       kind: "message.aborted",
       runId,

@@ -105,4 +105,17 @@ CREATE TABLE saved_approvals (
 );
 `,
   },
+  {
+    version: 2,
+    sql: `
+ALTER TABLE sessions ADD COLUMN leaf_id TEXT;
+
+CREATE VIRTUAL TABLE entries_fts USING fts5(
+  entry_id UNINDEXED,
+  session_id UNINDEXED,
+  text,
+  tokenize = 'trigram'
+);
+`,
+  },
 ];

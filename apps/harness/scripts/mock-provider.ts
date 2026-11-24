@@ -37,6 +37,10 @@ const server = Bun.serve({
       return new Response("not found", { status: 404 });
     }
     const body = (await request.json()) as { messages?: { role: string; content: string }[] };
+    const capture = process.env["MOCK_CAPTURE"];
+    if (capture) {
+      await Bun.write(capture, JSON.stringify({ at: new Date().toISOString(), messages: body.messages ?? [] }, null, 1));
+    }
     const last = [...(body.messages ?? [])].reverse().find((message) => message.role === "user");
     const prompt = last?.content ?? "";
     const reply = `요청을 받았습니다: ${prompt.slice(0, 60)}. 스트리밍 응답입니다.`;

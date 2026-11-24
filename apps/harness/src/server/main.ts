@@ -18,6 +18,7 @@ export type HarnessConfig = {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;
+  readonly maxChars: number;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): HarnessConfig {
@@ -29,6 +30,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
     model: env["MODEL_NAME"] ?? "mock-model",
+    maxChars: Number(env["HARNESS_MAX_CHARS"] ?? "24000"),
   };
 }
 
@@ -38,7 +40,21 @@ export function createHarness(config: HarnessConfig): { deps: AppDeps; handler: 
   const events = new EventLog(db);
   const tools = createRegistry([]);
   const stream = openAiStream({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
-  const conversation = { db, events, stream, tools };
+  const summarize = async (transcript: string): Promise<string> => {
+    let summary = "";
+    for await (const event of stream(
+      [
+        { role: "system", content: "다음 대화를 나중에 맥락으로 쓸 수 있게 3~6문장으로 요약하세요. 사실만 남기고 추측은 넣지 마세요." },
+        { role: "user", content: transcript },
+      ],
+      [],
+      { maxOutputTokens: 512, firstTokenTimeoutMs: 30_000, idleTimeoutMs: 60_000 },
+    )) {
+      if (event.type === "text_delta") summary += event.text;
+    }
+    return summary;
+  };
+  const conversation = { db, events, stream, tools, summarize, maxChars: config.maxChars };
   const deps: AppDeps = { db, events, conversation, webRoot: config.webRoot };
   return { deps, handler: createApp(deps), close: () => db.close() };
 }

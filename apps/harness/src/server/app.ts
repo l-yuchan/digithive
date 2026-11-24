@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
-import { createSession, getSession, listEntries, listSessions } from "../core/sessions";
-import type { ConversationDeps } from "../surfaces/conversation/loop";
+import { createSession, getSession, listSessions, renameSession, softDeleteSession } from "../core/sessions";
+import { deepestDescendant, editUserMessage, forkSession, pathEntries, regeneratePoint, searchSessions, setLeaf, siblings } from "../core/tree";
 import { runTurn } from "../surfaces/conversation/loop";
+import type { ConversationDeps } from "../surfaces/conversation/loop";
 
 export type AppDeps = {
   readonly db: Database;
@@ -32,7 +33,7 @@ function sse(request: Request, deps: AppDeps, after: number, sessionId: string |
       };
       const snapshot = {
         sessions: listSessions(deps.db),
-        entries: sessionId ? listEntries(deps.db, sessionId) : [],
+        entries: sessionId ? withBranches(deps.db, sessionId) : [],
         lastSeq: deps.events.lastSeq(),
       };
       controller.enqueue(encoder.encode(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`));
@@ -71,14 +72,30 @@ function sse(request: Request, deps: AppDeps, after: number, sessionId: string |
   });
 }
 
+/** Active branch only, with sibling counts so the client can offer a branch switcher. */
+function withBranches(db: Database, sessionId: string) {
+  return pathEntries(db, sessionId).map((entry) => {
+    const group = siblings(db, sessionId, entry.id);
+    return {
+      ...entry,
+      siblingCount: group.length,
+      siblingIndex: group.findIndex((sibling) => sibling.id === entry.id) + 1,
+      siblingIds: group.map((sibling) => sibling.id),
+    };
+  });
+}
+
 async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
   const file = pathname === "/" || pathname === "" ? "index.html" : pathname.replace(/^\/+/, "");
   if (file.includes("..")) return new Response("not found", { status: 404 });
-  const candidates = [deps.webRoot, `${deps.webRoot}/assets`];
-  for (const root of candidates) {
+  for (const root of [deps.webRoot, `${deps.webRoot}/assets`]) {
     const handle = Bun.file(`${root}/${file}`);
     if (await handle.exists()) {
-      const type = file.endsWith(".js") ? "text/javascript; charset=utf-8" : file.endsWith(".css") ? "text/css; charset=utf-8" : "text/html; charset=utf-8";
+      const type = file.endsWith(".js")
+        ? "text/javascript; charset=utf-8"
+        : file.endsWith(".css")
+          ? "text/css; charset=utf-8"
+          : "text/html; charset=utf-8";
       return new Response(handle, { headers: { "content-type": type, "cache-control": "no-cache" } });
     }
   }
@@ -86,6 +103,12 @@ async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
 }
 
 export function createApp(deps: AppDeps): (request: Request) => Promise<Response> {
+  const start = (sessionId: string, text: string, extra: { appendUser?: boolean; parentId?: string | null } = {}) => {
+    void runTurn(deps.conversation, { sessionId, text, ...extra }).catch((error: unknown) => {
+      console.error("turn failed", error);
+    });
+  };
+
   return async (request) => {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -99,13 +122,64 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/sessions") {
-      if (request.method === "GET") return json({ sessions: listSessions(deps.db) });
+      if (request.method === "GET") {
+        const query = url.searchParams.get("q");
+        if (query && query.trim().length > 0) return json({ sessions: searchSessions(deps.db, query) });
+        return json({ sessions: listSessions(deps.db) });
+      }
       if (request.method === "POST") {
         const raw = (await request.json().catch(() => ({}))) as { title?: unknown };
         const title = typeof raw.title === "string" && raw.title.trim().length > 0 ? raw.title.trim() : "새 대화";
         const session = createSession(deps.db, title);
         deps.events.append({ kind: "session.created", sessionId: session.id, payload: { id: session.id, title: session.title } });
         return json(session, 201);
+      }
+    }
+
+    const entryMatch = /^\/api\/sessions\/([^/]+)\/entries\/([^/]+)\/(edit|regenerate|leaf)$/.exec(path);
+    if (entryMatch && request.method === "POST") {
+      const sessionId = entryMatch[1] ?? "";
+      const entryId = entryMatch[2] ?? "";
+      const action = entryMatch[3];
+      if (!getSession(deps.db, sessionId)) return json({ error: "session_not_found" }, 404);
+      try {
+        if (action === "edit") {
+          const raw = (await request.json().catch(() => null)) as { text?: unknown } | null;
+          const text = typeof raw?.text === "string" ? raw.text.trim() : "";
+          if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
+          const result = editUserMessage(deps.db, { sessionId, entryId, text });
+          deps.events.append({ kind: "context.edited", sessionId, payload: { entryId: result.entry.id, replaced: entryId } });
+          start(sessionId, text, { appendUser: false, parentId: result.entry.id });
+          return json({ entryId: result.entry.id }, 202);
+        }
+        if (action === "regenerate") {
+          const point = regeneratePoint(deps.db, { sessionId, entryId });
+          start(sessionId, point.userText, { appendUser: false, parentId: point.parentId });
+          return json({ parentId: point.parentId }, 202);
+        }
+        const raw = (await request.json().catch(() => null)) as { entryId?: unknown } | null;
+        const leaf = typeof raw?.entryId === "string" ? raw.entryId : null;
+        if (!leaf) return json({ error: "invalid_leaf" }, 422);
+        const target = deepestDescendant(deps.db, sessionId, leaf);
+        setLeaf(deps.db, sessionId, target);
+        return json({ leaf: target });
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "failed" }, 409);
+      }
+    }
+
+    const forkMatch = /^\/api\/sessions\/([^/]+)\/fork$/.exec(path);
+    if (forkMatch && request.method === "POST") {
+      const sessionId = forkMatch[1] ?? "";
+      const raw = (await request.json().catch(() => null)) as { entryId?: unknown; title?: unknown } | null;
+      const entryId = typeof raw?.entryId === "string" ? raw.entryId : "";
+      const title = typeof raw?.title === "string" ? raw.title : "분기 대화";
+      try {
+        const forked = forkSession(deps.db, { sessionId, entryId, title });
+        deps.events.append({ kind: "session.created", sessionId: forked.sessionId, payload: { id: forked.sessionId, title } });
+        return json(forked, 201);
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "failed" }, 409);
       }
     }
 
@@ -116,16 +190,27 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       if (!session) return json({ error: "session_not_found" }, 404);
 
       if (sessionMatch[2] === "entries" && request.method === "GET") {
-        return json({ entries: listEntries(deps.db, id) });
+        return json({ entries: withBranches(deps.db, id) });
       }
       if (sessionMatch[2] === "messages" && request.method === "POST") {
         const raw = (await request.json().catch(() => null)) as { text?: unknown } | null;
         const text = typeof raw?.text === "string" ? raw.text.trim() : "";
         if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
-        void runTurn(deps.conversation, { sessionId: id, text }).catch((error: unknown) => {
-          console.error("turn failed", error);
-        });
+        start(id, text);
         return json({ accepted: true }, 202);
+      }
+      if (sessionMatch[2] === undefined && request.method === "PATCH") {
+        const raw = (await request.json().catch(() => null)) as { title?: unknown } | null;
+        const title = typeof raw?.title === "string" ? raw.title : "";
+        const renamed = renameSession(deps.db, id, title);
+        if (!renamed) return json({ error: "invalid_title" }, 422);
+        deps.events.append({ kind: "session.renamed", sessionId: id, payload: { title: renamed.title } });
+        return json(renamed);
+      }
+      if (sessionMatch[2] === undefined && request.method === "DELETE") {
+        const result = softDeleteSession(deps.db, id);
+        deps.events.append({ kind: "session.deleted", sessionId: id, payload: { cancelledRuns: result.cancelledRuns } });
+        return json({ deleted: true, cancelledRuns: result.cancelledRuns });
       }
     }
 

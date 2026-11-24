@@ -247,3 +247,106 @@ button.primary:disabled {
     padding: 10px;
   }
 }
+
+.search {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #2b3444;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-row .session-item {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.icon:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.icon.danger {
+  color: #ff9b9b;
+}
+
+.link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 6px 0 0;
+}
+
+.link:hover {
+  color: var(--accent);
+}
+
+.branches {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0.75;
+}
+
+.actions:hover {
+  opacity: 1;
+}
+
+.edit-form,
+.rename-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rename-form {
+  flex-direction: row;
+  flex: 1;
+}
+
+.rename-form input,
+.edit-form textarea {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #2b3444;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.edit-form .row {
+  display: flex;
+  gap: 6px;
+}
+
