@@ -80,10 +80,10 @@ docker compose up -d --build
 
 ## CI/CD (GitHub Actions)
 
-| 워크플로 | 트리거 | 하는 일 |
-|---|---|---|
-| `ci` | `main` push, PR, 수동 | `apps/harness`에서 `bun install --frozen-lockfile` → lint → typecheck → build:web → test → fmt:check, 그리고 push 없이 `docker build` |
-| `cd` | `main` push, 수동 | `ghcr.io/<owner>/digithive-harness:<sha>`·`:latest` 발행 → mini 러너에서 배포 |
+| 워크플로 | 트리거                | 하는 일                                                                                                                               |
+| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci`     | `main` push, PR, 수동 | `apps/harness`에서 `bun install --frozen-lockfile` → lint → typecheck → build:web → test → fmt:check, 그리고 push 없이 `docker build` |
+| `cd`     | `main` push, 수동     | `ghcr.io/<owner>/digithive-harness:<sha>`·`:latest` 발행 → mini 러너에서 배포                                                         |
 
 배포 job은 `runs-on: [self-hosted, mini]`에서 돈다(서버가 LAN에 있어
 GitHub 호스티드 러너가 직접 닿지 못한다). 순서:
@@ -102,6 +102,7 @@ passwordless sudo가 없고 libicu가 빠져 있어 실행 시
 재부팅 후에도 살아 있으려면 소유자가 한 번
 `sudo loginctl enable-linger leefam`을 실행한 뒤
 `systemctl --user enable --now actions-runner`를 켜야 한다.
+
 - 운영 DB는 볼륨 `deploy_harness-data`(/data). v2 데이터는 `bun scripts/migrate-v2.ts --from <v2.db> --to /data/harness.db`로 옮긴다.
 
 ## 연동 환경변수
