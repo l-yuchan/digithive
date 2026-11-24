@@ -3,3 +3,7 @@ backups/
 public/app.js
 node_modules/
 .env
+
+# agent working state (local evidence, not source)
+.omo/evidence/
+.omo/handoffs/
