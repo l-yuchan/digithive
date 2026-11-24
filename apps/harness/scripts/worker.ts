@@ -14,7 +14,7 @@ const { createRuntime } = await import("../src/runtime");
 const runtime = createRuntime(config);
 const { db, events } = runtime.work;
 const owner = `worker-${process.pid}`;
-let stopping = false;
+const stopping = new AbortController();
 
 const google = {
   db,
@@ -26,10 +26,10 @@ const canvas = { db, events, config: { baseUrl: config.canvasBaseUrl, token: con
 const vapid = { publicKey: config.vapidPublicKey, privateKey: config.vapidPrivateKey, subject: config.vapidSubject };
 
 process.on("SIGINT", () => {
-  stopping = true;
+  stopping.abort();
 });
 process.on("SIGTERM", () => {
-  stopping = true;
+  stopping.abort();
 });
 
 console.log(`worker ${owner} started (model ${config.model}, max concurrent ${config.maxConcurrent})`);
@@ -37,7 +37,7 @@ console.log(`worker ${owner} started (model ${config.model}, max concurrent ${co
 let lastSync = 0;
 const SYNC_INTERVAL_MS = 15 * 60_000;
 
-while (!stopping) {
+while (!stopping.signal.aborted) {
   const reconciled = reconcileWork(db, events);
   if (reconciled.expiredApprovals > 0 || reconciled.interrupted > 0) {
     console.log(`reconciled: expired=${reconciled.expiredApprovals} interrupted=${reconciled.interrupted}`);

@@ -1,6 +1,7 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import { BRIEFING_SLOTS, TIMEZONE } from "./briefing";
+import { z } from "zod";
 
 export type BriefingContent = {
   readonly slot: string;
@@ -10,6 +11,11 @@ export type BriefingContent = {
   readonly mail: readonly { id: string; title: string; at: string | null; detail: string }[];
   readonly text: string;
 };
+const BriefingItemSchema = z.object({ id: z.string(), title: z.string(), at: z.string().nullable(), detail: z.string() });
+const BriefingContentSchema = z.object({
+  slot: z.string(), generatedAt: z.string(), events: z.array(BriefingItemSchema),
+  assignments: z.array(BriefingItemSchema), mail: z.array(BriefingItemSchema), text: z.string(),
+});
 
 function kstDay(now: number): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now));
@@ -52,13 +58,13 @@ export function dueSlot(now: number, windowMinutes = 10): { slot: string; day: s
 function rows(db: Database, source: string, from: number, until: number, limit: number): { id: string; title: string; at: string | null; detail: string }[] {
   return (
     db
-      .query("SELECT item_id, title, at, detail FROM sync_items WHERE source = ? AND (at IS NULL OR (at >= ? AND at <= ?)) ORDER BY at LIMIT ?")
-      .all(source, new Date(from).toISOString(), new Date(until).toISOString(), limit) as Record<string, unknown>[]
+      .query<{ item_id: string; title: string; at: string | null; detail: string | null }, SQLQueryBindings[]>("SELECT item_id, title, at, detail FROM sync_items WHERE source = ? AND (at IS NULL OR (at >= ? AND at <= ?)) ORDER BY at LIMIT ?")
+      .all(source, new Date(from).toISOString(), new Date(until).toISOString(), limit)
   ).map((row) => ({
-    id: String(row["item_id"]),
-    title: String(row["title"]),
-    at: row["at"] === null ? null : String(row["at"]),
-    detail: String(row["detail"] ?? ""),
+    id: (row["item_id"]),
+    title: (row["title"]),
+    at: row["at"] === null ? null : (row["at"]),
+    detail: (row["detail"] ?? ""),
   }));
 }
 
@@ -95,12 +101,10 @@ export function storeBriefing(db: Database, content: BriefingContent, now: numbe
 }
 
 export function latestBriefing(db: Database): { slot: string; content: BriefingContent; createdAt: string } | null {
-  const row = db.query("SELECT slot, content_json, created_at FROM briefings ORDER BY created_at DESC LIMIT 1").get() as
-    | { slot: string; content_json: string; created_at: string }
-    | null;
+  const row = db.query<{ slot: string; content_json: string; created_at: string }, SQLQueryBindings[]>("SELECT slot, content_json, created_at FROM briefings ORDER BY created_at DESC LIMIT 1").get();
   if (!row) return null;
   try {
-    return { slot: row.slot, content: JSON.parse(row.content_json) as BriefingContent, createdAt: row.created_at };
+    return { slot: row.slot, content: BriefingContentSchema.parse(JSON.parse(row.content_json)), createdAt: row.created_at };
   } catch {
     return null;
   }

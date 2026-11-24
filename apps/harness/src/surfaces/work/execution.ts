@@ -1,25 +1,28 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../../events/log";
 import { specs } from "../../tools/registry";
-import type { AdapterEvent, ChatMessage } from "../../providers/openai";
-import { WORK_LIMITS, type WorkDeps, type RunRow, type DelegateFields } from "./runner";
+import { WORK_LIMITS, type WorkDeps, type RunRow } from "./runner";
 import { keepLease, ownsLease } from "./lease";
 import { executeTool, toolDecision } from "./tool";
+import { ChatMessageSchema } from "../../core/contracts";
+import { z } from "zod";
 
-type WorkState = {
-  messages: ChatMessage[];
-  pending?: { callId: string; name: string; arguments: string; approvalId: string };
-  remaining?: { id: string; name: string; arguments: string }[];
-  toolCallsUsed?: number;
-  roundsUsed?: number;
-};
+const WorkStateSchema = z.object({
+  messages: z.array(ChatMessageSchema),
+  pending: z.object({ callId: z.string(), name: z.string(), arguments: z.string(), approvalId: z.string() }).optional(),
+  remaining: z.array(z.object({ id: z.string(), name: z.string(), arguments: z.string() })).optional(),
+  toolCallsUsed: z.number().optional(), roundsUsed: z.number().optional(),
+});
+type WorkState = z.infer<typeof WorkStateSchema>;
+const BudgetSchema = z.object({
+  inputRefs: z.array(z.string()).optional(), completionCondition: z.string().optional(), permissionProfile: z.string().optional(),
+  budget: z.object({ maxToolCalls: z.number(), maxMicroUsd: z.number() }).optional(), maxToolCalls: z.number().optional(),
+});
 
 function parseState(run: RunRow): WorkState {
   if (!run.stateJson) return { messages: [{ role: "user", content: run.goal }] };
   try {
-    const parsed = JSON.parse(run.stateJson) as WorkState;
-    if (!Array.isArray(parsed.messages)) return { messages: [{ role: "user", content: run.goal }] };
-    return parsed;
+    return WorkStateSchema.parse(JSON.parse(run.stateJson));
   } catch {
     return { messages: [{ role: "user", content: run.goal }] };
   }
@@ -29,7 +32,7 @@ function saveState(db: Database, run: RunRow, state: WorkState): void {
   db.query("UPDATE runs SET state_json = ? WHERE id = ? AND status='running' AND lease_owner=?").run(JSON.stringify(state), run.id, run.leaseOwner);
 }
 
-function settle(db: Database, events: EventLog, run: RunRow, status: "succeeded" | "failed" | "interrupted", payload: Record<string, unknown>, now: number): void {
+function settle(db: Database, events: EventLog, run: RunRow, status: "succeeded" | "failed" | "interrupted", payload: { text?: string; error?: string }, now: number): void {
   const changed = db.query("UPDATE runs SET status = ?, lease_owner = NULL, lease_expires_at = NULL, settled_at = ?, result_json = ? WHERE id = ? AND status = 'running' AND lease_owner = ?").run(
     status,
     new Date(now).toISOString(),
@@ -50,7 +53,7 @@ function settle(db: Database, events: EventLog, run: RunRow, status: "succeeded"
       kind: "run.progress",
       runId: run.parentRunId,
       sessionId: run.sessionId,
-      payload: { childRunId: run.id, status, summary: String(payload["text"] ?? payload["error"] ?? "").slice(0, 200) },
+      payload: { childRunId: run.id, status, summary: (payload["text"] ?? payload["error"] ?? "").slice(0, 200) },
       now,
     });
   }
@@ -66,7 +69,7 @@ export async function executeRun(deps: WorkDeps, run: RunRow): Promise<"succeede
   const limits = deps.limits ?? WORK_LIMITS;
   const state = parseState(run);
   const lease = keepLease(deps.db, deps.events, run, deps.leaseMs ?? 45_000, limits.totalMs, now);
-  const contract = JSON.parse(run.budgetJson) as Partial<DelegateFields> & { maxToolCalls?: number };
+  const contract = BudgetSchema.parse(JSON.parse(run.budgetJson));
   if (state.messages.length === 1 && contract.completionCondition) {
     state.messages.unshift({ role: "system", content: `Input references: ${JSON.stringify(contract.inputRefs)}\nCompletion condition: ${contract.completionCondition}\nPermission profile: ${contract.permissionProfile}` });
   }
@@ -86,7 +89,7 @@ export async function executeRun(deps: WorkDeps, run: RunRow): Promise<"succeede
   try {
     if (state.pending) {
       assertActive();
-      const approval = deps.db.query("SELECT status FROM approvals WHERE id = ?").get(state.pending.approvalId) as { status: string } | null;
+      const approval = deps.db.query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM approvals WHERE id = ?").get(state.pending.approvalId);
       const call = { id: state.pending.callId, name: state.pending.name, arguments: state.pending.arguments };
       const permitted = toolDecision(deps, call, contract.permissionProfile) !== "deny";
       if (approval?.status === "approved" && permitted) {
@@ -116,7 +119,7 @@ export async function executeRun(deps: WorkDeps, run: RunRow): Promise<"succeede
         idleTimeoutMs: limits.idleMs,
         signal: lease.signal,
         })) {
-        const typed = event as AdapterEvent;
+        const typed = event;
         if (typed.type === "text_delta") {
           text += typed.text;
           deps.events.append({ kind: "message.delta", runId: run.id, sessionId: run.sessionId, payload: { text: typed.text }, now: now() });

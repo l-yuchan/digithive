@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { unlinkSync } from "node:fs";
 import { migrate, openDatabase } from "../src/store/db";
 import { MIGRATIONS } from "../src/store/migrations";
@@ -15,13 +15,13 @@ describe("store migrations", () => {
   test("fresh migration creates the core storage tables at the latest schema version", () => {
     const db = memoryDb();
     const names = db
-      .query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .query<{ name: string }, SQLQueryBindings[]>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all()
-      .map((row) => (row as { name: string }).name);
+      .map((row) => row.name);
     for (const table of ["approvals", "entries", "events", "parts", "runs", "saved_approvals", "sessions", "tool_calls"]) {
       expect(names).toContain(table);
     }
-    expect((db.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(MIGRATIONS.length);
+    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
   });
 
   test("re-running migrate applies nothing", () => {
@@ -45,7 +45,7 @@ describe("store migrations", () => {
     const first = openDatabase(path);
     first.close();
     const second = openDatabase(path);
-    expect((second.query("PRAGMA user_version").get() as { user_version: number }).user_version).toBe(MIGRATIONS.length);
+    expect(second.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
     second.close();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {

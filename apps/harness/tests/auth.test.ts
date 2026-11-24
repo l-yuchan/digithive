@@ -11,6 +11,7 @@ import { COOKIE_NAME, checkPassphrase, isPublicRoute, issueCookie, readCookie, v
 import type { StreamFn } from "../src/providers/openai";
 import type { ConversationDeps } from "../src/surfaces/conversation/loop";
 import type { WorkDeps } from "../src/surfaces/work/runner";
+import { z } from "zod";
 
 const auth = { passphrase: "correct horse", secret: "test-secret-value" };
 const idle: StreamFn = async function* () {};
@@ -118,12 +119,12 @@ describe("auth gate on the server", () => {
 
   test("delegation API rejects missing and non-finite budgets instead of creating a child", async () => {
     const fixture = deps({ passphrase: "" });
-    const app = createApp(fixture);
-    const parent = await app(new Request("http://local/api/runs", { method: "POST", body: JSON.stringify({ goal: "parent" }) }));
-    const body = await parent.json();
+    const delegationApp = createApp(fixture);
+    const parent = await delegationApp(new Request("http://local/api/runs", { method: "POST", body: JSON.stringify({ goal: "parent" }) }));
+    const body = z.object({ id: z.string() }).parse(await parent.json());
     expect(parent.status).toBe(201);
     for (const budget of [undefined, {}, { maxMicroUsd: -1, maxToolCalls: 1 }]) {
-      const result = await app(new Request(`http://local/api/runs/${body.id}/delegate`, { method: "POST", body: JSON.stringify({
+      const result = await delegationApp(new Request(`http://local/api/runs/${body.id}/delegate`, { method: "POST", body: JSON.stringify({
         goal: "child", inputRefs: ["mail:1"], completionCondition: "done", permissionProfile: "read-only", budget,
       }) }));
       expect(result.status).toBe(422);

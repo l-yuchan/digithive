@@ -1,7 +1,8 @@
+import { ok } from "node:assert/strict";
 import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { migrate } from "../src/store/db";
-import { RUN_STATUSES, canTransition, isLeaseExpired, leaseExpiry, settleExpiredRuns } from "../src/core/run-state";
+import { RUN_STATUSES, canTransition, isLeaseExpired, leaseExpiry, settleExpiredRuns, type RunStatus } from "../src/core/run-state";
 
 function db(): Database {
   const database = new Database(":memory:");
@@ -21,7 +22,7 @@ function insertRun(database: Database, id: string, status: string, expiresAt: st
 
 describe("run state machine", () => {
   test("allows the documented transitions and nothing else", () => {
-    const allowed: [string, string][] = [
+    const allowed: [RunStatus, RunStatus][] = [
       ["queued", "running"],
       ["queued", "cancelled"],
       ["running", "awaiting_approval"],
@@ -34,9 +35,9 @@ describe("run state machine", () => {
       ["awaiting_approval", "interrupted"],
     ];
     for (const [from, to] of allowed) {
-      expect(canTransition(from as never, to as never)).toBe(true);
+      expect(canTransition(from, to)).toBe(true);
     }
-    const forbidden: [string, string][] = [
+    const forbidden: [RunStatus, RunStatus][] = [
       ["succeeded", "running"],
       ["cancelled", "running"],
       ["interrupted", "running"],
@@ -44,7 +45,7 @@ describe("run state machine", () => {
       ["failed", "awaiting_approval"],
     ];
     for (const [from, to] of forbidden) {
-      expect(canTransition(from as never, to as never)).toBe(false);
+      expect(canTransition(from, to)).toBe(false);
     }
   });
 
@@ -65,17 +66,19 @@ describe("run state machine", () => {
     const settled = settleExpiredRuns(database, now);
     expect(settled).toEqual(["dead"]);
 
-    const dead = database.query("SELECT status, cancel_intent, settled_at FROM runs WHERE id = 'dead'").get() as {
+    const dead = database.query<{
       status: string;
       cancel_intent: string;
       settled_at: string;
-    };
+    }, SQLQueryBindings[]>("SELECT status, cancel_intent, settled_at FROM runs WHERE id = 'dead'").get();
+    ok(dead, "fixture row exists");
     expect(dead.status).toBe("interrupted");
     expect(dead.cancel_intent).toBe("host_restart");
     expect(dead.settled_at).not.toBeNull();
 
-    const alive = database.query("SELECT status FROM runs WHERE id = 'alive'").get() as { status: string };
+    const alive = database.query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = 'alive'").get();
+    ok(alive, "fixture row exists");
     expect(alive.status).toBe("running");
-    expect(RUN_STATUSES).toContain("interrupted" as never);
+    expect(RUN_STATUSES).toContain("interrupted");
   });
 });

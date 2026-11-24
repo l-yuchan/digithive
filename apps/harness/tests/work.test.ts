@@ -1,5 +1,7 @@
+import { z } from "zod";
+import { ok } from "node:assert/strict";
 import { afterEach, describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -25,6 +27,12 @@ afterEach(() => {
     rmSync(resource.root, { recursive: true, force: true });
   }
 });
+
+function requiredClaim(...args: Parameters<typeof claimNext>) {
+  const run = claimNext(...args);
+  ok(run, "fixture worker claims a run");
+  return run;
+}
 
 function scripted(steps: AdapterEvent[][]): StreamFn {
   let index = 0;
@@ -66,10 +74,10 @@ describe("work runner", () => {
     const run = enqueueRun(db, events, { goal: "메모를 파일로 남겨줘" });
     expect(run.status).toBe("queued");
 
-    const claimed = claimNext(db, events, "w1");
+    const claimed = requiredClaim(db, events, "w1");
     expect(claimed?.status).toBe("running");
     expect(claimed?.leaseOwner).toBe("w1");
-    const outcome = await executeRun(deps, claimed!);
+    const outcome = await executeRun(deps, claimed);
     expect(outcome).toBe("succeeded");
 
     const settled = getRun(db, run.id);
@@ -91,17 +99,18 @@ describe("work runner", () => {
       [{ type: "text_delta", text: "발송 절차를 마쳤습니다." }, { type: "done", finishReason: "stop" }],
     ]);
     const run = enqueueRun(db, events, { goal: "메일을 보내줘" });
-    const claimed = claimNext(db, events, "w1")!;
+    const claimed = requiredClaim(db, events, "w1");
     expect(await executeRun(deps, claimed)).toBe("paused");
 
     const paused = getRun(db, run.id);
     expect(paused?.status).toBe("awaiting_approval");
-    const approval = db.query("SELECT id, status FROM approvals WHERE run_id = ?").get(run.id) as { id: string; status: string };
+    const approval = db.query<{ id: string; status: string }, SQLQueryBindings[]>("SELECT id, status FROM approvals WHERE run_id = ?").get(run.id);
+    ok(approval, "fixture row exists");
     expect(approval.status).toBe("pending");
     expect(events.after(0).map((event) => event.kind)).toContain("approval.requested");
 
     decideApproval({ db, events }, { runId: run.id, approvalId: approval.id, decision: "approve" });
-    const resumed = claimNext(db, events, "w2")!;
+    const resumed = requiredClaim(db, events, "w2");
     expect(resumed.id).toBe(run.id);
     expect(await executeRun(deps, resumed)).toBe("succeeded");
     expect(getRun(db, run.id)?.status).toBe("succeeded");
@@ -113,13 +122,14 @@ describe("work runner", () => {
       [{ type: "text_delta", text: "게시하지 않았습니다." }, { type: "done", finishReason: "stop" }],
     ]);
     const run = enqueueRun(db, events, { goal: "게시해줘" });
-    await executeRun(deps, claimNext(db, events, "w1")!);
-    const approval = db.query("SELECT id FROM approvals WHERE run_id = ?").get(run.id) as { id: string };
+    await executeRun(deps, requiredClaim(db, events, "w1"));
+    const approval = db.query<{ id: string }, SQLQueryBindings[]>("SELECT id FROM approvals WHERE run_id = ?").get(run.id);
+    ok(approval, "fixture row exists");
     decideApproval({ db, events }, { runId: run.id, approvalId: approval.id, decision: "reject" });
 
-    const resumed = claimNext(db, events, "w2")!;
+    const resumed = requiredClaim(db, events, "w2");
     expect(await executeRun(deps, resumed)).toBe("succeeded");
-    const state = JSON.parse(getRun(db, run.id)?.stateJson ?? "{}") as { messages: { role: string; content: string }[] };
+    const state = z.object({ messages: z.array(z.object({ role: z.string(), content: z.string() })) }).parse(JSON.parse(getRun(db, run.id)?.stateJson ?? "{}"));
     expect(state.messages.some((message) => message.role === "tool" && message.content.includes("거부"))).toBe(true);
     expect(events.after(0).map((event) => event.kind)).toContain("tool.denied");
   });
@@ -129,7 +139,7 @@ describe("work runner", () => {
       [{ type: "tool_call", id: "c1", name: "external_action", arguments: JSON.stringify({ summary: "게시" }) }, { type: "done", finishReason: "tool_calls" }],
     ]);
     const run = enqueueRun(db, events, { goal: "게시해줘" });
-    await executeRun(deps, claimNext(db, events, "w1")!);
+    await executeRun(deps, requiredClaim(db, events, "w1"));
 
     const paused = getRun(db, run.id);
     expect(paused?.status).toBe("awaiting_approval");
@@ -162,7 +172,7 @@ describe("work runner", () => {
   });
 
   test("delegation requires all five fields", () => {
-    expect(validateDelegation({ goal: "조사" }).sort()).toEqual(["budget", "completionCondition", "inputRefs", "permissionProfile"]);
+    expect(validateDelegation({ goal: "조사" }).toSorted()).toEqual(["budget", "completionCondition", "inputRefs", "permissionProfile"]);
     expect(
       validateDelegation({
         goal: "조사",
@@ -181,13 +191,13 @@ describe("work runner", () => {
     expect(child.parentRunId).toBe(parent.id);
     db.query("UPDATE runs SET status = 'succeeded' WHERE id = ?").run(parent.id);
 
-    const claimed = claimNext(db, events, "w1", 2);
+    const claimed = requiredClaim(db, events, "w1", 2);
     expect(claimed?.id).toBe(child.id);
-    expect(await executeRun(deps, claimed!)).toBe("succeeded");
+    expect(await executeRun(deps, claimed)).toBe("succeeded");
 
     const progress = events.after(0).filter((event) => event.kind === "run.progress");
     expect(progress).toHaveLength(1);
-    const payload = progress[0]?.payload as { childRunId: string; status: string; summary: string };
+    const payload = z.object({ childRunId: z.string(), status: z.string(), summary: z.string() }).parse(progress[0]?.payload);
     expect(payload.childRunId).toBe(child.id);
     expect(payload.status).toBe("succeeded");
     expect(payload.summary).toBe("조사 끝");

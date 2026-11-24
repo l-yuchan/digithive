@@ -14,7 +14,7 @@ export function saveItems(db: Database, source: string, items: readonly Normaliz
 
 export function recordOutcome(
   input: { readonly db: Database; readonly events: EventLog; readonly now?: () => number },
-  source: string,
+  source: SyncOutcome["source"],
   ok: boolean,
   count: number,
   cursor: string | null,
@@ -28,5 +28,5 @@ export function recordOutcome(
     )
     .run(source, cursor, iso, ok ? 1 : 0, error, JSON.stringify({ count }));
   input.events.append({ kind: "integration.sync_state", payload: { source, ok, count, error }, now });
-  return { source: source as SyncOutcome["source"], ok, count, cursor, error };
+  return { source, ok, count, cursor, error };
 }

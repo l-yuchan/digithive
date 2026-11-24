@@ -1,5 +1,7 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { z } from "zod";
 import type { PushSubscription } from "web-push";
+const PushSubscriptionSchema = z.object({ endpoint: z.string().min(1), keys: z.object({ p256dh: z.string(), auth: z.string() }) });
 
 export type PushConfig = {
   readonly publicKey: string;
@@ -16,10 +18,9 @@ export type Deliver = (subscription: PushSubscriptionRow, job: PushConfig, paylo
 export type PushOutcome = { readonly sent: number; readonly failed: number; readonly errors: string[] };
 
 export function addSubscription(db: Database, subscription: unknown, now = Date.now()): { id: string; duplicate: boolean } {
-  const parsed = subscription as { endpoint?: unknown };
-  const endpoint = typeof parsed?.endpoint === "string" ? parsed.endpoint : "";
+  const endpoint = z.object({ endpoint: z.string() }).safeParse(subscription).data?.endpoint ?? "";
   if (endpoint.length === 0) throw new Error("missing_endpoint");
-  const existing = db.query("SELECT id FROM push_subscriptions WHERE endpoint = ?").get(endpoint) as { id: string } | null;
+  const existing = db.query<{ id: string }, SQLQueryBindings[]>("SELECT id FROM push_subscriptions WHERE endpoint = ?").get(endpoint);
   if (existing) return { id: existing.id, duplicate: true };
   const id = crypto.randomUUID();
   db.query("INSERT INTO push_subscriptions (id, endpoint, payload, created_at) VALUES (?,?,?,?)").run(
@@ -32,7 +33,7 @@ export function addSubscription(db: Database, subscription: unknown, now = Date.
 }
 
 export function subscriptions(db: Database): PushSubscriptionRow[] {
-  return db.query("SELECT id, endpoint, payload FROM push_subscriptions").all() as PushSubscriptionRow[];
+  return db.query<PushSubscriptionRow, SQLQueryBindings[]>("SELECT id, endpoint, payload FROM push_subscriptions").all();
 }
 
 export function pushConfigured(config: PushConfig): boolean {
@@ -46,14 +47,14 @@ type WebPushModule = {
 
 /** web-push is CommonJS; load it lazily so tests and the API never pay for it. */
 async function loadWebPush(): Promise<WebPushModule> {
-  const loaded = (await import("web-push")) as unknown as { default?: WebPushModule } & WebPushModule;
+  const loaded = await import("web-push");
   return loaded.default ?? loaded;
 }
 
 const defaultDeliver: Deliver = async (row, config, payload) => {
   const webpush = await loadWebPush();
   webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
-  await webpush.sendNotification(JSON.parse(row.payload) as PushSubscription, JSON.stringify(payload));
+  await webpush.sendNotification(PushSubscriptionSchema.parse(JSON.parse(row.payload)), JSON.stringify(payload));
 };
 
 /**

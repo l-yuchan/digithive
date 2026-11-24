@@ -32,7 +32,7 @@ describe("openai streaming adapter", () => {
     const events = await collect(
       openAiStream(config)([{ role: "user", content: "hi" }], [], {
         ...options,
-        fetchImpl: (async () => sseResponse(frames)) as unknown as typeof fetch,
+        fetchImpl: Object.assign((async () => sseResponse(frames)), { preconnect: fetch.preconnect }),
       }),
     );
     expect(events.filter((event) => event.type === "text_delta").map((event) => (event as { text: string }).text)).toEqual(["안", "녕"]);
@@ -47,7 +47,7 @@ describe("openai streaming adapter", () => {
       "data: [DONE]\n\n",
     ];
     const events = await collect(
-      openAiStream(config)([{ role: "user", content: "hi" }], [], { ...options, fetchImpl: (async () => sseResponse(frames)) as unknown as typeof fetch }),
+      openAiStream(config)([{ role: "user", content: "hi" }], [], { ...options, fetchImpl: Object.assign((async () => sseResponse(frames)), { preconnect: fetch.preconnect }) }),
     );
     const call = events.find((event) => event.type === "tool_call");
     expect(call).toEqual({ type: "tool_call", id: "call_a", name: "echo", arguments: '{"text":"hi"}' });
@@ -56,9 +56,9 @@ describe("openai streaming adapter", () => {
   test("finish_reason length is a truncated error, not a partial success", async () => {
     const frames = [chunk({ content: "반" }), chunk({}, "length"), "data: [DONE]\n\n"];
     const failure = collect(
-      openAiStream(config)([{ role: "user", content: "hi" }], [], { ...options, fetchImpl: (async () => sseResponse(frames)) as unknown as typeof fetch }),
+      openAiStream(config)([{ role: "user", content: "hi" }], [], { ...options, fetchImpl: Object.assign((async () => sseResponse(frames)), { preconnect: fetch.preconnect }) }),
     );
-    await expect(failure).rejects.toMatchObject({ kind: "truncated" });
+    await Promise.resolve(expect(failure).rejects.toMatchObject({ kind: "truncated" }));
   });
 
   for (const [status, kind] of [
@@ -69,9 +69,9 @@ describe("openai streaming adapter", () => {
   ] as const) {
     test(`HTTP ${status} is classified as ${kind}`, async () => {
       const failure = collect(
-        openAiStream(config)([{ role: "user", content: "hi" }], [], { ...options, fetchImpl: (async () => sseResponse([], status)) as unknown as typeof fetch }),
+        openAiStream(config)([{ role: "user", content: "hi" }], [], { ...options, fetchImpl: Object.assign((async () => sseResponse([], status)), { preconnect: fetch.preconnect }) }),
       );
-      await expect(failure).rejects.toMatchObject({ kind });
+      await Promise.resolve(expect(failure).rejects.toMatchObject({ kind }));
     });
   }
 
@@ -83,13 +83,13 @@ describe("openai streaming adapter", () => {
       openAiStream(config)([{ role: "user", content: "hi" }], [], {
         ...options,
         signal: controller.signal,
-        fetchImpl: (async () => {
+        fetchImpl: Object.assign((async () => {
           called = true;
           return sseResponse([]);
-        }) as unknown as typeof fetch,
+        }), { preconnect: fetch.preconnect }),
       }),
     );
-    await expect(failure).rejects.toBeInstanceOf(ProviderError);
+    await Promise.resolve(expect(failure).rejects.toBeInstanceOf(ProviderError));
     expect(called).toBe(false);
   });
 });
@@ -97,7 +97,7 @@ describe("openai streaming adapter", () => {
 test("transport EOF before a finish marker rejects partial text and unfinished tool calls", async () => {
   for (const delta of [{ content: "partial" }, { tool_calls: [{ index: 0, id: "c", function: { name: "echo", arguments: '{"x":' } }] }]) {
     const fetchImpl: typeof fetch = Object.assign(async () => sseResponse([chunk(delta)]), { preconnect: fetch.preconnect });
-    await expect(collect(openAiStream(config)([], [], { ...options, fetchImpl }))).rejects.toMatchObject({ kind: "truncated" });
+    await Promise.resolve(expect(collect(openAiStream(config)([], [], { ...options, fetchImpl }))).rejects.toMatchObject({ kind: "truncated" }));
   }
 });
 
@@ -117,6 +117,6 @@ test("first-token deadline includes time waiting for HTTP response headers", asy
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   try {
     const request = collect(openAiStream({ ...config, baseUrl: `http://127.0.0.1:${server.port}` })([], [], { ...options, firstTokenTimeoutMs: 20 }));
-    await expect(Promise.race([request, new Promise<never>((_, reject) => { watchdog = setTimeout(() => reject(new Error("deadline not enforced")), 300); })])).rejects.toMatchObject({ kind: "timeout" });
-  } finally { if (watchdog) clearTimeout(watchdog); release(); server.stop(true); }
+    await Promise.resolve(expect(Promise.race([request, new Promise<never>((_, reject) => { watchdog = setTimeout(() => reject(new Error("deadline not enforced")), 300); })])).rejects.toMatchObject({ kind: "timeout" }));
+  } finally { if (watchdog) clearTimeout(watchdog); release(); await server.stop(true); }
 }, 1000);

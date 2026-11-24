@@ -1,12 +1,9 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
+import { PartSchema } from "./contracts";
+import { ok } from "node:assert/strict";
 
-export type Part =
-  | { readonly type: "text"; readonly text: string }
-  | { readonly type: "reasoning"; readonly text: string }
-  | { readonly type: "tool_call"; readonly id: string; readonly name: string; readonly arguments: string }
-  | { readonly type: "tool_result"; readonly id: string; readonly name: string; readonly output: string; readonly denied?: boolean; readonly timeout?: boolean }
-  | { readonly type: "error"; readonly message: string };
+export type Part = z.infer<typeof PartSchema>;
 
 export type Entry = {
   readonly id: string;
@@ -37,9 +34,9 @@ export type Session = z.infer<typeof SessionRow>;
 
 function toEntry(row: z.infer<typeof EntryRow>): Entry {
   const payload = z
-    .object({ parts: z.array(z.unknown()).default([]) })
+    .object({ parts: z.array(PartSchema).default([]) })
     .safeParse(JSON.parse(row.payload_json));
-  const parts = payload.success ? (payload.data.parts as Part[]) : [];
+  const parts = payload.success ? payload.data.parts : [];
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -92,9 +89,9 @@ export function renameSession(db: Database, id: string, title: string, now = Dat
 export function softDeleteSession(db: Database, id: string, now = Date.now()): { cancelledRuns: number } {
   const iso = new Date(now).toISOString();
   const result = db.transaction(() => {
-    const live = db.query("SELECT id FROM runs WHERE session_id = ? AND status IN ('queued','running','awaiting_approval')").all(id) as {
+    const live = db.query<{
       id: string;
-    }[];
+    }, SQLQueryBindings[]>("SELECT id FROM runs WHERE session_id = ? AND status IN ('queued','running','awaiting_approval')").all(id);
     for (const run of live) {
       db.query("UPDATE runs SET status = 'cancelled', cancel_intent = 'policy', settled_at = ? WHERE id = ?").run(iso, run.id);
     }
@@ -116,9 +113,10 @@ export function appendEntry(
     readonly now?: number;
   },
 ): Entry {
-  const seqRow = db.query("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM entries WHERE session_id = ?").get(input.sessionId) as {
+  const seqRow = db.query<{
     next: number;
-  };
+  }, SQLQueryBindings[]>("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM entries WHERE session_id = ?").get(input.sessionId);
+  ok(seqRow, "sequence query returns one aggregate row");
   const id = crypto.randomUUID();
   const createdAt = new Date(input.now ?? Date.now()).toISOString();
   const status = input.status ?? "complete";

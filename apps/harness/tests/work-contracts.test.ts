@@ -4,7 +4,7 @@ import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { createRegistry } from "../src/tools/registry";
 import { enqueueRun, claimNext, executeRun, reconcileWork, decideApproval, getRun, validateDelegation, WORK_LIMITS, type WorkDeps } from "../src/surfaces/work/runner";
-import type { StreamFn } from "../src/providers/openai";
+import type { AdapterEvent, StreamFn } from "../src/providers/openai";
 
 const databases: Database[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
@@ -30,12 +30,12 @@ const calls: StreamFn = async function* () {
 };
 
 test("work total deadline aborts an unending provider and settles once as interrupted", async () => {
-  const hanging: StreamFn = async function* (_messages, _tools, options) {
-    await new Promise<void>((_resolve, reject) => {
+  const hanging: StreamFn = (_messages, _tools, options) => ({
+    [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<AdapterEvent>>((_resolve, reject) => {
       if (!options.signal) { reject(new Error("missing cancellation signal")); return; }
       options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-    });
-  };
+    }) }),
+  });
   const { db, events, deps } = fixture(hanging);
   const run = enqueueRun(db, events, { goal: "deadline" });
   const claimed = claimNext(db, events, "worker");
@@ -65,21 +65,17 @@ test("an active stream renews its lease while reconciliation leaves it running",
 });
 
 test("a cancelled run cannot execute the next tool or overwrite its terminal status", async () => {
-  let db: Database;
-  let id = "";
   const stream: StreamFn = async function* () {
-    db.query("UPDATE runs SET status='cancelled', cancel_intent='user' WHERE id=?").run(id);
+    f.db.query("UPDATE runs SET status='cancelled', cancel_intent='user' WHERE id=?").run(run.id);
     yield* calls([], [], { maxOutputTokens: 1, firstTokenTimeoutMs: 1, idleTimeoutMs: 1 });
   };
   const f = fixture(stream, [{ action: "*", resource: "*", effect: "allow" }]);
-  db = f.db;
-  const run = enqueueRun(db, f.events, { goal: "cancel" });
-  id = run.id;
-  const claimed = claimNext(db, f.events, "worker");
+  const run = enqueueRun(f.db, f.events, { goal: "cancel" });
+  const claimed = claimNext(f.db, f.events, "worker");
   if (!claimed) throw new Error("fixture");
   await executeRun(f.deps, claimed);
   expect(f.effects()).toBe(0);
-  expect(getRun(db, run.id)?.status).toBe("cancelled");
+  expect(getRun(f.db, run.id)?.status).toBe("cancelled");
 });
 
 test("approval expires without an effect and repeated approval cannot replay it", async () => {
@@ -275,6 +271,6 @@ test("provider call IDs reused by separate runs do not replace each other's rece
     expect(await executeRun(f.deps, claimed)).toBe("succeeded");
   }
   const rows = f.db.query<{ run_id: string }, []>("SELECT run_id FROM tool_calls ORDER BY run_id").all();
-  expect(rows.map((row) => row.run_id)).toEqual(ids.sort());
+  expect(rows.map((row) => row.run_id)).toEqual(ids.toSorted());
   expect(f.effects()).toBe(2);
 });

@@ -53,6 +53,6 @@ test("conversation and work send a valid assistant/tool round-trip over HTTP", a
       }
       expect(effects).toBe(1);
       expect(requests).toBe(2);
-    } finally { server.stop(true); db.close(); }
+    } finally { await server.stop(true); db.close(); }
   }
 });

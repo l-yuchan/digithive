@@ -7,10 +7,13 @@
     "dev": "bun --watch src/server/main.ts",
     "start": "bun src/server/main.ts",
     "build:web": "bun scripts/build-web.ts",
+    "lint": "oxlint --type-aware --deny-warnings --report-unused-disable-directives src tests scripts web/src web/sw.js lint",
+    "fmt": "oxfmt src tests scripts web/src web/index.html web/sw.js lint package.json tsconfig.json .oxlintrc.json .oxfmtrc.json README.md",
+    "fmt:check": "bun run fmt --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "mock": "bun scripts/mock-provider.ts",
-    "verify": "bun run typecheck && bun test"
+    "verify": "bun run lint && bun run typecheck && bun run build:web && bun test"
   },
   "dependencies": {
     "react": "^19.2.0",
@@ -23,6 +26,9 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/web-push": "^3.6.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "oxlint": "1.95.0",
+    "oxlint-tsgolint": "7.0.2008",
+    "oxfmt": "0.80.0"
   }
 }

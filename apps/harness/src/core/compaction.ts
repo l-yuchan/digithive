@@ -1,7 +1,8 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { appendEntry } from "./sessions";
 import { pathEntries } from "./tree";
 import type { CompactionView } from "./context";
+import { z } from "zod";
 
 export type CompactionOptions = {
   readonly db: Database;
@@ -21,12 +22,13 @@ export type CompactionResult = {
 
 export function latestCompaction(db: Database, sessionId: string): CompactionView | null {
   const path = new Set(pathEntries(db, sessionId).map((entry) => entry.id));
-  const rows = db.query("SELECT payload_json FROM entries WHERE session_id = ? AND kind = 'compaction' ORDER BY seq DESC")
-    .all(sessionId) as { payload_json: string }[];
+  const rows = db.query<{ payload_json: string }, SQLQueryBindings[]>("SELECT payload_json FROM entries WHERE session_id = ? AND kind = 'compaction' ORDER BY seq DESC")
+    .all(sessionId);
   for (const row of rows) {
     try {
-      const payload = JSON.parse(row.payload_json) as { summary?: unknown; coversSeq?: unknown; coversUpTo?: unknown };
-      if (typeof payload.summary === "string" && typeof payload.coversSeq === "number" && typeof payload.coversUpTo === "string" && path.has(payload.coversUpTo)) {
+      const parsed = z.object({ summary: z.string(), coversSeq: z.number(), coversUpTo: z.string() }).safeParse(JSON.parse(row.payload_json));
+      if (parsed.success && path.has(parsed.data.coversUpTo)) {
+        const payload = parsed.data;
         return { summary: payload.summary, coversSeq: payload.coversSeq };
       }
     } catch (error) {

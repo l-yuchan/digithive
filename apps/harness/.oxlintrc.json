@@ -1,0 +1,51 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "import", "oxc", "react", "unicorn"],
+  "jsPlugins": [
+    { "name": "programming", "specifier": "./lint/oxlint-plugin/index.js" }
+  ],
+  "categories": { "correctness": "error", "suspicious": "error" },
+  "rules": {
+    "react/react-in-jsx-scope": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-param-reassign": "error",
+    "no-unused-vars": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/consistent-type-imports": "error",
+    "typescript/ban-ts-comment": ["error", { "ts-expect-error": true, "ts-ignore": true, "ts-nocheck": true }],
+    "typescript/no-floating-promises": ["error", { "ignoreVoid": false }],
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/no-namespace": "off",
+    "programming/require-suppression-reason": "error"
+  },
+  "ignorePatterns": ["node_modules/**", "web/dist/**", "data/**", "coverage/**"],
+  "overrides": [
+    {
+      "files": ["src/**", "web/src/**"],
+      "rules": { "programming/no-em-dash-copy": "error" }
+    },
+    {
+      "files": ["lint/**/*.js", "web/sw.js"],
+      "rules": {
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-return": "off"
+      }
+    }
+  ]
+}

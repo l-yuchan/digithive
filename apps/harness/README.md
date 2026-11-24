@@ -17,10 +17,34 @@ PORT=8799 MODEL_BASE_URL=http://127.0.0.1:8798/v1 MODEL_NAME=mock-model bun run 
 ## 검증
 
 ```bash
-bun run typecheck && bun test
+bun run verify
+bun run fmt:check
 ```
 
-`tests/`는 스키마·이벤트·상태 기계·정책·스트리밍 어댑터·대화 루프·입력 규칙을 다룬다. 외부 모델 호출 없이 돈다.
+`apps/harness`에서 실행한다. `verify`는 타입 기반 lint, TypeScript 검사,
+웹 빌드, 전체 테스트를 순서대로 실행한다. `fmt:check`는 파일을 수정하지 않고
+포맷만 확인하며, `bun run fmt`는 포맷을 적용한다. 개별 검사는 `lint`,
+`typecheck`, `build:web`, `test`로 실행할 수 있다. 자동 CI나 배포는 연결하지 않는다.
+
+Oxlint 1.95.0, oxlint-tsgolint 7.0.2008, Oxfmt 0.80.0을 lockfile과 함께 고정한다.
+correctness/suspicious 규칙과 unsafe 연산, 미처리 Promise, 잘못된 async 사용,
+분기 완결성 검사를 오류로 처리하며 경고도 실패시킨다. `void`만 붙여 Promise를
+버리는 방식은 허용하지 않는다. 타입 단언으로 외부 JSON을 신뢰하지 않고
+경계에서 스키마로 파싱하며, DB 결과는 SQLite 쿼리의 제네릭 계약으로 표현한다.
+
+TypeScript의 enum, namespace, constructor parameter property 등 non-erasable
+문법은 허용한다. `erasableSyntaxOnly`는 `false`이며, 해당 문법을 사용하는
+테스트도 lint와 타입 검사의 대상이다. 자동 JSX 런타임에 맞춰 React 전역 import를
+강제하지 않으며 함수 위치만 바꾸는 스타일 규칙은 사용하지 않는다.
+독립 JavaScript 플러그인과 service worker에는 TypeScript 프로젝트의 타입 정보가
+없으므로 unsafe 계열 타입 규칙만 제외하고 일반 lint는 적용한다.
+
+포맷은 2칸 들여쓰기, 큰따옴표, 세미콜론, 100자 줄 너비, LF를 사용한다.
+생성된 `web/dist`, 의존성, 데이터, 커버리지 출력은 검사에서 제외한다.
+규칙 억제에는 사유가 필요하며, 프로덕션 문자열의 em dash도 검사한다.
+
+`tests/`는 저장소·이벤트·상태·정책·모델 프로토콜·동기화·대화 분기와
+프로세스 간 실행을 다룬다. 외부 모델 호출 없이 돈다.
 
 ## 현재 범위 (W0·W1)
 

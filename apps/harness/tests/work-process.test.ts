@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { openDatabase } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { enqueueRun, reconcileWork, getRun } from "../src/surfaces/work/runner";
+import { z } from "zod";
 
 test("separate workers race for one concurrency slot and an exited worker's lease is reclaimed", async () => {
   const root = mkdtempSync(join(tmpdir(), "worker-race-"));
@@ -41,7 +42,7 @@ test("separate workers race for one concurrency slot and an exited worker's leas
       while (true) { const next = await reader.read(); if (next.done) return text; text += new TextDecoder().decode(next.value); }
     }));
     expect(await Promise.all(workers.map((worker) => worker.exited))).toEqual([0, 0]);
-    const claimed = outputs.map((text) => JSON.parse(text)).filter((row) => row !== null);
+    const claimed = outputs.map((text) => z.object({ id: z.string() }).nullable().parse(JSON.parse(text))).filter((row) => row !== null);
     expect(claimed).toHaveLength(1);
     const active = db.query<{ id: string; lease_expires_at: string }, []>("SELECT id, lease_expires_at FROM runs WHERE status='running'").get();
     if (!active) throw new Error("no owner");

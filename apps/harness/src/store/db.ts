@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { MIGRATIONS } from "./migrations";
 
 export type Db = Database;
@@ -22,7 +22,7 @@ export function openDatabase(path: string): Database {
  * each, so a re-run is a no-op (idempotent by version, not by luck).
  */
 export function migrate(db: Database): number {
-  const row = db.query("PRAGMA user_version").get() as { user_version: number } | null;
+  const row = db.query<{ user_version: number }, SQLQueryBindings[]>("PRAGMA user_version").get();
   const current = row?.user_version ?? 0;
   let applied = 0;
   for (const migration of MIGRATIONS) {

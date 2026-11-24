@@ -1,4 +1,5 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { z } from "zod";
 
 export type NormalizedItem = {
   readonly id: string;
@@ -9,20 +10,21 @@ export type NormalizedItem = {
   readonly url: string | null;
 };
 
-export type GmailPart = {
-  headers?: { name?: string; value?: string }[];
-  body?: { data?: string };
-  parts?: GmailPart[];
-};
+const GmailPartSchema = z.object({
+  headers: z.array(z.object({ name: z.string().optional(), value: z.string().optional() })).optional(),
+  body: z.object({ data: z.string().optional() }).optional(),
+  get parts() { return z.array(GmailPartSchema).optional(); },
+});
+export type GmailPart = z.infer<typeof GmailPartSchema>;
+export const GmailPayloadSchema = z.object({
+  id: z.union([z.string(), z.number()]).optional(),
+  internalDate: z.union([z.string(), z.number()]).optional(),
+  snippet: z.string().optional(),
+  payload: GmailPartSchema.optional(),
+});
+export type GmailPayload = z.infer<typeof GmailPayloadSchema>;
 
-export type GmailPayload = {
-  id?: unknown;
-  internalDate?: unknown;
-  snippet?: unknown;
-  payload?: GmailPart;
-};
-
-function header(headers: { name?: string; value?: string }[] | undefined, name: string): string {
+function header(headers: GmailPart["headers"], name: string): string {
   return headers?.find((entry) => (entry.name ?? "").toLowerCase() === name.toLowerCase())?.value ?? "";
 }
 
@@ -45,7 +47,8 @@ function findBody(part: GmailPart | undefined): string {
   return "";
 }
 
-export function normalizeGmail(message: GmailPayload): NormalizedItem {
+export function normalizeGmail(raw: unknown): NormalizedItem {
+  const message = GmailPayloadSchema.parse(raw);
   const headers = message.payload?.headers;
   const internal = Number(message.internalDate ?? 0);
   return {
@@ -53,50 +56,55 @@ export function normalizeGmail(message: GmailPayload): NormalizedItem {
     source: "gmail",
     title: header(headers, "Subject") || "(제목 없음)",
     at: internal > 0 ? new Date(internal).toISOString() : null,
-    detail: findBody(message.payload) || String(message.snippet ?? ""),
+    detail: findBody(message.payload) || (message.snippet ?? ""),
     url: null,
   };
 }
 
-export type CalendarEventPayload = {
-  id?: unknown;
-  summary?: unknown;
-  description?: unknown;
-  htmlLink?: unknown;
-  start?: { dateTime?: string; date?: string };
-  end?: { dateTime?: string; date?: string };
-  recurringEventId?: unknown;
-};
+export const CalendarEventPayloadSchema = z.object({
+  id: z.string().optional(),
+  summary: z.string().nullish(),
+  description: z.string().nullish(),
+  htmlLink: z.string().nullish(),
+  start: z.object({ dateTime: z.string().optional(), date: z.string().optional() }).optional(),
+  end: z.object({ dateTime: z.string().optional(), date: z.string().optional() }).optional(),
+  recurringEventId: z.string().optional(),
+  status: z.string().optional(),
+});
+export type CalendarEventPayload = z.infer<typeof CalendarEventPayloadSchema>;
 
-export function normalizeCalendarEvent(event: CalendarEventPayload): NormalizedItem {
+export function normalizeCalendarEvent(raw: unknown): NormalizedItem {
+  const event = CalendarEventPayloadSchema.parse(raw);
   const start = event.start?.dateTime ?? event.start?.date ?? null;
   return {
-    id: String(event.id ?? ""),
+    id: (event.id ?? ""),
     source: "calendar",
-    title: String(event.summary ?? "(제목 없음)"),
+    title: (event.summary ?? "(제목 없음)"),
     at: start,
-    detail: String(event.description ?? "") + (event.recurringEventId ? " (반복 일정)" : ""),
-    url: event.htmlLink ? String(event.htmlLink) : null,
+    detail: (event.description ?? "") + (event.recurringEventId ? " (반복 일정)" : ""),
+    url: event.htmlLink ? (event.htmlLink) : null,
   };
 }
 
-export type CanvasAssignmentPayload = {
-  id?: unknown;
-  name?: unknown;
-  due_at?: unknown;
-  html_url?: unknown;
-  course_id?: unknown;
-  description?: unknown;
-};
+const CanvasAssignmentPayloadSchema = z.object({
+  id: z.union([z.string(), z.number()]).optional(),
+  name: z.string().nullish(),
+  due_at: z.string().nullish(),
+  html_url: z.string().nullish(),
+  course_id: z.union([z.string(), z.number()]).optional(),
+  description: z.string().nullish(),
+});
+export type CanvasAssignmentPayload = z.infer<typeof CanvasAssignmentPayloadSchema>;
 
-export function normalizeCanvasAssignment(assignment: CanvasAssignmentPayload): NormalizedItem {
+export function normalizeCanvasAssignment(raw: unknown): NormalizedItem {
+  const assignment = CanvasAssignmentPayloadSchema.parse(raw);
   return {
     id: String(assignment.id ?? ""),
     source: "canvas",
-    title: String(assignment.name ?? "(제목 없음)"),
-    at: assignment.due_at ? String(assignment.due_at) : null,
-    detail: `과목 ${String(assignment.course_id ?? "-")} · ${String(assignment.description ?? "").slice(0, 200)}`,
-    url: assignment.html_url ? String(assignment.html_url) : null,
+    title: (assignment.name ?? "(제목 없음)"),
+    at: assignment.due_at ? (assignment.due_at) : null,
+    detail: `과목 ${String(assignment.course_id ?? "-")} · ${(assignment.description ?? "").slice(0, 200)}`,
+    url: assignment.html_url ? (assignment.html_url) : null,
   };
 }
 
@@ -109,10 +117,10 @@ export type SyncOutcome = {
 };
 
 export function syncStates(db: Database): { source: string; ok: boolean; lastSyncAt: string | null; error: string | null }[] {
-  return (db.query("SELECT source, ok, last_sync_at, error FROM integration_state ORDER BY source").all() as Record<string, unknown>[]).map((row) => ({
-    source: String(row["source"]),
-    ok: Number(row["ok"]) === 1,
-    lastSyncAt: row["last_sync_at"] === null ? null : String(row["last_sync_at"]),
-    error: row["error"] === null ? null : String(row["error"]),
+  return (db.query<{ source: string; ok: number; last_sync_at: string | null; error: string | null }, SQLQueryBindings[]>("SELECT source, ok, last_sync_at, error FROM integration_state ORDER BY source").all()).map((row) => ({
+    source: (row["source"]),
+    ok: (row["ok"]) === 1,
+    lastSyncAt: row["last_sync_at"] === null ? null : (row["last_sync_at"]),
+    error: row["error"] === null ? null : (row["error"]),
   }));
 }

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import { createSession, getSession, listSessions, renameSession, softDeleteSession } from "../core/sessions";
@@ -130,7 +131,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       return json({ authenticated, authRequired: deps.auth.passphrase.length > 0 });
     }
     if (path === "/api/login" && request.method === "POST") {
-      const raw = (await request.json().catch(() => ({}))) as { passphrase?: unknown };
+      const raw = z.object({ passphrase: z.unknown().optional() }).catch({}).parse((await request.json().catch(() => ({}))));
       const candidate = typeof raw.passphrase === "string" ? raw.passphrase : "";
       if (!checkPassphrase(deps.auth, candidate)) return json({ error: "invalid_passphrase" }, 401);
       const secure = url.protocol === "https:" ? "; Secure" : "";
@@ -200,7 +201,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     if (path === "/api/push/key" && request.method === "GET") return json({ publicKey: deps.vapid.publicKey });
 
     if (path === "/api/push/subscribe" && request.method === "POST") {
-      const raw = (await request.json().catch(() => null)) as { subscription?: unknown } | null;
+      const raw = z.union([z.object({ subscription: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
       try {
         return json(addSubscription(deps.db, raw?.subscription));
       } catch (error) {
@@ -233,7 +234,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     if (path === "/api/runs") {
       if (request.method === "GET") return json({ runs: withApprovals(deps.db, listRuns(deps.db)) });
       if (request.method === "POST") {
-        const raw = (await request.json().catch(() => null)) as { goal?: unknown; sessionId?: unknown } | null;
+        const raw = z.union([z.object({ goal: z.unknown().optional(), sessionId: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
         const goal = typeof raw?.goal === "string" ? raw.goal.trim() : "";
         if (goal.length === 0 || goal.length > 4_096) return json({ error: "invalid_goal" }, 422);
         const sessionId = typeof raw?.sessionId === "string" ? raw.sessionId : null;
@@ -249,7 +250,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       if (!run) return json({ error: "run_not_found" }, 404);
 
       if (runMatch[3] && request.method === "POST") {
-        const raw = (await request.json().catch(() => null)) as { decision?: unknown } | null;
+        const raw = z.union([z.object({ decision: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
         const decision = raw?.decision === "approve" ? "approve" : raw?.decision === "reject" ? "reject" : null;
         if (!decision) return json({ error: "invalid_decision" }, 422);
         try {
@@ -268,11 +269,11 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       }
 
       if (runMatch[2] === "delegate" && request.method === "POST") {
-        const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-        const budget = raw["budget"] as { maxMicroUsd?: unknown; maxToolCalls?: unknown } | undefined;
+        const raw = z.record(z.string(), z.unknown()).catch({}).parse((await request.json().catch(() => ({}))));
+        const budget = z.union([z.object({ maxMicroUsd: z.unknown().optional(), maxToolCalls: z.unknown().optional() }), z.undefined()]).catch(undefined).parse(raw["budget"]);
         const fields = {
           goal: typeof raw["goal"] === "string" ? raw["goal"] : "",
-          inputRefs: Array.isArray(raw["inputRefs"]) ? (raw["inputRefs"] as string[]) : [],
+          inputRefs: Array.isArray(raw["inputRefs"]) ? (z.array(z.string()).catch([]).parse(raw["inputRefs"])) : [],
           permissionProfile: typeof raw["permissionProfile"] === "string" ? raw["permissionProfile"] : "",
           budget: { maxMicroUsd: Number(budget?.maxMicroUsd ?? Number.NaN), maxToolCalls: Number(budget?.maxToolCalls ?? Number.NaN) },
           completionCondition: typeof raw["completionCondition"] === "string" ? raw["completionCondition"] : "",
@@ -306,7 +307,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
         return json({ sessions: listSessions(deps.db) });
       }
       if (request.method === "POST") {
-        const raw = (await request.json().catch(() => ({}))) as { title?: unknown };
+        const raw = z.object({ title: z.unknown().optional() }).catch({}).parse((await request.json().catch(() => ({}))));
         const title = typeof raw.title === "string" && raw.title.trim().length > 0 ? raw.title.trim() : "새 대화";
         const session = createSession(deps.db, title);
         deps.events.append({ kind: "session.created", sessionId: session.id, payload: { id: session.id, title: session.title } });
@@ -322,7 +323,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       if (!getSession(deps.db, sessionId)) return json({ error: "session_not_found" }, 404);
       try {
         if (action === "edit") {
-          const raw = (await request.json().catch(() => null)) as { text?: unknown } | null;
+          const raw = z.union([z.object({ text: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
           const text = typeof raw?.text === "string" ? raw.text.trim() : "";
           if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
           const result = editUserMessage(deps.db, { sessionId, entryId, text });
@@ -335,7 +336,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
           start(sessionId, point.userText, { appendUser: false, parentId: point.parentId });
           return json({ parentId: point.parentId }, 202);
         }
-        const raw = (await request.json().catch(() => null)) as { entryId?: unknown } | null;
+        const raw = z.union([z.object({ entryId: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
         const leaf = typeof raw?.entryId === "string" ? raw.entryId : null;
         if (!leaf) return json({ error: "invalid_leaf" }, 422);
         const target = deepestDescendant(deps.db, sessionId, leaf);
@@ -349,7 +350,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     const forkMatch = /^\/api\/sessions\/([^/]+)\/fork$/.exec(path);
     if (forkMatch && request.method === "POST") {
       const sessionId = forkMatch[1] ?? "";
-      const raw = (await request.json().catch(() => null)) as { entryId?: unknown; title?: unknown } | null;
+      const raw = z.union([z.object({ entryId: z.unknown().optional(), title: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
       const entryId = typeof raw?.entryId === "string" ? raw.entryId : "";
       const title = typeof raw?.title === "string" ? raw.title : "분기 대화";
       try {
@@ -371,14 +372,14 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
         return json({ entries: withBranches(deps.db, id) });
       }
       if (sessionMatch[2] === "messages" && request.method === "POST") {
-        const raw = (await request.json().catch(() => null)) as { text?: unknown } | null;
+        const raw = z.union([z.object({ text: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
         const text = typeof raw?.text === "string" ? raw.text.trim() : "";
         if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
         start(id, text);
         return json({ accepted: true }, 202);
       }
       if (sessionMatch[2] === undefined && request.method === "PATCH") {
-        const raw = (await request.json().catch(() => null)) as { title?: unknown } | null;
+        const raw = z.union([z.object({ title: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
         const title = typeof raw?.title === "string" ? raw.title : "";
         const renamed = renameSession(deps.db, id, title);
         if (!renamed) return json({ error: "invalid_title" }, 422);

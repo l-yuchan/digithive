@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 
 export const RUN_STATUSES = [
   "queued",
@@ -52,8 +52,8 @@ export function isLeaseExpired(expiresAt: string | null, now = Date.now()): bool
  */
 export function settleExpiredRuns(db: Database, now = Date.now(), owner?: string): string[] {
   const rows = db
-    .query("SELECT id, status, lease_expires_at FROM runs WHERE status = 'running'")
-    .all() as { id: string; status: string; lease_expires_at: string | null }[];
+    .query<{ id: string; status: string; lease_expires_at: string | null }, SQLQueryBindings[]>("SELECT id, status, lease_expires_at FROM runs WHERE status = 'running'")
+    .all();
   const settled: string[] = [];
   const update = db.query(
     "UPDATE runs SET status = 'interrupted', cancel_intent = 'host_restart', settled_at = ? WHERE id = ? AND status = 'running'",

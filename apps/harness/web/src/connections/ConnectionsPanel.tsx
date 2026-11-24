@@ -1,18 +1,12 @@
-import { useEffect, useState } from "react";
+import { z } from "zod";
+import { useCallback, useEffect, useState } from "react";
 import { apiUrl, getJson, postJson } from "../api";
 
-type SyncState = { source: string; ok: boolean; lastSyncAt: string | null; error: string | null };
-type Connections = {
-  googleConnected: boolean;
-  canvasConfigured: boolean;
-  pushConfigured: boolean;
-  states: SyncState[];
-};
-type Briefing = {
-  slot: string;
-  createdAt: string;
-  content: { text: string; generatedAt: string };
-} | null;
+const SyncStateSchema = z.object({ source: z.string(), ok: z.boolean(), lastSyncAt: z.union([z.string(), z.null()]), error: z.union([z.string(), z.null()]) });
+const ConnectionsSchema = z.object({ googleConnected: z.boolean(), canvasConfigured: z.boolean(), pushConfigured: z.boolean(), states: z.array(SyncStateSchema) });
+type Connections = z.infer<typeof ConnectionsSchema>;
+const BriefingSchema = z.union([z.object({ slot: z.string(), createdAt: z.string(), content: z.object({ text: z.string(), generatedAt: z.string() }) }), z.null()]);
+type Briefing = z.infer<typeof BriefingSchema>;
 
 const LABELS: Record<string, string> = { calendar: "캘린더", gmail: "메일", canvas: "한양 LMS" };
 
@@ -32,26 +26,25 @@ export function ConnectionsPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [pushState, setPushState] = useState<string>("확인 전");
 
-  const load = async () => {
-    const [connections, latest] = await Promise.all([
-      getJson<Connections>("/api/connections"),
-      getJson<Briefing>("/api/briefings/latest"),
-    ]);
+  const load = useCallback(() => Promise.all([
+      getJson("/api/connections", ConnectionsSchema),
+      getJson("/api/briefings/latest", BriefingSchema),
+    ]).then(([connections, latest]) => {
     setState(connections);
     setBriefing(latest);
-  };
+  }), []);
 
   useEffect(() => {
     void load().catch((error: unknown) => setMessage(String(error)));
     const timer = setInterval(() => void load().catch(() => undefined), 20_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [load]);
 
   const sync = async () => {
     setBusy("sync");
     setMessage(null);
     try {
-      const result = await postJson<{ results: { source: string; ok: boolean; count: number; error: string | null }[] }>("/api/connections/sync", {});
+      const result = await postJson("/api/connections/sync", {}, z.object({ results: z.array(z.object({ source: z.string(), ok: z.boolean(), count: z.number(), error: z.union([z.string(), z.null()]) })) }));
       setMessage(result.results.map((row) => `${LABELS[row.source] ?? row.source} ${row.ok ? `${row.count}건` : `실패: ${row.error ?? ""}`}`).join(" · "));
       await load();
     } catch (error) {
@@ -65,7 +58,7 @@ export function ConnectionsPanel() {
     setBusy("briefing");
     setMessage(null);
     try {
-      const result = await postJson<{ slot: string; stored: boolean; pushed: boolean; error: string | null }>("/api/briefings/run", {});
+      const result = await postJson("/api/briefings/run", {}, z.object({ slot: z.string(), stored: z.boolean(), pushed: z.boolean(), error: z.union([z.string(), z.null()]) }));
       setMessage(result.stored ? `브리핑 ${result.slot} 생성${result.pushed ? " · 알림 전송" : ` · 알림 없음(${result.error ?? "no_device"})`}` : `브리핑 없음(${result.error ?? "이미 생성됨"})`);
       await load();
     } catch (error) {
@@ -89,7 +82,7 @@ export function ConnectionsPanel() {
         return;
       }
       const registration = await navigator.serviceWorker.register(apiUrl("/sw.js"));
-      const { publicKey } = await getJson<{ publicKey: string }>("/api/push/key");
+      const { publicKey } = await getJson("/api/push/key", z.object({ publicKey: z.string() }));
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(publicKey),
@@ -107,7 +100,7 @@ export function ConnectionsPanel() {
   const testPush = async () => {
     setBusy("test");
     try {
-      const outcome = await postJson<{ sent: number; failed: number; errors: string[] }>("/api/push/test", {});
+      const outcome = await postJson("/api/push/test", {}, z.object({ sent: z.number(), failed: z.number(), errors: z.array(z.string()) }));
       setMessage(outcome.sent > 0 ? `테스트 알림 전송(${outcome.sent}대)` : `전송 실패: ${outcome.errors.join(", ")}`);
     } catch (error) {
       setMessage(String(error));

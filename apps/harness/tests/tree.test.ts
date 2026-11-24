@@ -1,5 +1,6 @@
+import { ok } from "node:assert/strict";
 import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { appendEntry, createSession, listEntries, renameSession, softDeleteSession, updateEntryParts } from "../src/core/sessions";
 import { forkSession, getLeaf, pathEntries, regeneratePoint, searchSessions, setLeaf, editUserMessage, deepestDescendant } from "../src/core/tree";
@@ -83,7 +84,8 @@ describe("conversation tree", () => {
     ).run(sessionId);
     const result = softDeleteSession(db, sessionId);
     expect(result.cancelledRuns).toBe(1);
-    const run = db.query("SELECT status, cancel_intent FROM runs WHERE id = 'r1'").get() as { status: string; cancel_intent: string };
+    const run = db.query<{ status: string; cancel_intent: string }, SQLQueryBindings[]>("SELECT status, cancel_intent FROM runs WHERE id = 'r1'").get();
+    ok(run, "fixture row exists");
     expect(run).toEqual({ status: "cancelled", cancel_intent: "policy" });
     const visible = db.query("SELECT id FROM sessions WHERE deleted_at IS NULL").all();
     expect(visible).toHaveLength(0);

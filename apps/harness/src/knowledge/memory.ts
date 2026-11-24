@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
 
 export const MEMORY_KINDS = ["interest", "fact", "hypothesis", "commitment", "delegation"] as const;
@@ -53,7 +53,7 @@ export function listMemories(db: Database, includeSuperseded = false): Memory[] 
   const rows = includeSuperseded
     ? db.query("SELECT id, kind, text, source_json, superseded_by, created_at FROM memories ORDER BY created_at DESC").all()
     : db.query("SELECT id, kind, text, source_json, superseded_by, created_at FROM memories WHERE superseded_by IS NULL ORDER BY created_at DESC").all();
-  return (rows as Record<string, unknown>[]).map((row) => toMemory(MemoryRow.parse(row)));
+  return rows.map((row) => toMemory(MemoryRow.parse(row)));
 }
 
 /**
@@ -61,11 +61,9 @@ export function listMemories(db: Database, includeSuperseded = false): Memory[] 
  * answer can still explain what changed and when.
  */
 export function correctMemory(db: Database, input: { readonly id: string; readonly text: string; readonly now?: number }): Memory | null {
-  const existing = db.query("SELECT id, kind, source_json FROM memories WHERE id = ?").get(input.id) as
-    | { id: string; kind: string; source_json: string }
-    | null;
+  const existing = db.query<{ id: string; kind: string; source_json: string }, SQLQueryBindings[]>("SELECT id, kind, source_json FROM memories WHERE id = ?").get(input.id);
   if (!existing) return null;
-  const created = remember(db, { kind: existing.kind as MemoryKind, text: input.text, source: JSON.parse(existing.source_json) as unknown, ...(input.now === undefined ? {} : { now: input.now }) });
+  const created = remember(db, { kind: z.enum(MEMORY_KINDS).parse(existing.kind), text: input.text, source: JSON.parse(existing.source_json), ...(input.now === undefined ? {} : { now: input.now }) });
   db.query("UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?").run(created.id, new Date(input.now ?? Date.now()).toISOString(), existing.id);
   return created;
 }
@@ -79,5 +77,5 @@ export function recallMemories(db: Database, query: string, limit = 8): Memory[]
       "SELECT id, kind, text, source_json, superseded_by, created_at FROM memories WHERE superseded_by IS NULL AND (text LIKE ? OR kind = ?) ORDER BY updated_at DESC LIMIT ?",
     )
     .all(`%${trimmed}%`, trimmed, limit);
-  return (rows as Record<string, unknown>[]).map((row) => toMemory(MemoryRow.parse(row)));
+  return rows.map((row) => toMemory(MemoryRow.parse(row)));
 }

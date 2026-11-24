@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative as relativePath, resolve } from "node:path";
 import type { ToolRuntime } from "./registry";
+import { z } from "zod";
 
 export type WorkspaceRoots = {
   /** Everything a work run may read or write lives under this root. */
@@ -36,10 +37,11 @@ export function builtinTools(roots: WorkspaceRoots): ToolRuntime[] {
       parameters: { type: "object", properties: { path: { type: "string" }, text: { type: "string" } }, required: ["path", "text"] },
       action: "edit",
       execute: async (args, context) => {
-        const path = safePath(roots.root, context.runId, String(args["path"] ?? ""));
+        const input = z.object({ path: z.string(), text: z.string() }).parse(args);
+        const path = safePath(roots.root, context.runId, input.path);
         mkdirSync(resolve(path, ".."), { recursive: true });
-        await Bun.write(path, String(args["text"] ?? ""));
-        return `작성 완료: ${String(args["path"] ?? "")} (${String(args["text"] ?? "").length}자)`;
+        await Bun.write(path, input.text);
+        return `작성 완료: ${input.path} (${input.text.length}자)`;
       },
     },
     {
@@ -48,9 +50,10 @@ export function builtinTools(roots: WorkspaceRoots): ToolRuntime[] {
       parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
       action: "read",
       execute: async (args, context) => {
-        const path = safePath(roots.root, context.runId, String(args["path"] ?? ""));
+        const input = z.object({ path: z.string() }).parse(args);
+        const path = safePath(roots.root, context.runId, input.path);
         const file = Bun.file(path);
-        if (!(await file.exists())) return `파일이 없습니다: ${String(args["path"] ?? "")}`;
+        if (!(await file.exists())) return `파일이 없습니다: ${input.path}`;
         return (await file.text()).slice(0, 4_000);
       },
     },
@@ -59,7 +62,7 @@ export function builtinTools(roots: WorkspaceRoots): ToolRuntime[] {
       description: "외부로 나가는 행동(전송·게시 등)을 요청한다. 승인이 필요하다.",
       parameters: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] },
       action: "external_action",
-      execute: async (args) => `외부 행동 실행됨: ${String(args["summary"] ?? "")}`,
+      execute: async (args) => `외부 행동 실행됨: ${z.object({ summary: z.string() }).parse(args).summary}`,
     },
   ];
 }

@@ -48,7 +48,7 @@ test("an open HTTP SSE connection receives another process's event and reconnect
     if (watchdog) clearTimeout(watchdog);
     controller.abort();
     child?.kill();
-    server.stop(true);
+    await server.stop(true);
     harness.close();
     rmSync(root, { recursive: true, force: true });
   }

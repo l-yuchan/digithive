@@ -1,17 +1,9 @@
-import { useEffect, useState } from "react";
+import { z } from "zod";
+import { useCallback, useEffect, useState } from "react";
 import { getJson, postJson } from "../api";
 
-export type Run = {
-  id: string;
-  origin: string;
-  goal: string;
-  status: string;
-  parentRunId: string | null;
-  resultJson: string | null;
-  createdAt: string;
-  pendingApprovalId?: string | null;
-  pendingTool?: string | null;
-};
+const RunSchema = z.object({ id: z.string(), origin: z.string(), goal: z.string(), status: z.string(), parentRunId: z.union([z.string(), z.null()]), resultJson: z.union([z.string(), z.null()]), createdAt: z.string(), pendingApprovalId: z.union([z.string(), z.null()]).optional(), pendingTool: z.union([z.string(), z.null()]).optional() });
+export type Run = z.infer<typeof RunSchema>;
 
 const LABELS: Record<string, string> = {
   queued: "대기",
@@ -29,20 +21,18 @@ export function WorkPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
-    try {
-      const body = await getJson<{ runs: Run[] }>("/api/runs");
+  const load = useCallback(() =>
+    getJson("/api/runs", z.object({ runs: z.array(RunSchema) })).then((body) => {
       setRuns(body.runs);
-    } catch (failure) {
+    }).catch((failure: unknown) => {
       setError(String(failure));
-    }
-  };
+    }), []);
 
   useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), 1_500);
+    load().catch((failure: unknown) => setError(String(failure)));
+    const timer = setInterval(() => { load().catch((failure: unknown) => setError(String(failure))); }, 1_500);
     return () => clearInterval(timer);
-  }, []);
+  }, [load]);
 
   const start = async () => {
     const value = goal.trim();
@@ -75,7 +65,7 @@ export function WorkPanel() {
         className="run-form"
         onSubmit={(event) => {
           event.preventDefault();
-          void start();
+          start().catch((failure: unknown) => setError(String(failure)));
         }}
       >
         <input
@@ -124,7 +114,7 @@ export function WorkPanel() {
 
 function summarizeResult(resultJson: string): string {
   try {
-    const parsed = JSON.parse(resultJson) as { text?: unknown; error?: unknown };
+    const parsed = z.object({ text: z.unknown().optional(), error: z.unknown().optional() }).parse(JSON.parse(resultJson));
     if (typeof parsed.text === "string") return parsed.text.slice(0, 200);
     if (typeof parsed.error === "string") return `오류: ${parsed.error}`;
   } catch {

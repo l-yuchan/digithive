@@ -6,6 +6,7 @@ import { openDatabase } from "../src/store/db";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { z } from "zod";
 
 function db(): Database {
   const database = new Database(":memory:");
@@ -39,7 +40,7 @@ describe("event log", () => {
     log.append({ kind: "message.delta", payload: { text: "b" } });
     const replay = log.after(first.seq);
     expect(replay.map((event) => event.kind)).toEqual(["message.delta", "message.delta"]);
-    expect(replay.map((event) => (event.payload as { text: string }).text)).toEqual(["a", "b"]);
+    expect(replay.map((event) => z.object({ text: z.string() }).parse(event.payload).text)).toEqual(["a", "b"]);
   });
 
   test("after(seq, sessionId) filters to one session", () => {

@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { saveTokens, syncGoogleCalendar, syncGoogleGmail } from "../src/integrations/google";
+import { z } from "zod";
 
 const databases: Database[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
@@ -13,7 +14,7 @@ function setup(respond: (url: URL, init?: Parameters<typeof fetch>[1]) => Respon
   migrate(db);
   const now = 1_000_000;
   saveTokens(db, "secret", { accessToken: "at", refreshToken: "rt", expiresAt: now + 3600_000, scope: null });
-  const fetchImpl: typeof fetch = Object.assign(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => respond(new URL(String(input)), init), { preconnect: fetch.preconnect });
+  const fetchImpl: typeof fetch = Object.assign(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => respond(new URL(input instanceof Request ? input.url : input.toString()), init), { preconnect: fetch.preconnect });
   return { db, events: new EventLog(db), vaultSecret: "secret", config: { clientId: "id", clientSecret: "secret", redirectUri: "https://local/callback" }, now: () => now, fetchImpl };
 }
 function seed(db: Database, source: string, cursor: string) {
@@ -46,7 +47,7 @@ test("expired Google credentials refresh before collection and the replacement i
   const deps = setup((url, init) => {
     if (url.pathname === "/token") {
       refreshes++;
-      expect(String(init?.body)).toContain("refresh_token=rt");
+      expect(z.instanceof(URLSearchParams).parse(init?.body).get("refresh_token")).toBe("rt");
       return json({ access_token: "new-access", expires_in: 3600 });
     }
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer new-access");

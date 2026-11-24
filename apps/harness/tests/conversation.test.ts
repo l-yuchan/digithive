@@ -1,5 +1,6 @@
+import { ok } from "node:assert/strict";
 import { describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { createSession, listEntries, softDeleteSession } from "../src/core/sessions";
@@ -21,8 +22,8 @@ function deps(db: Database, events: EventLog, stream: StreamFn, extra: Partial<C
 
 function textStream(chunks: string[]): StreamFn {
   return async function* () {
-    for (const text of chunks) yield { type: "text_delta", text } as AdapterEvent;
-    yield { type: "done", finishReason: "stop" } as AdapterEvent;
+    for (const text of chunks) yield { type: "text_delta", text };
+    yield { type: "done", finishReason: "stop" };
   };
 }
 
@@ -48,7 +49,8 @@ describe("conversation turn", () => {
     }
     expect(kinds.filter((kind) => kind === "message.delta").length).toBe(3);
 
-    const run = db.query("SELECT status FROM runs WHERE id = ?").get(result.runId) as { status: string };
+    const run = db.query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = ?").get(result.runId);
+    ok(run, "fixture row exists");
     expect(run.status).toBe("succeeded");
   });
 
@@ -58,12 +60,12 @@ describe("conversation turn", () => {
     const stream: StreamFn = async function* () {
       call += 1;
       if (call === 1) {
-        yield { type: "tool_call", id: "call_1", name: "shell_exec", arguments: '{"command":"rm -rf /"}' } as AdapterEvent;
-        yield { type: "done", finishReason: "tool_calls" } as AdapterEvent;
+        yield { type: "tool_call", id: "call_1", name: "shell_exec", arguments: '{"command":"rm -rf /"}' };
+        yield { type: "done", finishReason: "tool_calls" };
         return;
       }
-      yield { type: "text_delta", text: "거부되었습니다." } as AdapterEvent;
-      yield { type: "done", finishReason: "stop" } as AdapterEvent;
+      yield { type: "text_delta", text: "거부되었습니다." };
+      yield { type: "done", finishReason: "stop" };
     };
     const tools = createRegistry([
       {
@@ -93,12 +95,12 @@ describe("conversation turn", () => {
     const stream: StreamFn = async function* () {
       call += 1;
       if (call === 1) {
-        yield { type: "tool_call", id: "call_1", name: "slow", arguments: "{}" } as AdapterEvent;
-        yield { type: "done", finishReason: "tool_calls" } as AdapterEvent;
+        yield { type: "tool_call", id: "call_1", name: "slow", arguments: "{}" };
+        yield { type: "done", finishReason: "tool_calls" };
         return;
       }
-      yield { type: "text_delta", text: "도구가 멈춰서 중단했습니다." } as AdapterEvent;
-      yield { type: "done", finishReason: "stop" } as AdapterEvent;
+      yield { type: "text_delta", text: "도구가 멈춰서 중단했습니다." };
+      yield { type: "done", finishReason: "stop" };
     };
     const tools = createRegistry([
       { name: "slow", description: "never ends", parameters: {}, action: "read", execute: () => new Promise<string>(() => {}) },
@@ -113,21 +115,22 @@ describe("conversation turn", () => {
 
   test("an aborted stream settles the run as interrupted instead of leaving it running", async () => {
     const { db, events, sessionId } = setup();
-    const hanging: StreamFn = async function* (_messages, _tools, options) {
-      await new Promise((_resolve, reject) => {
+    const hanging: StreamFn = (_messages, _tools, options) => ({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<AdapterEvent>>((_resolve, reject) => {
         options.signal?.addEventListener("abort", () => reject(new ProviderError("aborted")), { once: true });
-      });
-    };
+      }) }),
+    });
     const result = await runTurn(
       deps(db, events, hanging, { limits: { firstTokenMs: 5_000, idleMs: 5_000, totalMs: 40, toolMs: 1_000, maxOutputTokens: 100, maxToolRounds: 1 } }),
       { sessionId, text: "멈추는 요청" },
     );
     expect(result.status).toBe("aborted");
-    const run = db.query("SELECT status, cancel_intent, settled_at FROM runs WHERE id = ?").get(result.runId) as {
+    const run = db.query<{
       status: string;
       cancel_intent: string | null;
       settled_at: string | null;
-    };
+    }, SQLQueryBindings[]>("SELECT status, cancel_intent, settled_at FROM runs WHERE id = ?").get(result.runId);
+    ok(run, "fixture row exists");
     expect(run.status).toBe("interrupted");
     expect(run.cancel_intent).toBe("timeout");
     expect(run.settled_at).not.toBeNull();

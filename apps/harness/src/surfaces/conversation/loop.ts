@@ -1,14 +1,15 @@
 import type { Database } from "bun:sqlite";
-import { EventLog } from "../../events/log";
+import type { EventLog } from "../../events/log";
 import { appendEntry, updateEntryParts, type Part } from "../../core/sessions";
 import { getLeaf, pathEntries, setLeaf } from "../../core/tree";
-import { systemPrompt, buildContext } from "../../core/context";
+import { buildContext } from "../../core/context";
 import { latestCompaction, maybeCompact } from "../../core/compaction";
 import { BASE_POLICY, decide, type PolicyRule } from "../../core/policy";
 import { leaseExpiry } from "../../core/run-state";
 import { ProviderError, type ChatMessage, type StreamFn } from "../../providers/openai";
 import { specs, type ToolRegistry } from "../../tools/registry";
 import { keepLease, ownsLease } from "../work/lease";
+import { z } from "zod";
 
 export type TurnLimits = {
   readonly firstTokenMs: number;
@@ -212,14 +213,14 @@ export async function runTurn(
         let args: Record<string, unknown> = {};
         try {
           const parsed: unknown = JSON.parse(call.arguments || "{}");
-          if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
+          if (parsed && typeof parsed === "object") args = z.record(z.string(), z.unknown()).parse(parsed);
         } catch {
           args = {};
         }
         parts.push({ type: "tool_call", id: call.id, name: call.name, arguments: call.arguments });
         deps.events.append({ kind: "tool.started", runId, sessionId: input.sessionId, payload: { call }, now: now() });
 
-        const decision = tool ? decide(policy, { action: tool.action, resource: String(args["path"] ?? args["command"] ?? "*") }) : "deny";
+        const decision = tool ? decide(policy, { action: tool.action, resource: z.string().parse(args["path"] ?? args["command"] ?? "*") }) : "deny";
         if (!tool || decision !== "allow") {
           const output = tool ? "정책이 이 호출을 거부했습니다." : `알 수 없는 도구입니다: ${call.name}`;
           parts.push({ type: "tool_result", id: call.id, name: call.name, output, denied: true });

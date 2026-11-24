@@ -1,8 +1,9 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import { seal, open } from "../core/vault";
-import { normalizeCalendarEvent, normalizeGmail, type NormalizedItem, type SyncOutcome } from "./normalize";
+import { CalendarEventPayloadSchema, normalizeCalendarEvent, normalizeGmail, type NormalizedItem, type SyncOutcome } from "./normalize";
 import { recordOutcome, saveItems } from "./sync-store";
+import { z } from "zod";
 
 export type GoogleConfig = {
   readonly clientId: string;
@@ -36,13 +37,14 @@ export function authUrl(config: GoogleConfig, state: string): string {
   return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
 }
 
-type TokenResponse = {
-  access_token?: unknown;
-  refresh_token?: unknown;
-  expires_in?: unknown;
-  scope?: unknown;
-  error?: unknown;
-};
+const TokenResponseSchema = z.object({
+  access_token: z.string().optional(), refresh_token: z.string().optional(),
+  expires_in: z.number().optional(), scope: z.string().optional(), error: z.string().optional(),
+});
+type TokenResponse = z.infer<typeof TokenResponseSchema>;
+const SavedTokensSchema = z.object({
+  accessToken: z.string(), refreshToken: z.string().nullable(), expiresAt: z.number(), scope: z.string().nullable(),
+});
 
 function parseTokens(body: TokenResponse, previousRefresh: string | null, now: number): GoogleTokens {
   if (typeof body.error === "string") throw new Error(`oauth_error:${body.error}`);
@@ -63,7 +65,7 @@ async function tokenRequest(params: Record<string, string>, fetchImpl: typeof fe
     body: new URLSearchParams(params),
   });
   if (!response.ok) throw new Error(`oauth_http_${response.status}`);
-  return (await response.json()) as TokenResponse;
+  return TokenResponseSchema.parse(await response.json());
 }
 
 export async function exchangeCode(config: GoogleConfig, code: string, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<GoogleTokens> {
@@ -95,13 +97,13 @@ export function saveTokens(db: Database, secret: string, tokens: GoogleTokens): 
 }
 
 export function loadTokens(db: Database, secret: string): GoogleTokens | null {
-  const row = db.query("SELECT payload FROM oauth_tokens WHERE provider = 'google'").get() as { payload: string } | null;
+  const row = db.query<{ payload: string }, SQLQueryBindings[]>("SELECT payload FROM oauth_tokens WHERE provider = 'google'").get();
   if (!row) return null;
   const raw = open(secret, row.payload);
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as GoogleTokens;
-    return typeof parsed.accessToken === "string" ? parsed : null;
+    const parsed = SavedTokensSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
@@ -129,7 +131,7 @@ async function accessToken(deps: GoogleDeps): Promise<string> {
 }
 
 function cursorOf(db: Database, source: string): string | null {
-  const row = db.query("SELECT cursor FROM integration_state WHERE source = ?").get(source) as { cursor: string | null } | null;
+  const row = db.query<{ cursor: string | null }, SQLQueryBindings[]>("SELECT cursor FROM integration_state WHERE source = ?").get(source);
   return row?.cursor ?? null;
 }
 
@@ -170,7 +172,9 @@ export async function syncGoogleCalendar(deps: GoogleDeps): Promise<SyncOutcome>
     let cursor = syncToken;
     while (true) {
       if (!response.ok) throw new Error(`calendar_http_${response.status}`);
-      const body = (await response.json()) as { items?: { id?: string; status?: string }[]; nextSyncToken?: string; nextPageToken?: string };
+      const body = z.object({
+        items: z.array(CalendarEventPayloadSchema).optional(), nextSyncToken: z.string().optional(), nextPageToken: z.string().optional(),
+      }).parse(await response.json());
       for (const raw of body.items ?? []) {
         if (raw.status === "cancelled" && raw.id) deleted.push(raw.id);
         else items.push(normalizeCalendarEvent(raw));
@@ -188,7 +192,7 @@ export async function syncGoogleCalendar(deps: GoogleDeps): Promise<SyncOutcome>
       return recordOutcome(deps, "calendar", true, items.length, cursor, note);
     })();
   } catch (error) {
-    return await recordOutcome(deps, "calendar", false, 0, null, error instanceof Error ? error.message : "unknown");
+    return recordOutcome(deps, "calendar", false, 0, null, error instanceof Error ? error.message : "unknown");
   }
 }
 
@@ -198,7 +202,7 @@ async function syncGmailFull(deps: GoogleDeps, token: string, now: number): Prom
   // is replayed by the next incremental sync rather than skipped.
   const profile = await fetchImpl("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { authorization: `Bearer ${token}` } });
   if (!profile.ok) throw new Error(`gmail_profile_http_${profile.status}`);
-  const historyId = ((await profile.json()) as { historyId?: string }).historyId;
+  const historyId = z.object({ historyId: z.string().optional() }).parse(await profile.json()).historyId;
   if (!historyId) throw new Error("gmail_missing_history_id");
   const ids = new Set<string>();
   let page: string | undefined;
@@ -207,7 +211,7 @@ async function syncGmailFull(deps: GoogleDeps, token: string, now: number): Prom
     if (page) url.searchParams.set("pageToken", page);
     const list = await fetchImpl(url.toString(), { headers: { authorization: `Bearer ${token}` } });
     if (!list.ok) throw new Error(`gmail_list_http_${list.status}`);
-    const body = (await list.json()) as { messages?: { id?: string }[]; nextPageToken?: string };
+    const body = z.object({ messages: z.array(z.object({ id: z.string().optional() })).optional(), nextPageToken: z.string().optional() }).parse(await list.json());
     for (const message of body.messages ?? []) if (message.id) ids.add(message.id);
     page = body.nextPageToken;
   } while (page);
@@ -226,7 +230,7 @@ async function gmailDetails(deps: GoogleDeps, token: string, ids: Iterable<strin
       headers: { authorization: `Bearer ${token}` },
     });
     if (!detail.ok) throw new Error(`gmail_detail_http_${detail.status}`);
-    items.push(normalizeGmail((await detail.json()) as Record<string, never>));
+    items.push(normalizeGmail(await detail.json()));
   }
   return items;
 }
@@ -249,10 +253,11 @@ export async function syncGoogleGmail(deps: GoogleDeps): Promise<SyncOutcome> {
       const response = await fetchImpl(url.toString(), { headers: { authorization: `Bearer ${token}` } });
       if (response.status === 404) return await syncGmailFull(deps, token, now);
       if (!response.ok) throw new Error(`gmail_history_http_${response.status}`);
-      const body = (await response.json()) as {
-        history?: { messagesAdded?: { message?: { id?: string } }[]; messagesDeleted?: { message?: { id?: string } }[] }[];
-        historyId?: string; nextPageToken?: string;
-      };
+      const messageChange = z.array(z.object({ message: z.object({ id: z.string().optional() }).optional() }));
+      const body = z.object({
+        history: z.array(z.object({ messagesAdded: messageChange.optional(), messagesDeleted: messageChange.optional() })).optional(),
+        historyId: z.string().optional(), nextPageToken: z.string().optional(),
+      }).parse(await response.json());
       for (const entry of body.history ?? []) {
         for (const added of entry.messagesAdded ?? []) if (added.message?.id) { ids.add(added.message.id); deleted.delete(added.message.id); }
         for (const removed of entry.messagesDeleted ?? []) if (removed.message?.id) { deleted.add(removed.message.id); ids.delete(removed.message.id); }
@@ -267,6 +272,6 @@ export async function syncGoogleGmail(deps: GoogleDeps): Promise<SyncOutcome> {
       return recordOutcome(deps, "gmail", true, items.length, cursor, null);
     })();
   } catch (error) {
-    return await recordOutcome(deps, "gmail", false, 0, null, error instanceof Error ? error.message : "unknown");
+    return recordOutcome(deps, "gmail", false, 0, null, error instanceof Error ? error.message : "unknown");
   }
 }

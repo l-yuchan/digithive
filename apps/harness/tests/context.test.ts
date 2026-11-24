@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { appendEntry, createSession, listEntries } from "../src/core/sessions";
-import { buildContext, clockLine, systemPrompt } from "../src/core/context";
+import { buildContext, clockLine, systemPrompt, type HistoryMessage } from "../src/core/context";
 import { latestCompaction, maybeCompact } from "../src/core/compaction";
 import { editUserMessage, setLeaf } from "../src/core/tree";
 
@@ -22,8 +22,8 @@ describe("context assembly", () => {
   });
 
   test("instruction blocks survive budget pressure and only history is trimmed", () => {
-    const history = Array.from({ length: 40 }, (_, index) => ({
-      role: (index % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+    const history = Array.from({ length: 40 }, (_, index): HistoryMessage => ({
+      role: (index % 2 === 0 ? "user" : "assistant"),
       content: "가".repeat(100),
     }));
     const built = buildContext({ now: FIXED, history, budget: { maxChars: 3_000 } });

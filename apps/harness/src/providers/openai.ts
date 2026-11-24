@@ -6,12 +6,7 @@ export type ProviderConfig = {
   readonly headers?: Readonly<Record<string, string>>;
 };
 
-export type ChatMessage = {
-  readonly role: "system" | "user" | "assistant" | "tool";
-  readonly content: string;
-  readonly toolCallId?: string;
-  readonly toolCalls?: readonly { readonly id: string; readonly name: string; readonly arguments: string }[];
-};
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 export type ToolSpec = {
   readonly name: string;
@@ -85,6 +80,19 @@ async function readWithTimeout(
 }
 
 type ToolCallAccumulator = { id: string; name: string; arguments: string };
+const StreamFrameSchema = z.object({
+  choices: z.array(z.object({
+    finish_reason: z.string().nullish(),
+    delta: z.object({
+      content: z.string().nullish(), reasoning_content: z.string().nullish(), reasoning: z.string().nullish(),
+      tool_calls: z.array(z.object({
+        index: z.number().optional(), id: z.string().optional(),
+        function: z.object({ name: z.string().optional(), arguments: z.string().optional() }).optional(),
+      })).optional(),
+    }).optional(),
+  })).optional(),
+  usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }).nullish(),
+});
 
 /**
  * OpenAI-compatible streaming adapter. Emits deltas in arrival order, assembles
@@ -108,7 +116,7 @@ export function openAiStream(config: ProviderConfig): StreamFn {
         headers: {
           authorization: `Bearer ${config.apiKey}`,
           "content-type": "application/json",
-          ...(config.headers ?? {}),
+          ...config.headers,
         },
         body: JSON.stringify({
           model: config.model,
@@ -169,7 +177,8 @@ export function openAiStream(config: ProviderConfig): StreamFn {
               if (!(error instanceof SyntaxError)) throw error;
               throw new ProviderError("malformed");
             }
-            const choice = (parsed as { choices?: { delta?: Record<string, unknown>; finish_reason?: string | null }[] }).choices?.[0];
+            const envelope = StreamFrameSchema.parse(parsed);
+            const choice = envelope.choices?.[0];
             if (!choice) continue;
             if (choice.finish_reason) finishReason = choice.finish_reason;
             const delta = choice.delta ?? {};
@@ -184,11 +193,7 @@ export function openAiStream(config: ProviderConfig): StreamFn {
             const toolCalls = delta["tool_calls"];
             if (Array.isArray(toolCalls)) {
               for (const raw of toolCalls) {
-                const call = raw as {
-                  index?: number;
-                  id?: string;
-                  function?: { name?: string; arguments?: string };
-                };
+                const call = raw;
                 const index = call.index ?? 0;
                 const current = calls.get(index) ?? { id: `call_${index}`, name: "", arguments: "" };
                 if (call.id) current.id = call.id;
@@ -197,7 +202,7 @@ export function openAiStream(config: ProviderConfig): StreamFn {
                 calls.set(index, current);
               }
             }
-            const usage = (parsed as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
+            const usage = envelope.usage;
             if (usage && typeof usage.prompt_tokens === "number" && typeof usage.completion_tokens === "number") {
               yield { type: "usage", promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens };
             }
@@ -225,3 +230,5 @@ export function openAiStream(config: ProviderConfig): StreamFn {
     }
   };
 }
+import { z } from "zod";
+import type { ChatMessageSchema } from "../core/contracts";

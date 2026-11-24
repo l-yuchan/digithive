@@ -1,5 +1,6 @@
-import { useEffect, useReducer, useRef, useState } from "react";
-import { apiUrl, getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
+import { z } from "zod";
+import { useCallback, useEffect, useEffectEvent, useReducer, useState } from "react";
+import { apiUrl, EntrySchema, SessionSchema, getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
 import { Composer } from "./composer/Composer";
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
@@ -95,6 +96,10 @@ function reducer(state: State, action: Action): State {
       return { ...state, error: action.message };
     case "seq":
       return { ...state, lastSeq: Math.max(state.lastSeq, action.seq) };
+    default: {
+      const unexpected: never = action;
+      throw new Error(`Unknown action: ${JSON.stringify(unexpected)}`);
+    }
   }
 }
 
@@ -147,27 +152,28 @@ export function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
-    void getJson<{ authenticated: boolean }>("/api/session")
+    void getJson("/api/session", z.object({ authenticated: z.boolean() }))
       .then((body) => setAuthed(body.authenticated))
       .catch(() => setAuthed(false));
   }, []);
-  const activeRef = useRef<string | null>(null);
-  activeRef.current = state.activeId;
-
-  const reloadSessions = async (q?: string) => {
+  const reloadSessions = useCallback(async (q?: string) => {
     const suffix = q && q.trim().length > 0 ? `?q=${encodeURIComponent(q.trim())}` : "";
-    const body = await getJson<{ sessions: Session[] }>(`/api/sessions${suffix}`);
+    const body = await getJson(`/api/sessions${suffix}`, z.object({ sessions: z.array(SessionSchema) }));
     dispatch({ type: "sessions", sessions: body.sessions });
     return body.sessions;
-  };
+  }, []);
 
-  const reloadEntries = async (id: string) => {
-    const body = await getJson<{ entries: Entry[] }>(`/api/sessions/${id}/entries`);
+  const reloadEntries = useCallback(async (id: string) => {
+    const body = await getJson(`/api/sessions/${id}/entries`, z.object({ entries: z.array(EntrySchema) }));
     dispatch({ type: "entries", entries: body.entries });
-  };
+  }, []);
+  const reportError = useCallback((error: unknown) => dispatch({ type: "error", message: String(error) }), []);
+  const onSessionRenamed = useEffectEvent(() => {
+    reloadSessions(query).catch(reportError);
+  });
 
   useEffect(() => {
-    if (authed !== true) return;
+    if (authed !== true) return undefined;
     let cancelled = false;
     void (async () => {
       const sessions = await reloadSessions();
@@ -175,7 +181,7 @@ export function App() {
       const first = sessions[0];
       if (first) dispatch({ type: "active", id: first.id });
       else {
-        const created = await postJson<Session>("/api/sessions", { title: "첫 대화" });
+        const created = await postJson("/api/sessions", { title: "첫 대화" }, SessionSchema);
         dispatch({ type: "sessions", sessions: [created] });
         dispatch({ type: "active", id: created.id });
       }
@@ -183,50 +189,53 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [authed]);
+  }, [authed, reloadSessions]);
 
   useEffect(() => {
-    if (authed !== true) return;
+    if (authed !== true) return undefined;
     const id = state.activeId;
-    if (!id) return;
+    if (!id) return undefined;
     let cancelled = false;
     void reloadEntries(id).catch((error: unknown) => dispatch({ type: "error", message: String(error) }));
 
     const source = new EventSource(apiUrl(`/api/events?after=0&session=${encodeURIComponent(id)}`));
     source.addEventListener("snapshot", (event) => {
-      const data = JSON.parse((event as MessageEvent<string>).data) as { sessions: Session[]; entries: Entry[]; lastSeq: number };
+      if (!(event instanceof MessageEvent)) return;
+      const data = z.object({ sessions: z.array(SessionSchema), entries: z.array(EntrySchema), lastSeq: z.number() }).parse(JSON.parse(z.string().parse(event.data)));
       dispatch({ type: "snapshot", sessions: data.sessions, entries: data.entries, lastSeq: data.lastSeq });
       dispatch({ type: "connected", value: true });
     });
-    const on = (kind: string, handler: (payload: Record<string, unknown>, seq: number) => void) => {
+    const on = <T,>(kind: string, schema: z.ZodType<T>, handler: (payload: T, seq: number) => void) => {
       source.addEventListener(kind, (event) => {
-        const message = event as MessageEvent<string>;
-        const seq = Number(message.lastEventId || "0");
+        if (!(event instanceof MessageEvent)) return;
+        const seq = Number(event.lastEventId || "0");
         if (seq > 0) dispatch({ type: "seq", seq });
-        handler(JSON.parse(message.data) as Record<string, unknown>, seq);
+        const envelope = z.object({ payload: schema }).parse(JSON.parse(z.string().parse(event.data)));
+        handler(envelope.payload, seq);
       });
     };
-    on("message.started", (payload) => dispatch({ type: "started", entryId: String(payload["entryId"]) }));
-    on("message.delta", (payload) =>
-      dispatch({ type: "delta", entryId: String(payload["entryId"]), text: String(payload["text"] ?? payload["reasoning"] ?? "") }),
+    const entryPayload = z.object({ entryId: z.string() });
+    on("message.started", entryPayload, (payload) => dispatch({ type: "started", entryId: payload.entryId }));
+    on("message.delta", entryPayload.extend({ text: z.string().optional(), reasoning: z.string().optional() }), (payload) =>
+      dispatch({ type: "delta", entryId: payload.entryId, text: payload.text ?? payload.reasoning ?? "" }),
     );
-    on("message.completed", (payload) => {
-      dispatch({ type: "status", entryId: String(payload["entryId"]), status: "complete" });
-      if (!cancelled) void reloadEntries(id);
+    on("message.completed", entryPayload, (payload) => {
+      dispatch({ type: "status", entryId: payload.entryId, status: "complete" });
+      if (!cancelled) reloadEntries(id).catch(reportError);
     });
-    on("message.aborted", (payload) => {
-      dispatch({ type: "status", entryId: String(payload["entryId"]), status: "aborted" });
-      if (!cancelled) void reloadEntries(id);
+    on("message.aborted", entryPayload, (payload) => {
+      dispatch({ type: "status", entryId: payload.entryId, status: "aborted" });
+      if (!cancelled) reloadEntries(id).catch(reportError);
     });
-    on("session.renamed", () => {
-      if (!cancelled) void reloadSessions(query);
+    on("session.renamed", z.unknown(), () => {
+      if (!cancelled) onSessionRenamed();
     });
-    source.onerror = () => dispatch({ type: "connected", value: false });
+    source.addEventListener("error", () => dispatch({ type: "connected", value: false }));
     return () => {
       cancelled = true;
       source.close();
     };
-  }, [state.activeId, authed]);
+  }, [state.activeId, authed, reloadEntries, reportError]);
 
   const send = async (text: string) => {
     const id = state.activeId;
@@ -244,7 +253,7 @@ export function App() {
   };
 
   const newSession = async () => {
-    const created = await postJson<Session>("/api/sessions", { title: "새 대화" });
+    const created = await postJson("/api/sessions", { title: "새 대화" }, SessionSchema);
     await reloadSessions();
     dispatch({ type: "active", id: created.id });
   };
@@ -313,7 +322,7 @@ export function App() {
   const fork = async (entryId: string) => {
     if (!state.activeId) return;
     try {
-      const created = await postJson<{ sessionId: string }>(`/api/sessions/${state.activeId}/fork`, { entryId, title: "분기 대화" });
+      const created = await postJson(`/api/sessions/${state.activeId}/fork`, { entryId, title: "분기 대화" }, z.object({ sessionId: z.string() }));
       await reloadSessions();
       dispatch({ type: "active", id: created.sessionId });
     } catch (error) {
@@ -331,7 +340,7 @@ export function App() {
   };
 
   if (authed === null) return <div className="login"><p>불러오는 중…</p></div>;
-  if (authed !== true) return <Login onDone={() => setAuthed(true)} />;
+  if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
   return (
     <div className="shell">
@@ -358,7 +367,7 @@ export function App() {
                     value={renaming.title}
                     onChange={(event) => setRenaming({ id: session.id, title: event.target.value })}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") void saveRename();
+                      if (event.key === "Enter") saveRename().catch(reportError);
                       if (event.key === "Escape") setRenaming(null);
                     }}
                     autoFocus

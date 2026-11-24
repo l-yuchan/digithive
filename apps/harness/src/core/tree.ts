@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { appendEntry, listEntries, type Entry } from "./sessions";
 
 function entryById(db: Database, sessionId: string, entryId: string): Entry | null {
@@ -6,7 +6,7 @@ function entryById(db: Database, sessionId: string, entryId: string): Entry | nu
 }
 
 export function getLeaf(db: Database, sessionId: string): string | null {
-  const row = db.query("SELECT leaf_id FROM sessions WHERE id = ?").get(sessionId) as { leaf_id: string | null } | null;
+  const row = db.query<{ leaf_id: string | null }, SQLQueryBindings[]>("SELECT leaf_id FROM sessions WHERE id = ?").get(sessionId);
   return row?.leaf_id ?? null;
 }
 
@@ -36,7 +36,7 @@ export function pathEntries(db: Database, sessionId: string, leafId?: string | n
     chain.push(entry);
     current = entry.parentId;
   }
-  return chain.reverse();
+  return chain.toReversed();
 }
 
 /** The newest descendant of an entry, so switching branches lands on a complete turn. */
@@ -151,24 +151,24 @@ export function searchSessions(db: Database, query: string, limit = 20): { id: s
   try {
     if (trimmed.length >= 3) {
       return db
-        .query(
+        .query<{ id: string; title: string }, SQLQueryBindings[]>(
           `SELECT DISTINCT s.id AS id, s.title AS title FROM sessions s
            JOIN entries_fts f ON f.session_id = s.id
            WHERE s.deleted_at IS NULL AND entries_fts MATCH ?
            LIMIT ?`,
         )
-        .all(`"${trimmed.replace(/"/g, '""')}"`, limit) as { id: string; title: string }[];
+        .all(`"${trimmed.replace(/"/g, '""')}"`, limit);
     }
   } catch {
     // fall through to LIKE for short or unparsable queries
   }
   const like = `%${trimmed}%`;
   return db
-    .query(
+    .query<{ id: string; title: string }, SQLQueryBindings[]>(
       `SELECT DISTINCT s.id AS id, s.title AS title FROM sessions s
        LEFT JOIN entries e ON e.session_id = s.id
        WHERE s.deleted_at IS NULL AND (s.title LIKE ? OR e.payload_json LIKE ?)
        LIMIT ?`,
     )
-    .all(like, like, limit) as { id: string; title: string }[];
+    .all(like, like, limit);
 }

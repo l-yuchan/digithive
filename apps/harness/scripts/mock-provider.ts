@@ -7,6 +7,7 @@
  *   contains "메일"  -> tool_call external_action (approval path), then final text
  *   otherwise        -> plain streamed echo
  */
+import { z } from "zod";
 const PORT = Number(process.env["MOCK_PORT"] ?? "8798");
 const DELAY_MS = Number(process.env["MOCK_DELAY_MS"] ?? "0");
 
@@ -59,13 +60,13 @@ const server = Bun.serve({
     if (url.pathname !== "/v1/chat/completions" || request.method !== "POST") {
       return new Response("not found", { status: 404 });
     }
-    const body = (await request.json()) as { messages?: { role: string; content: string }[] };
+    const body = z.object({ messages: z.array(z.object({ role: z.string(), content: z.string() })).optional() }).parse(await request.json());
     const capture = process.env["MOCK_CAPTURE"];
     if (capture) await Bun.write(capture, JSON.stringify({ at: new Date().toISOString(), messages: body.messages ?? [] }, null, 1));
     if (DELAY_MS > 0) await Bun.sleep(DELAY_MS);
 
     const messages = body.messages ?? [];
-    const last = [...messages].reverse().find((message) => message.role === "user");
+    const last = messages.toReversed().find((message) => message.role === "user");
     const prompt = last?.content ?? "";
     const hasToolResult = messages.some((message) => message.role === "tool");
 

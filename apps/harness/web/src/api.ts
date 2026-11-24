@@ -1,47 +1,35 @@
-export type Session = { id: string; title: string; created_at: string; updated_at: string };
-
-export type Part =
-  | { type: "text"; text: string }
-  | { type: "reasoning"; text: string }
-  | { type: "tool_call"; id: string; name: string; arguments: string }
-  | { type: "tool_result"; id: string; name: string; output: string; denied?: boolean; timeout?: boolean }
-  | { type: "error"; message: string };
-
-export type Entry = {
-  id: string;
-  sessionId: string;
-  kind: string;
-  role: string | null;
-  status: string | null;
-  parts: Part[];
-  createdAt: string;
-  seq: number;
-  siblingCount?: number;
-  siblingIndex?: number;
-  siblingIds?: string[];
-};
+import { z } from "zod";
+import { EntrySchema, type PartSchema, SessionSchema } from "../../src/core/contracts";
+export { EntrySchema, SessionSchema };
+export type Session = z.infer<typeof SessionSchema>;
+export type Part = z.infer<typeof PartSchema>;
+export type Entry = z.infer<typeof EntrySchema>;
 
 export function apiUrl(path: string): string {
   const base = window.location.pathname.startsWith("/app2") ? "/app2" : "";
   return `${base}${path}`;
 }
 
-export async function getJson<T>(url: string): Promise<T> {
+export async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<T> {
   const response = await fetch(apiUrl(url));
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return (await response.json()) as T;
+  return schema.parse(await response.json());
 }
 
-export async function postJson<T>(url: string, body: unknown): Promise<T> {
-  return sendJson<T>("POST", url, body);
+export function postJson(url: string, body: unknown): Promise<unknown>;
+export function postJson<T>(url: string, body: unknown, schema: z.ZodType<T>): Promise<T>;
+export function postJson(url: string, body: unknown, schema: z.ZodType = z.unknown()): Promise<unknown> {
+  return sendJson("POST", url, body, schema);
 }
 
-export async function sendJson<T>(method: string, url: string, body?: unknown): Promise<T> {
+export function sendJson(method: string, url: string, body?: unknown): Promise<unknown>;
+export function sendJson<T>(method: string, url: string, body: unknown, schema: z.ZodType<T>): Promise<T>;
+export async function sendJson(method: string, url: string, body?: unknown, schema: z.ZodType = z.unknown()): Promise<unknown> {
   const init: RequestInit =
     body === undefined
       ? { method }
       : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
   const response = await fetch(apiUrl(url), init);
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-  return (await response.json()) as T;
+  return schema.parse(await response.json());
 }

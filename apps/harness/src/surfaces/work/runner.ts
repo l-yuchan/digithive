@@ -1,9 +1,10 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../../events/log";
 import type { PolicyRule } from "../../core/policy";
 import { isLeaseExpired, leaseExpiry } from "../../core/run-state";
 import type { ToolRegistry } from "../../tools/registry";
 import type { StreamFn } from "../../providers/openai";
+import { ok } from "node:assert/strict";
 export { executeRun } from "./execution";
 
 export type WorkDeps = {
@@ -46,33 +47,38 @@ export type RunRow = {
 };
 
 
-const RunShape = (row: Record<string, unknown>): RunRow => ({
-  id: String(row["id"]),
-  sessionId: row["session_id"] === null ? null : String(row["session_id"]),
-  parentRunId: row["parent_run_id"] === null ? null : String(row["parent_run_id"]),
-  origin: String(row["origin"]),
-  goal: String(row["goal"]),
-  status: String(row["status"]),
-  cancelIntent: row["cancel_intent"] === null ? null : String(row["cancel_intent"]),
-  leaseOwner: row["lease_owner"] === null ? null : String(row["lease_owner"]),
-  leaseExpiresAt: row["lease_expires_at"] === null ? null : String(row["lease_expires_at"]),
-  attempt: Number(row["attempt"]),
-  budgetJson: String(row["budget_json"]),
-  resultJson: row["result_json"] === null ? null : String(row["result_json"]),
-  stateJson: row["state_json"] === null ? null : String(row["state_json"]),
-  createdAt: String(row["created_at"]),
-  settledAt: row["settled_at"] === null ? null : String(row["settled_at"]),
+type StoredRun = {
+  id: string; session_id: string | null; parent_run_id: string | null; origin: string; goal: string; status: string;
+  cancel_intent: string | null; lease_owner: string | null; lease_expires_at: string | null; attempt: number;
+  budget_json: string; result_json: string | null; state_json: string | null; created_at: string; settled_at: string | null;
+};
+const RunShape = (row: StoredRun): RunRow => ({
+  id: (row["id"]),
+  sessionId: row["session_id"] === null ? null : (row["session_id"]),
+  parentRunId: row["parent_run_id"] === null ? null : (row["parent_run_id"]),
+  origin: (row["origin"]),
+  goal: (row["goal"]),
+  status: (row["status"]),
+  cancelIntent: row["cancel_intent"] === null ? null : (row["cancel_intent"]),
+  leaseOwner: row["lease_owner"] === null ? null : (row["lease_owner"]),
+  leaseExpiresAt: row["lease_expires_at"] === null ? null : (row["lease_expires_at"]),
+  attempt: (row["attempt"]),
+  budgetJson: (row["budget_json"]),
+  resultJson: row["result_json"] === null ? null : (row["result_json"]),
+  stateJson: row["state_json"] === null ? null : (row["state_json"]),
+  createdAt: (row["created_at"]),
+  settledAt: row["settled_at"] === null ? null : (row["settled_at"]),
 });
 
 const SELECT = "SELECT id, session_id, parent_run_id, origin, goal, status, cancel_intent, lease_owner, lease_expires_at, attempt, budget_json, result_json, state_json, created_at, settled_at FROM runs";
 
 export function getRun(db: Database, id: string): RunRow | null {
-  const row = db.query(`${SELECT} WHERE id = ?`).get(id);
-  return row ? RunShape(row as Record<string, unknown>) : null;
+  const row = db.query<StoredRun, SQLQueryBindings[]>(`${SELECT} WHERE id = ?`).get(id);
+  return row ? RunShape(row) : null;
 }
 
 export function listRuns(db: Database, limit = 30): RunRow[] {
-  return (db.query(`${SELECT} ORDER BY created_at DESC LIMIT ?`).all(limit) as Record<string, unknown>[]).map(RunShape);
+  return db.query<StoredRun, SQLQueryBindings[]>(`${SELECT} ORDER BY created_at DESC LIMIT ?`).all(limit).map(RunShape);
 }
 
 export type RunView = RunRow & {
@@ -84,8 +90,8 @@ export type RunView = RunRow & {
 export function withApprovals(db: Database, runs: readonly RunRow[]): RunView[] {
   return runs.map((run) => {
     const row = db
-      .query("SELECT a.id AS id, t.name AS name FROM approvals a LEFT JOIN tool_calls t ON t.id = a.tool_call_id WHERE a.run_id = ? AND a.status = 'pending' ORDER BY a.requested_at DESC LIMIT 1")
-      .get(run.id) as { id: string; name: string | null } | null;
+      .query<{ id: string; name: string | null }, SQLQueryBindings[]>("SELECT a.id AS id, t.name AS name FROM approvals a LEFT JOIN tool_calls t ON t.id = a.tool_call_id WHERE a.run_id = ? AND a.status = 'pending' ORDER BY a.requested_at DESC LIMIT 1")
+      .get(run.id);
     return { ...run, pendingApprovalId: row?.id ?? null, pendingTool: row?.name ?? null };
   });
 }
@@ -155,11 +161,12 @@ export function enqueueRun(
 /** Claims the oldest queued run under the concurrency cap, with a lease. */
 export function claimNext(db: Database, events: EventLog, owner: string, maxConcurrent = 2, now = Date.now(), leaseMs = 45_000): RunRow | null {
   return db.transaction(() => {
-  const running = db.query("SELECT count(*) AS n FROM runs WHERE origin IN ('work','delegation') AND status = 'running'").get() as { n: number };
+  const running = db.query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM runs WHERE origin IN ('work','delegation') AND status = 'running'").get();
+  ok(running, "count query returns one aggregate row");
   if (running.n >= maxConcurrent) return null;
   const candidate = db
-    .query("SELECT id FROM runs WHERE status = 'queued' AND origin IN ('work','delegation') ORDER BY created_at LIMIT 1")
-    .get() as { id: string } | null;
+    .query<{ id: string }, SQLQueryBindings[]>("SELECT id FROM runs WHERE status = 'queued' AND origin IN ('work','delegation') ORDER BY created_at LIMIT 1")
+    .get();
   if (!candidate) return null;
   const changed = db
     .query("UPDATE runs SET status = 'running', lease_owner = ?, lease_expires_at = ?, attempt = attempt + 1 WHERE id = ? AND status = 'queued'")
@@ -180,9 +187,7 @@ export function decideApproval(
 ): { status: string } {
   const now = input.now ?? Date.now();
   return deps.db.transaction(() => {
-  const approval = deps.db.query("SELECT id, run_id, status, requested_at FROM approvals WHERE id = ?").get(input.approvalId) as
-    | { id: string; run_id: string; status: string; requested_at: string }
-    | null;
+  const approval = deps.db.query<{ id: string; run_id: string; status: string; requested_at: string }, SQLQueryBindings[]>("SELECT id, run_id, status, requested_at FROM approvals WHERE id = ?").get(input.approvalId);
   if (!approval || approval.run_id !== input.runId) throw new Error("approval_not_found");
   if (approval.status !== "pending") throw new Error("approval_already_decided");
   if (getRun(deps.db, input.runId)?.status !== "awaiting_approval") throw new Error("run_not_awaiting_approval");
@@ -200,14 +205,14 @@ export function decideApproval(
 export function reconcileWork(db: Database, events: EventLog, now = Date.now(), ttlMs = 30 * 60_000): { expiredApprovals: number; interrupted: number } {
   return db.transaction(() => {
   const stale = db
-    .query("SELECT id, run_id FROM approvals WHERE status = 'pending' AND requested_at <= ?")
-    .all(new Date(now - ttlMs).toISOString()) as { id: string; run_id: string }[];
+    .query<{ id: string; run_id: string }, SQLQueryBindings[]>("SELECT id, run_id FROM approvals WHERE status = 'pending' AND requested_at <= ?")
+    .all(new Date(now - ttlMs).toISOString());
   for (const approval of stale) {
     db.query("UPDATE approvals SET status = 'expired', decided_at = ? WHERE id = ?").run(new Date(now).toISOString(), approval.id);
     db.query("UPDATE runs SET status = 'queued' WHERE id = ? AND status = 'awaiting_approval'").run(approval.run_id);
     events.append({ kind: "approval.expired", runId: approval.run_id, payload: { approvalId: approval.id }, now });
   }
-  const live = db.query("SELECT id, lease_expires_at FROM runs WHERE status = 'running'").all() as { id: string; lease_expires_at: string | null }[];
+  const live = db.query<{ id: string; lease_expires_at: string | null }, SQLQueryBindings[]>("SELECT id, lease_expires_at FROM runs WHERE status = 'running'").all();
   let interrupted = 0;
   for (const run of live) {
     if (!isLeaseExpired(run.lease_expires_at, now)) continue;

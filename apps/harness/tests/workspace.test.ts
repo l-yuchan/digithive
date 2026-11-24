@@ -23,7 +23,7 @@ test("workspace tools reject traversal and symlinks without changing outside fil
     const tool = tools.find((candidate) => candidate.name === name);
     if (!tool) throw new Error("missing workspace tool");
     for (const path of ["../run-other/secret.txt", "link/secret.txt", "link/new.txt", "../run-other/new.txt", outside]) {
-      await expect(tool.execute({ path, text: "overwrite" }, { runId: "run" })).rejects.toThrow("path_outside_workspace");
+      await Promise.resolve(expect(tool.execute({ path, text: "overwrite" }, { runId: "run" })).rejects.toThrow("path_outside_workspace"));
     }
   }
   expect(await Bun.file(join(outside, "secret.txt")).text()).toBe("private");

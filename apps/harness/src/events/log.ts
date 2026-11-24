@@ -1,5 +1,6 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
+import { ok } from "node:assert/strict";
 
 export const EVENT_KINDS = [
   "session.created",
@@ -58,7 +59,7 @@ export type LoggedEvent = {
 };
 
 export type AppendInput = {
-  readonly kind: EventKind | string;
+  readonly kind: string;
   readonly payload: unknown;
   readonly runId?: string | null;
   readonly sessionId?: string | null;
@@ -119,7 +120,8 @@ export class EventLog {
   }
 
   lastSeq(): number {
-    const row = this.#db.query("SELECT COALESCE(MAX(seq), 0) AS seq FROM events").get() as { seq: number };
+    const row = this.#db.query<{ seq: number }, SQLQueryBindings[]>("SELECT COALESCE(MAX(seq), 0) AS seq FROM events").get();
+    ok(row, "sequence query returns one aggregate row");
     return row.seq;
   }
 

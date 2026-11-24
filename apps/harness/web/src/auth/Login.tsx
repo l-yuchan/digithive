@@ -27,7 +27,7 @@ export function Login({ onDone }: { onDone: () => void }) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          void submit();
+          submit().catch(() => setError("로그인 요청에 실패했습니다."));
         }}
       >
         <input

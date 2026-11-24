@@ -1,20 +1,19 @@
 import { decide } from "../../core/policy";
 import { ownsLease } from "./lease";
 import type { WorkDeps, RunRow } from "./runner";
+import { z } from "zod";
 
 type Call = { readonly id: string; readonly name: string; readonly arguments: string };
 
 function argumentsOf(call: Call): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(call.arguments || "{}");
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid_tool_arguments");
-  return Object.fromEntries(Object.entries(parsed));
+  return z.record(z.string(), z.unknown()).parse(JSON.parse(call.arguments || "{}"));
 }
 
 export function toolDecision(deps: WorkDeps, call: Call, profile?: string): "allow" | "ask" | "deny" {
   const tool = deps.tools.get(call.name);
   if (!tool || (profile === "read-only" && tool.action !== "read")) return "deny";
   const args = argumentsOf(call);
-  return decide(deps.policy, { action: tool.action, resource: String(args["path"] ?? args["summary"] ?? "*") });
+  return decide(deps.policy, { action: tool.action, resource: z.string().parse(args["path"] ?? args["summary"] ?? "*") });
 }
 
 export async function executeTool(

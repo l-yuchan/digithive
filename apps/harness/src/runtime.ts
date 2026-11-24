@@ -7,6 +7,7 @@ import { builtinTools, WORK_POLICY } from "./tools/builtins";
 import { openAiStream } from "./providers/openai";
 import { settleExpiredRuns } from "./core/run-state";
 import { claimNext, executeRun, reconcileWork, WORK_LIMITS, type WorkDeps } from "./surfaces/work/runner";
+import { z } from "zod";
 
 const here = import.meta.dir;
 const appRoot = resolve(here, "..");
@@ -96,7 +97,7 @@ function parseHeaders(raw: string): Record<string, string> {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return {};
     const out: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(z.record(z.string(), z.unknown()).parse(parsed))) {
       if (typeof value === "string") out[key] = value;
     }
     return out;

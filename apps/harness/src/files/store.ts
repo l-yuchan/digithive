@@ -1,4 +1,4 @@
-import type { Database } from "bun:sqlite";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -41,9 +41,7 @@ export function storeFile(
 }
 
 export function readStoredFile(db: Database, id: string): { meta: StoredFile; bytes: Uint8Array } | null {
-  const row = db.query("SELECT id, name, mime, bytes, sha256, path, origin, created_at FROM files WHERE id = ?").get(id) as
-    | { id: string; name: string; mime: string; bytes: number; sha256: string; path: string; origin: string; created_at: string }
-    | null;
+  const row = db.query<{ id: string; name: string; mime: string; bytes: number; sha256: string; path: string; origin: string; created_at: string }, SQLQueryBindings[]>("SELECT id, name, mime, bytes, sha256, path, origin, created_at FROM files WHERE id = ?").get(id);
   if (!row) return null;
   const meta: StoredFile = {
     id: row.id,
@@ -59,16 +57,16 @@ export function readStoredFile(db: Database, id: string): { meta: StoredFile; by
 }
 
 export function listFiles(db: Database, limit = 50): StoredFile[] {
-  return (db.query("SELECT id, name, mime, bytes, sha256, path, origin, created_at FROM files ORDER BY created_at DESC LIMIT ?").all(limit) as Record<string, unknown>[]).map(
+  return (db.query<{ id: string; name: string; mime: string; bytes: number; sha256: string; path: string; origin: string; created_at: string }, SQLQueryBindings[]>("SELECT id, name, mime, bytes, sha256, path, origin, created_at FROM files ORDER BY created_at DESC LIMIT ?").all(limit)).map(
     (row) => ({
-      id: String(row["id"]),
-      name: String(row["name"]),
-      mime: String(row["mime"]),
-      bytes: Number(row["bytes"]),
-      sha256: String(row["sha256"]),
-      path: String(row["path"]),
-      origin: String(row["origin"]),
-      createdAt: String(row["created_at"]),
+      id: (row["id"]),
+      name: (row["name"]),
+      mime: (row["mime"]),
+      bytes: (row["bytes"]),
+      sha256: (row["sha256"]),
+      path: (row["path"]),
+      origin: (row["origin"]),
+      createdAt: (row["created_at"]),
     }),
   );
 }
