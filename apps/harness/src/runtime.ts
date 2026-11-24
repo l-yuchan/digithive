@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { openDatabase } from "./store/db";
 import { EventLog } from "./events/log";
@@ -46,9 +46,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const dataDir = resolve(appRoot, "data");
   return {
     port: Number(env["PORT"] ?? "8799"),
-    dbPath: env["HARNESS_DB"] ?? resolve(dataDir, "harness.db"),
+    dbPath: resolve(env["HARNESS_DB"] ?? join(dataDir, "harness.db")),
     webRoot: resolve(appRoot, "web/dist"),
-    workspaceRoot: env["HARNESS_WORKSPACE"] ?? resolve(dataDir, "workspace"),
+    workspaceRoot: resolve(env["HARNESS_WORKSPACE"] ?? join(dataDir, "workspace")),
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
     model: env["MODEL_NAME"] ?? "mock-model",
