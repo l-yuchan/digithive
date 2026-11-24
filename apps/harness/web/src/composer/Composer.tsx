@@ -1,7 +1,13 @@
 import { useRef, useState } from "react";
 import { shouldSubmit } from "./submit";
 
-export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (text: string) => void }) {
+export function Composer({
+  disabled,
+  onSend,
+}: {
+  disabled: boolean;
+  onSend: (text: string) => void;
+}) {
   const [text, setText] = useState("");
   const composing = useRef(false);
 
@@ -40,7 +46,15 @@ export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (tex
         onKeyDown={(event) => {
           if (event.key !== "Enter") return;
           if (event.nativeEvent.isComposing || composing.current) return;
-          if (!shouldSubmit({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing, keyCode: event.keyCode })) return;
+          if (
+            !shouldSubmit({
+              key: event.key,
+              shiftKey: event.shiftKey,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.keyCode,
+            })
+          )
+            return;
           event.preventDefault();
           submit();
         }}

@@ -18,13 +18,27 @@ export async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<T> 
 
 export function postJson(url: string, body: unknown): Promise<unknown>;
 export function postJson<T>(url: string, body: unknown, schema: z.ZodType<T>): Promise<T>;
-export function postJson(url: string, body: unknown, schema: z.ZodType = z.unknown()): Promise<unknown> {
+export function postJson(
+  url: string,
+  body: unknown,
+  schema: z.ZodType = z.unknown(),
+): Promise<unknown> {
   return sendJson("POST", url, body, schema);
 }
 
 export function sendJson(method: string, url: string, body?: unknown): Promise<unknown>;
-export function sendJson<T>(method: string, url: string, body: unknown, schema: z.ZodType<T>): Promise<T>;
-export async function sendJson(method: string, url: string, body?: unknown, schema: z.ZodType = z.unknown()): Promise<unknown> {
+export function sendJson<T>(
+  method: string,
+  url: string,
+  body: unknown,
+  schema: z.ZodType<T>,
+): Promise<T>;
+export async function sendJson(
+  method: string,
+  url: string,
+  body?: unknown,
+  schema: z.ZodType = z.unknown(),
+): Promise<unknown> {
   const init: RequestInit =
     body === undefined
       ? { method }

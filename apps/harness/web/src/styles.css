@@ -352,7 +352,6 @@ a.primary[aria-disabled="true"] {
   gap: 6px;
 }
 
-
 .tabs {
   display: flex;
   gap: 6px;
@@ -480,7 +479,6 @@ button.ghost {
   cursor: pointer;
 }
 
-
 .login {
   max-width: 360px;
   margin: 12vh auto;
@@ -518,7 +516,6 @@ button.ghost {
   color: var(--muted);
   font-size: 13px;
 }
-
 
 .connections {
   display: flex;
@@ -572,4 +569,3 @@ button.ghost {
   line-height: 1.4;
   text-align: center;
 }
-

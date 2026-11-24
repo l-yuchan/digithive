@@ -2,10 +2,27 @@ import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl, getJson, postJson } from "../api";
 
-const SyncStateSchema = z.object({ source: z.string(), ok: z.boolean(), lastSyncAt: z.union([z.string(), z.null()]), error: z.union([z.string(), z.null()]) });
-const ConnectionsSchema = z.object({ googleConnected: z.boolean(), canvasConfigured: z.boolean(), pushConfigured: z.boolean(), states: z.array(SyncStateSchema) });
+const SyncStateSchema = z.object({
+  source: z.string(),
+  ok: z.boolean(),
+  lastSyncAt: z.union([z.string(), z.null()]),
+  error: z.union([z.string(), z.null()]),
+});
+const ConnectionsSchema = z.object({
+  googleConnected: z.boolean(),
+  canvasConfigured: z.boolean(),
+  pushConfigured: z.boolean(),
+  states: z.array(SyncStateSchema),
+});
 type Connections = z.infer<typeof ConnectionsSchema>;
-const BriefingSchema = z.union([z.object({ slot: z.string(), createdAt: z.string(), content: z.object({ text: z.string(), generatedAt: z.string() }) }), z.null()]);
+const BriefingSchema = z.union([
+  z.object({
+    slot: z.string(),
+    createdAt: z.string(),
+    content: z.object({ text: z.string(), generatedAt: z.string() }),
+  }),
+  z.null(),
+]);
 type Briefing = z.infer<typeof BriefingSchema>;
 
 const LABELS: Record<string, string> = { calendar: "캘린더", gmail: "메일", canvas: "한양 LMS" };
@@ -26,13 +43,17 @@ export function ConnectionsPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [pushState, setPushState] = useState<string>("확인 전");
 
-  const load = useCallback(() => Promise.all([
-      getJson("/api/connections", ConnectionsSchema),
-      getJson("/api/briefings/latest", BriefingSchema),
-    ]).then(([connections, latest]) => {
-    setState(connections);
-    setBriefing(latest);
-  }), []);
+  const load = useCallback(
+    () =>
+      Promise.all([
+        getJson("/api/connections", ConnectionsSchema),
+        getJson("/api/briefings/latest", BriefingSchema),
+      ]).then(([connections, latest]) => {
+        setState(connections);
+        setBriefing(latest);
+      }),
+    [],
+  );
 
   useEffect(() => {
     void load().catch((error: unknown) => setMessage(String(error)));
@@ -44,8 +65,28 @@ export function ConnectionsPanel() {
     setBusy("sync");
     setMessage(null);
     try {
-      const result = await postJson("/api/connections/sync", {}, z.object({ results: z.array(z.object({ source: z.string(), ok: z.boolean(), count: z.number(), error: z.union([z.string(), z.null()]) })) }));
-      setMessage(result.results.map((row) => `${LABELS[row.source] ?? row.source} ${row.ok ? `${row.count}건` : `실패: ${row.error ?? ""}`}`).join(" · "));
+      const result = await postJson(
+        "/api/connections/sync",
+        {},
+        z.object({
+          results: z.array(
+            z.object({
+              source: z.string(),
+              ok: z.boolean(),
+              count: z.number(),
+              error: z.union([z.string(), z.null()]),
+            }),
+          ),
+        }),
+      );
+      setMessage(
+        result.results
+          .map(
+            (row) =>
+              `${LABELS[row.source] ?? row.source} ${row.ok ? `${row.count}건` : `실패: ${row.error ?? ""}`}`,
+          )
+          .join(" · "),
+      );
       await load();
     } catch (error) {
       setMessage(String(error));
@@ -58,8 +99,21 @@ export function ConnectionsPanel() {
     setBusy("briefing");
     setMessage(null);
     try {
-      const result = await postJson("/api/briefings/run", {}, z.object({ slot: z.string(), stored: z.boolean(), pushed: z.boolean(), error: z.union([z.string(), z.null()]) }));
-      setMessage(result.stored ? `브리핑 ${result.slot} 생성${result.pushed ? " · 알림 전송" : ` · 알림 없음(${result.error ?? "no_device"})`}` : `브리핑 없음(${result.error ?? "이미 생성됨"})`);
+      const result = await postJson(
+        "/api/briefings/run",
+        {},
+        z.object({
+          slot: z.string(),
+          stored: z.boolean(),
+          pushed: z.boolean(),
+          error: z.union([z.string(), z.null()]),
+        }),
+      );
+      setMessage(
+        result.stored
+          ? `브리핑 ${result.slot} 생성${result.pushed ? " · 알림 전송" : ` · 알림 없음(${result.error ?? "no_device"})`}`
+          : `브리핑 없음(${result.error ?? "이미 생성됨"})`,
+      );
       await load();
     } catch (error) {
       setMessage(String(error));
@@ -100,8 +154,16 @@ export function ConnectionsPanel() {
   const testPush = async () => {
     setBusy("test");
     try {
-      const outcome = await postJson("/api/push/test", {}, z.object({ sent: z.number(), failed: z.number(), errors: z.array(z.string()) }));
-      setMessage(outcome.sent > 0 ? `테스트 알림 전송(${outcome.sent}대)` : `전송 실패: ${outcome.errors.join(", ")}`);
+      const outcome = await postJson(
+        "/api/push/test",
+        {},
+        z.object({ sent: z.number(), failed: z.number(), errors: z.array(z.string()) }),
+      );
+      setMessage(
+        outcome.sent > 0
+          ? `테스트 알림 전송(${outcome.sent}대)`
+          : `전송 실패: ${outcome.errors.join(", ")}`,
+      );
     } catch (error) {
       setMessage(String(error));
     } finally {
@@ -114,7 +176,10 @@ export function ConnectionsPanel() {
       <div className="card">
         <div className="card-head">
           <h2>Google (캘린더·메일)</h2>
-          <span className={`badge ${state?.googleConnected ? "succeeded" : "failed"}`} data-testid="google-state">
+          <span
+            className={`badge ${state?.googleConnected ? "succeeded" : "failed"}`}
+            data-testid="google-state"
+          >
             {state?.googleConnected ? "연결됨" : "미연결"}
           </span>
         </div>
@@ -124,7 +189,11 @@ export function ConnectionsPanel() {
             : "연결하면 캘린더와 메일을 읽어 일정·메일 브리핑에 넣습니다."}
         </p>
         <div className="run-actions">
-          <a className="primary button-link" href={apiUrl("/api/oauth/google/start")} data-testid="google-connect">
+          <a
+            className="primary button-link"
+            href={apiUrl("/api/oauth/google/start")}
+            data-testid="google-connect"
+          >
             {state?.googleConnected ? "다시 연결" : "Google 연결"}
           </a>
         </div>
@@ -133,7 +202,10 @@ export function ConnectionsPanel() {
       <div className="card">
         <div className="card-head">
           <h2>한양 LMS</h2>
-          <span className={`badge ${state?.canvasConfigured ? "succeeded" : "failed"}`} data-testid="canvas-state">
+          <span
+            className={`badge ${state?.canvasConfigured ? "succeeded" : "failed"}`}
+            data-testid="canvas-state"
+          >
             {state?.canvasConfigured ? "설정됨" : "미설정"}
           </span>
         </div>
@@ -143,18 +215,33 @@ export function ConnectionsPanel() {
       <div className="card">
         <div className="card-head">
           <h2>수집 상태</h2>
-          <button className="ghost" type="button" data-testid="sync-now" disabled={busy !== null} onClick={() => void sync()}>
+          <button
+            className="ghost"
+            type="button"
+            data-testid="sync-now"
+            disabled={busy !== null}
+            onClick={() => void sync()}
+          >
             지금 동기화
           </button>
         </div>
         <ul className="state-list" data-testid="sync-states">
-          {(state?.states ?? []).length === 0 ? <li className="run-meta">아직 수집 기록이 없습니다.</li> : null}
+          {(state?.states ?? []).length === 0 ? (
+            <li className="run-meta">아직 수집 기록이 없습니다.</li>
+          ) : null}
           {(state?.states ?? []).map((row) => (
             <li key={row.source}>
-              <span className={`badge ${row.ok ? "succeeded" : "failed"}`}>{row.ok ? "정상" : "오류"}</span>{" "}
+              <span className={`badge ${row.ok ? "succeeded" : "failed"}`}>
+                {row.ok ? "정상" : "오류"}
+              </span>{" "}
               {LABELS[row.source] ?? row.source}
               {row.error ? <span className="run-meta"> · {row.error}</span> : null}
-              {row.lastSyncAt ? <span className="run-meta"> · {new Date(row.lastSyncAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</span> : null}
+              {row.lastSyncAt ? (
+                <span className="run-meta">
+                  {" "}
+                  · {new Date(row.lastSyncAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
+                </span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -167,12 +254,27 @@ export function ConnectionsPanel() {
             {pushState}
           </span>
         </div>
-        <p className="run-meta">브리핑이 만들어지면 이 기기로 알립니다. (VAPID: {state?.pushConfigured ? "설정됨" : "미설정"})</p>
+        <p className="run-meta">
+          브리핑이 만들어지면 이 기기로 알립니다. (VAPID:{" "}
+          {state?.pushConfigured ? "설정됨" : "미설정"})
+        </p>
         <div className="run-actions">
-          <button className="primary" type="button" data-testid="push-enable" disabled={busy !== null} onClick={() => void enablePush()}>
+          <button
+            className="primary"
+            type="button"
+            data-testid="push-enable"
+            disabled={busy !== null}
+            onClick={() => void enablePush()}
+          >
             이 기기에서 알림 받기
           </button>
-          <button className="ghost" type="button" data-testid="push-test" disabled={busy !== null} onClick={() => void testPush()}>
+          <button
+            className="ghost"
+            type="button"
+            data-testid="push-test"
+            disabled={busy !== null}
+            onClick={() => void testPush()}
+          >
             테스트 알림
           </button>
         </div>
@@ -181,7 +283,13 @@ export function ConnectionsPanel() {
       <div className="card">
         <div className="card-head">
           <h2>최근 브리핑</h2>
-          <button className="ghost" type="button" data-testid="briefing-run" disabled={busy !== null} onClick={() => void runBriefing()}>
+          <button
+            className="ghost"
+            type="button"
+            data-testid="briefing-run"
+            disabled={busy !== null}
+            onClick={() => void runBriefing()}
+          >
             지금 만들기
           </button>
         </div>

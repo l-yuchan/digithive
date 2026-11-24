@@ -16,7 +16,12 @@ function setup(): { db: Database; events: EventLog; sessionId: string } {
   return { db, events: new EventLog(db), sessionId: session.id };
 }
 
-function deps(db: Database, events: EventLog, stream: StreamFn, extra: Partial<ConversationDeps> = {}): ConversationDeps {
+function deps(
+  db: Database,
+  events: EventLog,
+  stream: StreamFn,
+  extra: Partial<ConversationDeps> = {},
+): ConversationDeps {
   return { db, events, stream, tools: createRegistry([]), ...extra };
 }
 
@@ -30,7 +35,10 @@ function textStream(chunks: string[]): StreamFn {
 describe("conversation turn", () => {
   test("streams deltas into one assistant entry and settles the run", async () => {
     const { db, events, sessionId } = setup();
-    const result = await runTurn(deps(db, events, textStream(["안", "녕", "하세요"])), { sessionId, text: "인사해줘" });
+    const result = await runTurn(deps(db, events, textStream(["안", "녕", "하세요"])), {
+      sessionId,
+      text: "인사해줘",
+    });
     expect(result.status).toBe("succeeded");
     expect(result.text).toBe("안녕하세요");
 
@@ -49,7 +57,9 @@ describe("conversation turn", () => {
     }
     expect(kinds.filter((kind) => kind === "message.delta").length).toBe(3);
 
-    const run = db.query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = ?").get(result.runId);
+    const run = db
+      .query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = ?")
+      .get(result.runId);
     ok(run, "fixture row exists");
     expect(run.status).toBe("succeeded");
   });
@@ -60,7 +70,12 @@ describe("conversation turn", () => {
     const stream: StreamFn = async function* () {
       call += 1;
       if (call === 1) {
-        yield { type: "tool_call", id: "call_1", name: "shell_exec", arguments: '{"command":"rm -rf /"}' };
+        yield {
+          type: "tool_call",
+          id: "call_1",
+          name: "shell_exec",
+          arguments: '{"command":"rm -rf /"}',
+        };
         yield { type: "done", finishReason: "tool_calls" };
         return;
       }
@@ -77,7 +92,10 @@ describe("conversation turn", () => {
       },
     ]);
     const result = await runTurn(
-      deps(db, events, stream, { tools, policy: [{ action: "shell", resource: "*", effect: "deny" }] }),
+      deps(db, events, stream, {
+        tools,
+        policy: [{ action: "shell", resource: "*", effect: "deny" }],
+      }),
       { sessionId, text: "삭제해줘" },
     );
     expect(result.status).toBe("succeeded");
@@ -103,12 +121,31 @@ describe("conversation turn", () => {
       yield { type: "done", finishReason: "stop" };
     };
     const tools = createRegistry([
-      { name: "slow", description: "never ends", parameters: {}, action: "read", execute: () => new Promise<string>(() => {}) },
+      {
+        name: "slow",
+        description: "never ends",
+        parameters: {},
+        action: "read",
+        execute: () => new Promise<string>(() => {}),
+      },
     ]);
-    const result = await runTurn(deps(db, events, stream, { tools, limits: { firstTokenMs: 5_000, idleMs: 5_000, totalMs: 5_000, toolMs: 30, maxOutputTokens: 100, maxToolRounds: 3 } }), {
-      sessionId,
-      text: "느린 도구 실행",
-    });
+    const result = await runTurn(
+      deps(db, events, stream, {
+        tools,
+        limits: {
+          firstTokenMs: 5_000,
+          idleMs: 5_000,
+          totalMs: 5_000,
+          toolMs: 30,
+          maxOutputTokens: 100,
+          maxToolRounds: 3,
+        },
+      }),
+      {
+        sessionId,
+        text: "느린 도구 실행",
+      },
+    );
     expect(result.status).toBe("succeeded");
     expect(events.after(0, sessionId).map((event) => event.kind)).toContain("tool.timeout");
   });
@@ -116,20 +153,39 @@ describe("conversation turn", () => {
   test("an aborted stream settles the run as interrupted instead of leaving it running", async () => {
     const { db, events, sessionId } = setup();
     const hanging: StreamFn = (_messages, _tools, options) => ({
-      [Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<AdapterEvent>>((_resolve, reject) => {
-        options.signal?.addEventListener("abort", () => reject(new ProviderError("aborted")), { once: true });
-      }) }),
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<IteratorResult<AdapterEvent>>((_resolve, reject) => {
+            options.signal?.addEventListener("abort", () => reject(new ProviderError("aborted")), {
+              once: true,
+            });
+          }),
+      }),
     });
     const result = await runTurn(
-      deps(db, events, hanging, { limits: { firstTokenMs: 5_000, idleMs: 5_000, totalMs: 40, toolMs: 1_000, maxOutputTokens: 100, maxToolRounds: 1 } }),
+      deps(db, events, hanging, {
+        limits: {
+          firstTokenMs: 5_000,
+          idleMs: 5_000,
+          totalMs: 40,
+          toolMs: 1_000,
+          maxOutputTokens: 100,
+          maxToolRounds: 1,
+        },
+      }),
       { sessionId, text: "멈추는 요청" },
     );
     expect(result.status).toBe("aborted");
-    const run = db.query<{
-      status: string;
-      cancel_intent: string | null;
-      settled_at: string | null;
-    }, SQLQueryBindings[]>("SELECT status, cancel_intent, settled_at FROM runs WHERE id = ?").get(result.runId);
+    const run = db
+      .query<
+        {
+          status: string;
+          cancel_intent: string | null;
+          settled_at: string | null;
+        },
+        SQLQueryBindings[]
+      >("SELECT status, cancel_intent, settled_at FROM runs WHERE id = ?")
+      .get(result.runId);
     ok(run, "fixture row exists");
     expect(run.status).toBe("interrupted");
     expect(run.cancel_intent).toBe("timeout");
@@ -149,10 +205,29 @@ test("deleting a session during a stream prevents tool effects and preserves can
     yield { type: "done", finishReason: "tool_calls" };
   };
   try {
-    const tools = createRegistry([{ name: "effect", description: "effect", parameters: {}, action: "read", execute: async () => { effects++; return "late"; } }]);
-    const result = await runTurn(deps(db, events, stream, { tools }), { sessionId, text: "cancel me" });
+    const tools = createRegistry([
+      {
+        name: "effect",
+        description: "effect",
+        parameters: {},
+        action: "read",
+        execute: async () => {
+          effects++;
+          return "late";
+        },
+      },
+    ]);
+    const result = await runTurn(deps(db, events, stream, { tools }), {
+      sessionId,
+      text: "cancel me",
+    });
     expect(result.status).toBe("aborted");
     expect(effects).toBe(0);
-    expect(db.query("SELECT status,cancel_intent FROM runs").get()).toEqual({ status: "cancelled", cancel_intent: "policy" });
-  } finally { db.close(); }
+    expect(db.query("SELECT status,cancel_intent FROM runs").get()).toEqual({
+      status: "cancelled",
+      cancel_intent: "policy",
+    });
+  } finally {
+    db.close();
+  }
 });

@@ -6,7 +6,13 @@ import { createRegistry } from "./tools/registry";
 import { builtinTools, WORK_POLICY } from "./tools/builtins";
 import { openAiStream } from "./providers/openai";
 import { settleExpiredRuns } from "./core/run-state";
-import { claimNext, executeRun, reconcileWork, WORK_LIMITS, type WorkDeps } from "./surfaces/work/runner";
+import {
+  claimNext,
+  executeRun,
+  reconcileWork,
+  WORK_LIMITS,
+  type WorkDeps,
+} from "./surfaces/work/runner";
 import { z } from "zod";
 
 const here = import.meta.dir;
@@ -54,7 +60,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     modelHeaders: env["HARNESS_MODEL_HEADERS"] ?? "",
     googleClientId: env["GOOGLE_CLIENT_ID"] ?? "",
     googleClientSecret: env["GOOGLE_CLIENT_SECRET"] ?? "",
-    googleRedirectUri: env["GOOGLE_REDIRECT_URI"] ?? "https://digithive.chanoil.com/api/oauth/google/callback",
+    googleRedirectUri:
+      env["GOOGLE_REDIRECT_URI"] ?? "https://digithive.chanoil.com/api/oauth/google/callback",
     canvasBaseUrl: env["CANVAS_URL"] ?? env["CANVAS_HOST"] ?? "",
     canvasToken: env["CANVAS_TOKEN"] ?? "",
     vapidPublicKey: env["VAPID_PUBLIC_KEY"] ?? "",
@@ -105,4 +112,3 @@ function parseHeaders(raw: string): Record<string, string> {
     return {};
   }
 }
-

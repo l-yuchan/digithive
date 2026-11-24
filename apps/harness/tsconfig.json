@@ -24,5 +24,12 @@
     "noEmit": true,
     "moduleDetection": "force"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "tests/**/*.ts", "web/src/**/*.ts", "web/src/**/*.tsx"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "scripts/**/*.ts",
+    "tests/**/*.ts",
+    "web/src/**/*.ts",
+    "web/src/**/*.tsx"
+  ]
 }

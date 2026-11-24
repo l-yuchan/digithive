@@ -29,8 +29,14 @@ describe("event log", () => {
       const reopened = new EventLog(database);
       const c = reopened.append({ kind: "message.delta", payload: { text: "녕" } });
       expect([a.seq, b.seq, c.seq]).toEqual([1, 2, 3]);
-      expect(reopened.after(a.seq).map((event) => event.payload)).toEqual([{ text: "안" }, { text: "녕" }]);
-    } finally { database.close(); rmSync(root, { recursive: true, force: true }); }
+      expect(reopened.after(a.seq).map((event) => event.payload)).toEqual([
+        { text: "안" },
+        { text: "녕" },
+      ]);
+    } finally {
+      database.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test("after(seq) replays exactly the later events, in order", () => {
@@ -40,7 +46,9 @@ describe("event log", () => {
     log.append({ kind: "message.delta", payload: { text: "b" } });
     const replay = log.after(first.seq);
     expect(replay.map((event) => event.kind)).toEqual(["message.delta", "message.delta"]);
-    expect(replay.map((event) => z.object({ text: z.string() }).parse(event.payload).text)).toEqual(["a", "b"]);
+    expect(replay.map((event) => z.object({ text: z.string() }).parse(event.payload).text)).toEqual(
+      ["a", "b"],
+    );
   });
 
   test("after(seq, sessionId) filters to one session", () => {
@@ -82,8 +90,12 @@ test("local appends do not skip earlier events written by another connection", (
       second.append({ kind: "external", payload: null });
       first.append({ kind: "local", payload: null });
       expect(seen).toEqual(["external", "local"]);
-    } finally { stop(); }
-  } finally { database.close(); }
+    } finally {
+      stop();
+    }
+  } finally {
+    database.close();
+  }
 });
 
 test("subscribing from a replay cursor delivers events written between replay and subscription", async () => {
@@ -94,7 +106,20 @@ test("subscribing from a replay cursor delivers events written between replay an
   let stop: () => void = () => {};
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const delivered = new Promise<string>((resolve) => { stop = log.subscribe((event) => resolve(event.kind), replayCursor); });
-    expect(await Promise.race([delivered, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("gap event lost")), 500); })])).toBe("in-the-gap");
-  } finally { if (timer) clearTimeout(timer); stop(); database.close(); }
+    const delivered = new Promise<string>((resolve) => {
+      stop = log.subscribe((event) => resolve(event.kind), replayCursor);
+    });
+    expect(
+      await Promise.race([
+        delivered,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("gap event lost")), 500);
+        }),
+      ]),
+    ).toBe("in-the-gap");
+  } finally {
+    if (timer) clearTimeout(timer);
+    stop();
+    database.close();
+  }
 });

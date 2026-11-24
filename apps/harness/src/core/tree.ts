@@ -6,7 +6,11 @@ function entryById(db: Database, sessionId: string, entryId: string): Entry | nu
 }
 
 export function getLeaf(db: Database, sessionId: string): string | null {
-  const row = db.query<{ leaf_id: string | null }, SQLQueryBindings[]>("SELECT leaf_id FROM sessions WHERE id = ?").get(sessionId);
+  const row = db
+    .query<{ leaf_id: string | null }, SQLQueryBindings[]>(
+      "SELECT leaf_id FROM sessions WHERE id = ?",
+    )
+    .get(sessionId);
   return row?.leaf_id ?? null;
 }
 
@@ -75,7 +79,12 @@ export type EditResult = { readonly entry: Entry; readonly replaced: Entry };
  */
 export function editUserMessage(
   db: Database,
-  input: { readonly sessionId: string; readonly entryId: string; readonly text: string; readonly now?: number },
+  input: {
+    readonly sessionId: string;
+    readonly entryId: string;
+    readonly text: string;
+    readonly now?: number;
+  },
 ): EditResult {
   const original = entryById(db, input.sessionId, input.entryId);
   if (!original) throw new Error("entry_not_found");
@@ -96,7 +105,10 @@ export function editUserMessage(
  * Regenerating an assistant answer starts a new sibling under the same parent
  * user message; the previous answer remains readable in the tree.
  */
-export function regeneratePoint(db: Database, input: { readonly sessionId: string; readonly entryId: string }): { parentId: string | null; userText: string } {
+export function regeneratePoint(
+  db: Database,
+  input: { readonly sessionId: string; readonly entryId: string },
+): { parentId: string | null; userText: string } {
   const all = listEntries(db, input.sessionId);
   const target = all.find((entry) => entry.id === input.entryId);
   if (!target) throw new Error("entry_not_found");
@@ -113,7 +125,12 @@ export function regeneratePoint(db: Database, input: { readonly sessionId: strin
 /** Copies the ancestor chain of `entryId` into a brand-new session. */
 export function forkSession(
   db: Database,
-  input: { readonly sessionId: string; readonly entryId: string; readonly title: string; readonly now?: number },
+  input: {
+    readonly sessionId: string;
+    readonly entryId: string;
+    readonly title: string;
+    readonly now?: number;
+  },
 ): { sessionId: string; entries: number } {
   const chain = pathEntries(db, input.sessionId, input.entryId);
   if (chain.length === 0) throw new Error("empty_path");
@@ -145,7 +162,11 @@ export function forkSession(
   return { sessionId: id, entries: chain.length };
 }
 
-export function searchSessions(db: Database, query: string, limit = 20): { id: string; title: string }[] {
+export function searchSessions(
+  db: Database,
+  query: string,
+  limit = 20,
+): { id: string; title: string }[] {
   const trimmed = query.trim();
   if (trimmed.length === 0) return [];
   try {

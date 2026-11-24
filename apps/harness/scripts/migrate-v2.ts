@@ -26,7 +26,14 @@ function parseArgs(argv: string[]): Args {
 }
 
 function tables(db: Database): Set<string> {
-  return new Set((db.query<{ name: string }, SQLQueryBindings[]>("SELECT name FROM sqlite_master WHERE type = 'table'").all()).map((row) => row.name));
+  return new Set(
+    db
+      .query<{ name: string }, SQLQueryBindings[]>(
+        "SELECT name FROM sqlite_master WHERE type = 'table'",
+      )
+      .all()
+      .map((row) => row.name),
+  );
 }
 
 export type MigrationReport = {
@@ -47,7 +54,9 @@ export function migrateV2(fromPath: string, toDb: Database, dryRun: boolean): Mi
   }
 
   const conversations = source
-    .query<{ id: string; title: string; created_at: string }, SQLQueryBindings[]>("SELECT id, title, created_at FROM conversations ORDER BY created_at")
+    .query<{ id: string; title: string; created_at: string }, SQLQueryBindings[]>(
+      "SELECT id, title, created_at FROM conversations ORDER BY created_at",
+    )
     .all();
 
   let created = 0;
@@ -61,7 +70,9 @@ export function migrateV2(fromPath: string, toDb: Database, dryRun: boolean): Mi
   const insertEntry = toDb.query(
     "INSERT INTO entries (id, session_id, parent_id, kind, role, status, payload_json, created_at, seq) VALUES (?,?,?,?,?,?,?,?,?)",
   );
-  const insertFts = toDb.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?,?,?)");
+  const insertFts = toDb.query(
+    "INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?,?,?)",
+  );
 
   const run = toDb.transaction(() => {
     for (const conversation of conversations) {
@@ -82,7 +93,12 @@ export function migrateV2(fromPath: string, toDb: Database, dryRun: boolean): Mi
       created += 1;
 
       const messages = source
-        .query<{ id: string; role: string; content: string; created_at: string }, SQLQueryBindings[]>("SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid")
+        .query<
+          { id: string; role: string; content: string; created_at: string },
+          SQLQueryBindings[]
+        >(
+          "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid",
+        )
         .all(conversation.id);
       let parent: string | null = null;
       let seq = 0;
@@ -102,7 +118,8 @@ export function migrateV2(fromPath: string, toDb: Database, dryRun: boolean): Mi
             message.created_at,
             seq,
           );
-          if (message.content.trim().length >= 3) insertFts.run(entryId, conversation.id, message.content.trim());
+          if (message.content.trim().length >= 3)
+            insertFts.run(entryId, conversation.id, message.content.trim());
         }
         parent = entryId;
         entries += 1;
@@ -113,53 +130,84 @@ export function migrateV2(fromPath: string, toDb: Database, dryRun: boolean): Mi
   run();
 
   let memories = 0;
-  const memoryCount = toDb.query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM memories").get();
+  const memoryCount = toDb
+    .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM memories")
+    .get();
   ok(memoryCount, "count query returns one aggregate row");
   const alreadyMigrated = memoryCount.n > 0;
   if (sourceTables.has("memories") && !dryRun && !alreadyMigrated) {
-    const cols = new Set((source.query<{ name: string }, SQLQueryBindings[]>("PRAGMA table_info(memories)").all()).map((row) => row.name));
+    const cols = new Set(
+      source
+        .query<{ name: string }, SQLQueryBindings[]>("PRAGMA table_info(memories)")
+        .all()
+        .map((row) => row.name),
+    );
     if (cols.has("kind") && cols.has("text") && cols.has("created_at")) {
-      const rows = source.query<{ kind: string; text: string; created_at: string }, SQLQueryBindings[]>("SELECT kind, text, created_at FROM memories").all();
+      const rows = source
+        .query<{ kind: string; text: string; created_at: string }, SQLQueryBindings[]>(
+          "SELECT kind, text, created_at FROM memories",
+        )
+        .all();
       for (const row of rows) {
-        toDb.query("INSERT INTO memories (id, kind, text, source_json, created_at, updated_at) VALUES (?,?,?,?,?,?)").run(
-          crypto.randomUUID(),
-          row.kind,
-          row.text,
-          JSON.stringify({ v2: true }),
-          row.created_at,
-          row.created_at,
-        );
+        toDb
+          .query(
+            "INSERT INTO memories (id, kind, text, source_json, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+          )
+          .run(
+            crypto.randomUUID(),
+            row.kind,
+            row.text,
+            JSON.stringify({ v2: true }),
+            row.created_at,
+            row.created_at,
+          );
         memories += 1;
       }
     }
   }
 
   let files = 0;
-  const fileCount = toDb.query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM files WHERE origin = 'v2'").get();
+  const fileCount = toDb
+    .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM files WHERE origin = 'v2'")
+    .get();
   ok(fileCount, "count query returns one aggregate row");
   const filesMigrated = fileCount.n > 0;
   if (sourceTables.has("files") && !dryRun && !filesMigrated) {
-    const cols = new Set((source.query<{ name: string }, SQLQueryBindings[]>("PRAGMA table_info(files)").all()).map((row) => row.name));
+    const cols = new Set(
+      source
+        .query<{ name: string }, SQLQueryBindings[]>("PRAGMA table_info(files)")
+        .all()
+        .map((row) => row.name),
+    );
     if (cols.has("name") && cols.has("path")) {
-      const rows = source.query<{
-        name: string;
-        path: string;
-        mime: string | null;
-        bytes: number | null;
-        sha256: string | null;
-        created_at: string;
-      }, SQLQueryBindings[]>("SELECT name, path, mime, bytes, sha256, created_at FROM files").all();
+      const rows = source
+        .query<
+          {
+            name: string;
+            path: string;
+            mime: string | null;
+            bytes: number | null;
+            sha256: string | null;
+            created_at: string;
+          },
+          SQLQueryBindings[]
+        >("SELECT name, path, mime, bytes, sha256, created_at FROM files")
+        .all();
       for (const row of rows) {
-        toDb.query("INSERT INTO files (id, name, mime, bytes, sha256, path, origin, created_at) VALUES (?,?,?,?,?,?,?,?)").run(
-          crypto.randomUUID(),
-          row.name,
-          row.mime ?? "application/octet-stream",
-          row.bytes ?? 0,
-          row.sha256 ?? "",
-          row.path,
-          "v2",
-          row.created_at,
-        );
+        toDb
+          .query(
+            "INSERT INTO files (id, name, mime, bytes, sha256, path, origin, created_at) VALUES (?,?,?,?,?,?,?,?)",
+          )
+          .run(
+            crypto.randomUUID(),
+            row.name,
+            row.mime ?? "application/octet-stream",
+            row.bytes ?? 0,
+            row.sha256 ?? "",
+            row.path,
+            "v2",
+            row.created_at,
+          );
         files += 1;
       }
     }
@@ -175,10 +223,17 @@ if (import.meta.main) {
   const report = migrateV2(args.from, target, args.dryRun);
   console.log(JSON.stringify(report));
   if (!args.dryRun) {
-    const counts = target.query<{
-      sessions: number;
-      entries: number;
-    }, SQLQueryBindings[]>("SELECT (SELECT count(*) FROM sessions) AS sessions, (SELECT count(*) FROM entries) AS entries").get();
+    const counts = target
+      .query<
+        {
+          sessions: number;
+          entries: number;
+        },
+        SQLQueryBindings[]
+      >(
+        "SELECT (SELECT count(*) FROM sessions) AS sessions, (SELECT count(*) FROM entries) AS entries",
+      )
+      .get();
     console.log(JSON.stringify({ target: args.to ?? ":memory:", ...counts }));
   }
   target.close();

@@ -1,6 +1,16 @@
 import { z } from "zod";
 import { useCallback, useEffect, useEffectEvent, useReducer, useState } from "react";
-import { apiUrl, EntrySchema, SessionSchema, getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
+import {
+  apiUrl,
+  EntrySchema,
+  SessionSchema,
+  getJson,
+  postJson,
+  sendJson,
+  type Entry,
+  type Part,
+  type Session,
+} from "./api";
 import { Composer } from "./composer/Composer";
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
@@ -27,18 +37,31 @@ type Action =
   | { type: "error"; message: string | null }
   | { type: "seq"; seq: number };
 
-const initial: State = { sessions: [], activeId: null, entries: [], lastSeq: 0, connected: false, error: null };
+const initial: State = {
+  sessions: [],
+  activeId: null,
+  entries: [],
+  lastSeq: 0,
+  connected: false,
+  error: null,
+};
 
 function appendText(parts: Part[], text: string): Part[] {
   const last = parts.at(-1);
-  if (last && last.type === "text") return [...parts.slice(0, -1), { type: "text", text: last.text + text }];
+  if (last && last.type === "text")
+    return [...parts.slice(0, -1), { type: "text", text: last.text + text }];
   return [...parts, { type: "text", text }];
 }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "snapshot":
-      return { ...state, sessions: action.sessions, entries: action.entries, lastSeq: Math.max(state.lastSeq, action.lastSeq) };
+      return {
+        ...state,
+        sessions: action.sessions,
+        entries: action.entries,
+        lastSeq: Math.max(state.lastSeq, action.lastSeq),
+      };
     case "sessions":
       return { ...state, sessions: action.sessions };
     case "active":
@@ -85,11 +108,20 @@ function reducer(state: State, action: Action): State {
       }
       return {
         ...state,
-        entries: state.entries.map((entry) => (entry.id === action.entryId ? { ...entry, parts: appendText(entry.parts, action.text) } : entry)),
+        entries: state.entries.map((entry) =>
+          entry.id === action.entryId
+            ? { ...entry, parts: appendText(entry.parts, action.text) }
+            : entry,
+        ),
       };
     }
     case "status":
-      return { ...state, entries: state.entries.map((entry) => (entry.id === action.entryId ? { ...entry, status: action.status } : entry)) };
+      return {
+        ...state,
+        entries: state.entries.map((entry) =>
+          entry.id === action.entryId ? { ...entry, status: action.status } : entry,
+        ),
+      };
     case "connected":
       return { ...state, connected: action.value };
     case "error":
@@ -127,7 +159,11 @@ function Parts({ parts }: { parts: Part[] }) {
           );
         if (part.type === "tool_result")
           return (
-            <p key={index} className={part.denied ? "tool-result denied" : "tool-result"} data-testid="tool-result">
+            <p
+              key={index}
+              className={part.denied ? "tool-result denied" : "tool-result"}
+              data-testid="tool-result"
+            >
               {part.denied ? "거부됨" : part.timeout ? "시간 초과" : "결과"} · {part.name}
             </p>
           );
@@ -158,16 +194,25 @@ export function App() {
   }, []);
   const reloadSessions = useCallback(async (q?: string) => {
     const suffix = q && q.trim().length > 0 ? `?q=${encodeURIComponent(q.trim())}` : "";
-    const body = await getJson(`/api/sessions${suffix}`, z.object({ sessions: z.array(SessionSchema) }));
+    const body = await getJson(
+      `/api/sessions${suffix}`,
+      z.object({ sessions: z.array(SessionSchema) }),
+    );
     dispatch({ type: "sessions", sessions: body.sessions });
     return body.sessions;
   }, []);
 
   const reloadEntries = useCallback(async (id: string) => {
-    const body = await getJson(`/api/sessions/${id}/entries`, z.object({ entries: z.array(EntrySchema) }));
+    const body = await getJson(
+      `/api/sessions/${id}/entries`,
+      z.object({ entries: z.array(EntrySchema) }),
+    );
     dispatch({ type: "entries", entries: body.entries });
   }, []);
-  const reportError = useCallback((error: unknown) => dispatch({ type: "error", message: String(error) }), []);
+  const reportError = useCallback(
+    (error: unknown) => dispatch({ type: "error", message: String(error) }),
+    [],
+  );
   const onSessionRenamed = useEffectEvent(() => {
     reloadSessions(query).catch(reportError);
   });
@@ -196,28 +241,56 @@ export function App() {
     const id = state.activeId;
     if (!id) return undefined;
     let cancelled = false;
-    void reloadEntries(id).catch((error: unknown) => dispatch({ type: "error", message: String(error) }));
+    void reloadEntries(id).catch((error: unknown) =>
+      dispatch({ type: "error", message: String(error) }),
+    );
 
     const source = new EventSource(apiUrl(`/api/events?after=0&session=${encodeURIComponent(id)}`));
     source.addEventListener("snapshot", (event) => {
       if (!(event instanceof MessageEvent)) return;
-      const data = z.object({ sessions: z.array(SessionSchema), entries: z.array(EntrySchema), lastSeq: z.number() }).parse(JSON.parse(z.string().parse(event.data)));
-      dispatch({ type: "snapshot", sessions: data.sessions, entries: data.entries, lastSeq: data.lastSeq });
+      const data = z
+        .object({
+          sessions: z.array(SessionSchema),
+          entries: z.array(EntrySchema),
+          lastSeq: z.number(),
+        })
+        .parse(JSON.parse(z.string().parse(event.data)));
+      dispatch({
+        type: "snapshot",
+        sessions: data.sessions,
+        entries: data.entries,
+        lastSeq: data.lastSeq,
+      });
       dispatch({ type: "connected", value: true });
     });
-    const on = <T,>(kind: string, schema: z.ZodType<T>, handler: (payload: T, seq: number) => void) => {
+    const on = <T,>(
+      kind: string,
+      schema: z.ZodType<T>,
+      handler: (payload: T, seq: number) => void,
+    ) => {
       source.addEventListener(kind, (event) => {
         if (!(event instanceof MessageEvent)) return;
         const seq = Number(event.lastEventId || "0");
         if (seq > 0) dispatch({ type: "seq", seq });
-        const envelope = z.object({ payload: schema }).parse(JSON.parse(z.string().parse(event.data)));
+        const envelope = z
+          .object({ payload: schema })
+          .parse(JSON.parse(z.string().parse(event.data)));
         handler(envelope.payload, seq);
       });
     };
     const entryPayload = z.object({ entryId: z.string() });
-    on("message.started", entryPayload, (payload) => dispatch({ type: "started", entryId: payload.entryId }));
-    on("message.delta", entryPayload.extend({ text: z.string().optional(), reasoning: z.string().optional() }), (payload) =>
-      dispatch({ type: "delta", entryId: payload.entryId, text: payload.text ?? payload.reasoning ?? "" }),
+    on("message.started", entryPayload, (payload) =>
+      dispatch({ type: "started", entryId: payload.entryId }),
+    );
+    on(
+      "message.delta",
+      entryPayload.extend({ text: z.string().optional(), reasoning: z.string().optional() }),
+      (payload) =>
+        dispatch({
+          type: "delta",
+          entryId: payload.entryId,
+          text: payload.text ?? payload.reasoning ?? "",
+        }),
     );
     on("message.completed", entryPayload, (payload) => {
       dispatch({ type: "status", entryId: payload.entryId, status: "complete" });
@@ -322,7 +395,11 @@ export function App() {
   const fork = async (entryId: string) => {
     if (!state.activeId) return;
     try {
-      const created = await postJson(`/api/sessions/${state.activeId}/fork`, { entryId, title: "분기 대화" }, z.object({ sessionId: z.string() }));
+      const created = await postJson(
+        `/api/sessions/${state.activeId}/fork`,
+        { entryId, title: "분기 대화" },
+        z.object({ sessionId: z.string() }),
+      );
       await reloadSessions();
       dispatch({ type: "active", id: created.sessionId });
     } catch (error) {
@@ -339,14 +416,24 @@ export function App() {
     }
   };
 
-  if (authed === null) return <div className="login"><p>불러오는 중…</p></div>;
+  if (authed === null)
+    return (
+      <div className="login">
+        <p>불러오는 중…</p>
+      </div>
+    );
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
   return (
     <div className="shell">
       <aside className="sidebar" aria-label="대화 목록">
         <h1>digithive</h1>
-        <button className="primary" type="button" data-testid="new-session" onClick={() => void newSession()}>
+        <button
+          className="primary"
+          type="button"
+          data-testid="new-session"
+          onClick={() => void newSession()}
+        >
           새 대화
         </button>
         <input
@@ -400,7 +487,12 @@ export function App() {
                   </button>
                   {confirmDelete === session.id ? (
                     <>
-                      <button type="button" className="icon danger" data-testid="session-delete-confirm" onClick={() => void removeSession(session.id)}>
+                      <button
+                        type="button"
+                        className="icon danger"
+                        data-testid="session-delete-confirm"
+                        onClick={() => void removeSession(session.id)}
+                      >
                         삭제
                       </button>
                       <button type="button" className="icon" onClick={() => setConfirmDelete(null)}>
@@ -408,7 +500,13 @@ export function App() {
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="icon" aria-label={`${session.title} 삭제`} data-testid="session-delete" onClick={() => setConfirmDelete(session.id)}>
+                    <button
+                      type="button"
+                      className="icon"
+                      aria-label={`${session.title} 삭제`}
+                      data-testid="session-delete"
+                      onClick={() => setConfirmDelete(session.id)}
+                    >
                       ×
                     </button>
                   )}
@@ -423,103 +521,157 @@ export function App() {
       </aside>
       <main className="conversation" aria-label={view === "chat" ? "대화" : "작업"}>
         <nav className="tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={view === "chat"} data-testid="tab-chat" onClick={() => setView("chat")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "chat"}
+            data-testid="tab-chat"
+            onClick={() => setView("chat")}
+          >
             대화
           </button>
-          <button type="button" role="tab" aria-selected={view === "work"} data-testid="tab-work" onClick={() => setView("work")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "work"}
+            data-testid="tab-work"
+            onClick={() => setView("work")}
+          >
             작업
           </button>
-          <button type="button" role="tab" aria-selected={view === "connections"} data-testid="tab-connections" onClick={() => setView("connections")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "connections"}
+            data-testid="tab-connections"
+            onClick={() => setView("connections")}
+          >
             연결
           </button>
         </nav>
-        {view === "work" ? <WorkPanel /> : view === "connections" ? <ConnectionsPanel /> : (
-        <>
-        <ol className="messages" data-testid="messages" aria-live="polite">
-          {state.entries
-            .filter((entry) => entry.kind === "message")
-            .map((entry) => (
-              <li
-                key={entry.id}
-                className={`bubble ${entry.role ?? "assistant"} ${entry.status ?? ""}`}
-                data-testid={`entry-${entry.role ?? "assistant"}`}
-                data-entry-id={entry.id}
-              >
-                <span className="author">
-                  {entry.role === "user" ? "나" : "비서"}
-                  {(entry.siblingCount ?? 1) > 1 ? (
-                    <span className="branches">
-                      <button type="button" className="icon" data-testid="branch-prev" onClick={() => void switchBranch(entry.id, -1)}>
-                        ‹
-                      </button>
-                      <span data-testid="branch-index">
-                        {entry.siblingIndex}/{entry.siblingCount}
+        {view === "work" ? (
+          <WorkPanel />
+        ) : view === "connections" ? (
+          <ConnectionsPanel />
+        ) : (
+          <>
+            <ol className="messages" data-testid="messages" aria-live="polite">
+              {state.entries
+                .filter((entry) => entry.kind === "message")
+                .map((entry) => (
+                  <li
+                    key={entry.id}
+                    className={`bubble ${entry.role ?? "assistant"} ${entry.status ?? ""}`}
+                    data-testid={`entry-${entry.role ?? "assistant"}`}
+                    data-entry-id={entry.id}
+                  >
+                    <span className="author">
+                      {entry.role === "user" ? "나" : "비서"}
+                      {(entry.siblingCount ?? 1) > 1 ? (
+                        <span className="branches">
+                          <button
+                            type="button"
+                            className="icon"
+                            data-testid="branch-prev"
+                            onClick={() => void switchBranch(entry.id, -1)}
+                          >
+                            ‹
+                          </button>
+                          <span data-testid="branch-index">
+                            {entry.siblingIndex}/{entry.siblingCount}
+                          </span>
+                          <button
+                            type="button"
+                            className="icon"
+                            data-testid="branch-next"
+                            onClick={() => void switchBranch(entry.id, 1)}
+                          >
+                            ›
+                          </button>
+                        </span>
+                      ) : null}
+                    </span>
+                    {editing?.id === entry.id ? (
+                      <span className="edit-form">
+                        <textarea
+                          data-testid="edit-input"
+                          rows={3}
+                          value={editing.text}
+                          onChange={(event) =>
+                            setEditing({ id: entry.id, text: event.target.value })
+                          }
+                          autoFocus
+                        />
+                        <span className="row">
+                          <button
+                            type="button"
+                            className="primary"
+                            data-testid="edit-save"
+                            onClick={() => void saveEdit()}
+                          >
+                            저장 후 다시 묻기
+                          </button>
+                          <button type="button" onClick={() => setEditing(null)}>
+                            취소
+                          </button>
+                        </span>
                       </span>
-                      <button type="button" className="icon" data-testid="branch-next" onClick={() => void switchBranch(entry.id, 1)}>
-                        ›
+                    ) : (
+                      <Parts parts={entry.parts} />
+                    )}
+                    {entry.status === "streaming" && entry.parts.length === 0 ? (
+                      <span className="typing">…</span>
+                    ) : null}
+                    <span className="actions">
+                      {entry.role === "user" ? (
+                        <button
+                          type="button"
+                          className="link"
+                          data-testid="msg-edit"
+                          onClick={() =>
+                            setEditing({
+                              id: entry.id,
+                              text: entry.parts
+                                .filter(
+                                  (part): part is { type: "text"; text: string } =>
+                                    part.type === "text",
+                                )
+                                .map((part) => part.text)
+                                .join(""),
+                            })
+                          }
+                        >
+                          수정
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="link"
+                          data-testid="msg-regenerate"
+                          onClick={() => void regenerate(entry.id)}
+                        >
+                          재생성
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="link"
+                        data-testid="msg-fork"
+                        onClick={() => void fork(entry.id)}
+                      >
+                        분기
                       </button>
                     </span>
-                  ) : null}
-                </span>
-                {editing?.id === entry.id ? (
-                  <span className="edit-form">
-                    <textarea
-                      data-testid="edit-input"
-                      rows={3}
-                      value={editing.text}
-                      onChange={(event) => setEditing({ id: entry.id, text: event.target.value })}
-                      autoFocus
-                    />
-                    <span className="row">
-                      <button type="button" className="primary" data-testid="edit-save" onClick={() => void saveEdit()}>
-                        저장 후 다시 묻기
-                      </button>
-                      <button type="button" onClick={() => setEditing(null)}>
-                        취소
-                      </button>
-                    </span>
-                  </span>
-                ) : (
-                  <Parts parts={entry.parts} />
-                )}
-                {entry.status === "streaming" && entry.parts.length === 0 ? <span className="typing">…</span> : null}
-                <span className="actions">
-                  {entry.role === "user" ? (
-                    <button
-                      type="button"
-                      className="link"
-                      data-testid="msg-edit"
-                      onClick={() =>
-                        setEditing({
-                          id: entry.id,
-                          text: entry.parts
-                            .filter((part): part is { type: "text"; text: string } => part.type === "text")
-                            .map((part) => part.text)
-                            .join(""),
-                        })
-                      }
-                    >
-                      수정
-                    </button>
-                  ) : (
-                    <button type="button" className="link" data-testid="msg-regenerate" onClick={() => void regenerate(entry.id)}>
-                      재생성
-                    </button>
-                  )}
-                  <button type="button" className="link" data-testid="msg-fork" onClick={() => void fork(entry.id)}>
-                    분기
-                  </button>
-                </span>
-              </li>
-            ))}
-        </ol>
-        {state.error ? (
-          <p className="error" role="alert" data-testid="chat-error">
-            {state.error}
-          </p>
-        ) : null}
-        <Composer disabled={sending} onSend={(text) => void send(text)} />
-        </>
+                  </li>
+                ))}
+            </ol>
+            {state.error ? (
+              <p className="error" role="alert" data-testid="chat-error">
+                {state.error}
+              </p>
+            ) : null}
+            <Composer disabled={sending} onSend={(text) => void send(text)} />
+          </>
         )}
       </main>
     </div>

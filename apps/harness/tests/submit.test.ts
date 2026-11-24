@@ -12,7 +12,9 @@ describe("composer submit rules", () => {
 
   test("Enter during a Korean IME composition never submits", () => {
     expect(shouldSubmit({ key: "Enter", shiftKey: false, isComposing: true })).toBe(false);
-    expect(shouldSubmit({ key: "Enter", shiftKey: false, nativeEvent: { isComposing: true } })).toBe(false);
+    expect(
+      shouldSubmit({ key: "Enter", shiftKey: false, nativeEvent: { isComposing: true } }),
+    ).toBe(false);
     expect(shouldSubmit({ key: "Enter", shiftKey: false, keyCode: 229 })).toBe(false);
   });
 

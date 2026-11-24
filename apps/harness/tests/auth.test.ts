@@ -7,7 +7,14 @@ import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { createRegistry } from "../src/tools/registry";
 import { createApp, type AppDeps } from "../src/server/app";
-import { COOKIE_NAME, checkPassphrase, isPublicRoute, issueCookie, readCookie, verifyCookie } from "../src/server/auth";
+import {
+  COOKIE_NAME,
+  checkPassphrase,
+  isPublicRoute,
+  issueCookie,
+  readCookie,
+  verifyCookie,
+} from "../src/server/auth";
 import type { StreamFn } from "../src/providers/openai";
 import type { ConversationDeps } from "../src/surfaces/conversation/loop";
 import type { WorkDeps } from "../src/surfaces/work/runner";
@@ -16,7 +23,12 @@ import { z } from "zod";
 const auth = { passphrase: "correct horse", secret: "test-secret-value" };
 const idle: StreamFn = async function* () {};
 const resources: { db: Database; webRoot: string }[] = [];
-afterAll(() => { for (const resource of resources) { resource.db.close(); rmSync(resource.webRoot, { recursive: true, force: true }); } });
+afterAll(() => {
+  for (const resource of resources) {
+    resource.db.close();
+    rmSync(resource.webRoot, { recursive: true, force: true });
+  }
+});
 
 function deps(overrides: { passphrase?: string } = {}): AppDeps {
   const db = new Database(":memory:");
@@ -34,7 +46,16 @@ function deps(overrides: { passphrase?: string } = {}): AppDeps {
     work,
     webRoot,
     auth: { passphrase: overrides.passphrase ?? auth.passphrase, secret: auth.secret },
-    google: { db, events, vaultSecret: auth.secret, config: { clientId: "id", clientSecret: "secret", redirectUri: "http://local/api/oauth/google/callback" } },
+    google: {
+      db,
+      events,
+      vaultSecret: auth.secret,
+      config: {
+        clientId: "id",
+        clientSecret: "secret",
+        redirectUri: "http://local/api/oauth/google/callback",
+      },
+    },
     canvas: { db, events, config: { baseUrl: "", token: "" } },
     vapid: { publicKey: "", privateKey: "", subject: "mailto:test@local" },
   };
@@ -81,10 +102,20 @@ describe("auth gate on the server", () => {
   });
 
   test("a wrong passphrase is rejected and the right one sets an HttpOnly cookie", async () => {
-    const bad = await app(new Request("http://local/api/login", { method: "POST", body: JSON.stringify({ passphrase: "nope" }) }));
+    const bad = await app(
+      new Request("http://local/api/login", {
+        method: "POST",
+        body: JSON.stringify({ passphrase: "nope" }),
+      }),
+    );
     expect(bad.status).toBe(401);
 
-    const good = await app(new Request("http://local/api/login", { method: "POST", body: JSON.stringify({ passphrase: auth.passphrase }) }));
+    const good = await app(
+      new Request("http://local/api/login", {
+        method: "POST",
+        body: JSON.stringify({ passphrase: auth.passphrase }),
+      }),
+    );
     expect(good.status).toBe(200);
     const setCookie = good.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain(`${COOKIE_NAME}=`);
@@ -92,15 +123,26 @@ describe("auth gate on the server", () => {
     const cookie = readCookie(setCookie);
     expect(verifyCookie(auth, cookie)).toBe(true);
 
-    const authed = await app(new Request("http://local/api/sessions", { headers: { cookie: `${COOKIE_NAME}=${cookie}` } }));
+    const authed = await app(
+      new Request("http://local/api/sessions", { headers: { cookie: `${COOKIE_NAME}=${cookie}` } }),
+    );
     expect(authed.status).toBe(200);
   });
 
   test("the Google start endpoint redirects the browser instead of returning JSON", async () => {
     const authed = createApp(deps());
-    const login = await authed(new Request("http://local/api/login", { method: "POST", body: JSON.stringify({ passphrase: auth.passphrase }) }));
+    const login = await authed(
+      new Request("http://local/api/login", {
+        method: "POST",
+        body: JSON.stringify({ passphrase: auth.passphrase }),
+      }),
+    );
     const cookie = readCookie(login.headers.get("set-cookie"));
-    const response = await authed(new Request("http://local/api/oauth/google/start", { headers: { cookie: `${COOKIE_NAME}=${cookie}` } }));
+    const response = await authed(
+      new Request("http://local/api/oauth/google/start", {
+        headers: { cookie: `${COOKIE_NAME}=${cookie}` },
+      }),
+    );
     expect(response.status).toBe(302);
     const location = response.headers.get("location") ?? "";
     expect(location.startsWith("https://accounts.google.com/o/oauth2/v2/auth?")).toBe(true);
@@ -120,15 +162,31 @@ describe("auth gate on the server", () => {
   test("delegation API rejects missing and non-finite budgets instead of creating a child", async () => {
     const fixture = deps({ passphrase: "" });
     const delegationApp = createApp(fixture);
-    const parent = await delegationApp(new Request("http://local/api/runs", { method: "POST", body: JSON.stringify({ goal: "parent" }) }));
+    const parent = await delegationApp(
+      new Request("http://local/api/runs", {
+        method: "POST",
+        body: JSON.stringify({ goal: "parent" }),
+      }),
+    );
     const body = z.object({ id: z.string() }).parse(await parent.json());
     expect(parent.status).toBe(201);
     for (const budget of [undefined, {}, { maxMicroUsd: -1, maxToolCalls: 1 }]) {
-      const result = await delegationApp(new Request(`http://local/api/runs/${body.id}/delegate`, { method: "POST", body: JSON.stringify({
-        goal: "child", inputRefs: ["mail:1"], completionCondition: "done", permissionProfile: "read-only", budget,
-      }) }));
+      const result = await delegationApp(
+        new Request(`http://local/api/runs/${body.id}/delegate`, {
+          method: "POST",
+          body: JSON.stringify({
+            goal: "child",
+            inputRefs: ["mail:1"],
+            completionCondition: "done",
+            permissionProfile: "read-only",
+            budget,
+          }),
+        }),
+      );
       expect(result.status).toBe(422);
     }
-    expect(fixture.db.query("SELECT count(*) AS n FROM runs WHERE origin='delegation'").get()).toEqual({ n: 0 });
+    expect(
+      fixture.db.query("SELECT count(*) AS n FROM runs WHERE origin='delegation'").get(),
+    ).toEqual({ n: 0 });
   });
 });

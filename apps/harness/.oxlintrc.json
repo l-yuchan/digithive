@@ -1,9 +1,7 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "import", "oxc", "react", "unicorn"],
-  "jsPlugins": [
-    { "name": "programming", "specifier": "./lint/oxlint-plugin/index.js" }
-  ],
+  "jsPlugins": [{ "name": "programming", "specifier": "./lint/oxlint-plugin/index.js" }],
   "categories": { "correctness": "error", "suspicious": "error" },
   "rules": {
     "react/react-in-jsx-scope": "off",
@@ -16,7 +14,10 @@
     "typescript/no-explicit-any": "error",
     "typescript/no-non-null-assertion": "error",
     "typescript/consistent-type-imports": "error",
-    "typescript/ban-ts-comment": ["error", { "ts-expect-error": true, "ts-ignore": true, "ts-nocheck": true }],
+    "typescript/ban-ts-comment": [
+      "error",
+      { "ts-expect-error": true, "ts-ignore": true, "ts-nocheck": true }
+    ],
     "typescript/no-floating-promises": ["error", { "ignoreVoid": false }],
     "typescript/no-misused-promises": "error",
     "typescript/await-thenable": "error",

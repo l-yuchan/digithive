@@ -20,9 +20,16 @@ export function open(secret: string, sealed: string): string | null {
   const [ivPart, bodyPart, tagPart] = sealed.split(".");
   if (!ivPart || !bodyPart || !tagPart) return null;
   try {
-    const decipher = createDecipheriv("aes-256-gcm", keyFrom(secret), Buffer.from(ivPart, "base64url"));
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      keyFrom(secret),
+      Buffer.from(ivPart, "base64url"),
+    );
     decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
-    return Buffer.concat([decipher.update(Buffer.from(bodyPart, "base64url")), decipher.final()]).toString("utf8");
+    return Buffer.concat([
+      decipher.update(Buffer.from(bodyPart, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
   } catch {
     return null;
   }

@@ -23,7 +23,11 @@ export function createHarness(config: HarnessConfig): {
     let summary = "";
     for await (const event of stream(
       [
-        { role: "system", content: "다음 대화를 나중에 맥락으로 쓸 수 있게 3~6문장으로 요약하세요. 사실만 남기고 추측은 넣지 마세요." },
+        {
+          role: "system",
+          content:
+            "다음 대화를 나중에 맥락으로 쓸 수 있게 3~6문장으로 요약하세요. 사실만 남기고 추측은 넣지 마세요.",
+        },
         { role: "user", content: transcript },
       ],
       [],
@@ -59,7 +63,11 @@ export function createHarness(config: HarnessConfig): {
       },
     },
     canvas: { db, events, config: { baseUrl: config.canvasBaseUrl, token: config.canvasToken } },
-    vapid: { publicKey: config.vapidPublicKey, privateKey: config.vapidPrivateKey, subject: config.vapidSubject },
+    vapid: {
+      publicKey: config.vapidPublicKey,
+      privateKey: config.vapidPrivateKey,
+      subject: config.vapidSubject,
+    },
     webRoot: resolve(config.webRoot),
     auth: { passphrase: config.passphrase, secret: config.sessionSecret },
   };
@@ -71,12 +79,18 @@ if (import.meta.main) {
   const harness = createHarness(config);
   const reconciled = settleExpiredRuns(harness.deps.db);
   for (const runId of reconciled) {
-    harness.deps.events.append({ kind: "run.interrupted", runId, payload: { reason: "host_restart" } });
+    harness.deps.events.append({
+      kind: "run.interrupted",
+      runId,
+      payload: { reason: "host_restart" },
+    });
   }
   setInterval(() => {
     const result = reconcileWork(harness.deps.db, harness.deps.events);
     if (result.interrupted > 0) console.log(`reconciled ${result.interrupted} interrupted run(s)`);
   }, 15_000).unref();
   const server = Bun.serve({ port: config.port, fetch: harness.handler });
-  console.log(`digithive harness on http://127.0.0.1:${server.port} (model ${config.model} @ ${config.baseUrl})`);
+  console.log(
+    `digithive harness on http://127.0.0.1:${server.port} (model ${config.model} @ ${config.baseUrl})`,
+  );
 }

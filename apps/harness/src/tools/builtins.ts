@@ -13,15 +13,21 @@ function safePath(root: string, runId: string, relative: string): string {
   const target = resolve(base, relative);
   const contained = (parent: string, child: string) => {
     const path = relativePath(parent, child);
-    return path !== ".." && !path.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(path);
+    return (
+      path !== ".." &&
+      !path.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) &&
+      !isAbsolute(path)
+    );
   };
   if (!contained(base, target)) throw new Error("path_outside_workspace");
   mkdirSync(root, { recursive: true });
-  if (existsSync(base) && !contained(realpathSync(root), realpathSync(base))) throw new Error("path_outside_workspace");
+  if (existsSync(base) && !contained(realpathSync(root), realpathSync(base)))
+    throw new Error("path_outside_workspace");
   mkdirSync(base, { recursive: true });
   let ancestor = target;
   while (!existsSync(ancestor)) ancestor = dirname(ancestor);
-  if (!contained(realpathSync(base), realpathSync(ancestor))) throw new Error("path_outside_workspace");
+  if (!contained(realpathSync(base), realpathSync(ancestor)))
+    throw new Error("path_outside_workspace");
   return target;
 }
 
@@ -34,7 +40,11 @@ export function builtinTools(roots: WorkspaceRoots): ToolRuntime[] {
     {
       name: "workspace_write",
       description: "작업 공간 안에 텍스트 파일을 쓴다. path는 작업 공간 기준 상대 경로.",
-      parameters: { type: "object", properties: { path: { type: "string" }, text: { type: "string" } }, required: ["path", "text"] },
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" }, text: { type: "string" } },
+        required: ["path", "text"],
+      },
       action: "edit",
       execute: async (args, context) => {
         const input = z.object({ path: z.string(), text: z.string() }).parse(args);
@@ -60,9 +70,14 @@ export function builtinTools(roots: WorkspaceRoots): ToolRuntime[] {
     {
       name: "external_action",
       description: "외부로 나가는 행동(전송·게시 등)을 요청한다. 승인이 필요하다.",
-      parameters: { type: "object", properties: { summary: { type: "string" } }, required: ["summary"] },
+      parameters: {
+        type: "object",
+        properties: { summary: { type: "string" } },
+        required: ["summary"],
+      },
       action: "external_action",
-      execute: async (args) => `외부 행동 실행됨: ${z.object({ summary: z.string() }).parse(args).summary}`,
+      execute: async (args) =>
+        `외부 행동 실행됨: ${z.object({ summary: z.string() }).parse(args).summary}`,
     },
   ];
 }

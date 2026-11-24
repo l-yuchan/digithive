@@ -16,7 +16,9 @@ const formatter = new Intl.DateTimeFormat("ko-KR", {
 
 /** The only clock the model may trust. Injected on every turn, never once per session. */
 export function clockLine(now: number): string {
-  const parts = Object.fromEntries(formatter.formatToParts(new Date(now)).map((part) => [part.type, part.value]));
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(now)).map((part) => [part.type, part.value]),
+  );
   const iso = new Date(now).toISOString();
   return `현재 시각: ${parts["year"]}-${parts["month"]}-${parts["day"]} (${parts["weekday"]}) ${parts["hour"]}:${parts["minute"]}:${parts["second"]} ${TIMEZONE} · ${iso}`;
 }
@@ -64,7 +66,9 @@ export function buildContext(input: BuildInput): BuiltContext {
     "외부 행동(전송·삭제·구매·설정 변경)은 사용자의 명시적 승인 없이 실행하지 않습니다.",
   ];
   if (input.tools && input.tools.length > 0) {
-    blocks.push(`사용 가능한 도구:\n${input.tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n")}`);
+    blocks.push(
+      `사용 가능한 도구:\n${input.tools.map((tool) => `- ${tool.name}: ${tool.description}`).join("\n")}`,
+    );
   }
   if (input.memories && input.memories.length > 0) {
     blocks.push(`기억 요약:\n${input.memories.join("\n")}`);
@@ -75,7 +79,8 @@ export function buildContext(input: BuildInput): BuiltContext {
   const system = blocks.join("\n\n");
 
   const history = [...input.history];
-  const size = () => system.length + history.reduce((total, message) => total + message.content.length, 0);
+  const size = () =>
+    system.length + history.reduce((total, message) => total + message.content.length, 0);
   let dropped = 0;
   while (size() > budget.maxChars && history.length > 1) {
     history.shift();

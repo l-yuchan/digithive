@@ -1,7 +1,13 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import { seal, open } from "../core/vault";
-import { CalendarEventPayloadSchema, normalizeCalendarEvent, normalizeGmail, type NormalizedItem, type SyncOutcome } from "./normalize";
+import {
+  CalendarEventPayloadSchema,
+  normalizeCalendarEvent,
+  normalizeGmail,
+  type NormalizedItem,
+  type SyncOutcome,
+} from "./normalize";
 import { recordOutcome, saveItems } from "./sync-store";
 import { z } from "zod";
 
@@ -38,15 +44,25 @@ export function authUrl(config: GoogleConfig, state: string): string {
 }
 
 const TokenResponseSchema = z.object({
-  access_token: z.string().optional(), refresh_token: z.string().optional(),
-  expires_in: z.number().optional(), scope: z.string().optional(), error: z.string().optional(),
+  access_token: z.string().optional(),
+  refresh_token: z.string().optional(),
+  expires_in: z.number().optional(),
+  scope: z.string().optional(),
+  error: z.string().optional(),
 });
 type TokenResponse = z.infer<typeof TokenResponseSchema>;
 const SavedTokensSchema = z.object({
-  accessToken: z.string(), refreshToken: z.string().nullable(), expiresAt: z.number(), scope: z.string().nullable(),
+  accessToken: z.string(),
+  refreshToken: z.string().nullable(),
+  expiresAt: z.number(),
+  scope: z.string().nullable(),
 });
 
-function parseTokens(body: TokenResponse, previousRefresh: string | null, now: number): GoogleTokens {
+function parseTokens(
+  body: TokenResponse,
+  previousRefresh: string | null,
+  now: number,
+): GoogleTokens {
   if (typeof body.error === "string") throw new Error(`oauth_error:${body.error}`);
   if (typeof body.access_token !== "string") throw new Error("oauth_missing_access_token");
   const expiresIn = typeof body.expires_in === "number" ? body.expires_in : 3_600;
@@ -58,7 +74,10 @@ function parseTokens(body: TokenResponse, previousRefresh: string | null, now: n
   };
 }
 
-async function tokenRequest(params: Record<string, string>, fetchImpl: typeof fetch): Promise<TokenResponse> {
+async function tokenRequest(
+  params: Record<string, string>,
+  fetchImpl: typeof fetch,
+): Promise<TokenResponse> {
   const response = await fetchImpl("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -68,7 +87,12 @@ async function tokenRequest(params: Record<string, string>, fetchImpl: typeof fe
   return TokenResponseSchema.parse(await response.json());
 }
 
-export async function exchangeCode(config: GoogleConfig, code: string, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<GoogleTokens> {
+export async function exchangeCode(
+  config: GoogleConfig,
+  code: string,
+  fetchImpl: typeof fetch = fetch,
+  now = Date.now(),
+): Promise<GoogleTokens> {
   const body = await tokenRequest(
     {
       code,
@@ -82,9 +106,19 @@ export async function exchangeCode(config: GoogleConfig, code: string, fetchImpl
   return parseTokens(body, null, now);
 }
 
-export async function refreshTokens(config: GoogleConfig, refreshToken: string, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<GoogleTokens> {
+export async function refreshTokens(
+  config: GoogleConfig,
+  refreshToken: string,
+  fetchImpl: typeof fetch = fetch,
+  now = Date.now(),
+): Promise<GoogleTokens> {
   const body = await tokenRequest(
-    { refresh_token: refreshToken, client_id: config.clientId, client_secret: config.clientSecret, grant_type: "refresh_token" },
+    {
+      refresh_token: refreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      grant_type: "refresh_token",
+    },
     fetchImpl,
   );
   return parseTokens(body, refreshToken, now);
@@ -93,11 +127,20 @@ export async function refreshTokens(config: GoogleConfig, refreshToken: string, 
 export function saveTokens(db: Database, secret: string, tokens: GoogleTokens): void {
   db.query(
     "INSERT INTO oauth_tokens (provider, payload, scope, expires_at, updated_at) VALUES ('google', ?, ?, ?, ?) ON CONFLICT(provider) DO UPDATE SET payload=excluded.payload, scope=excluded.scope, expires_at=excluded.expires_at, updated_at=excluded.updated_at",
-  ).run(seal(secret, JSON.stringify(tokens)), tokens.scope, new Date(tokens.expiresAt).toISOString(), new Date().toISOString());
+  ).run(
+    seal(secret, JSON.stringify(tokens)),
+    tokens.scope,
+    new Date(tokens.expiresAt).toISOString(),
+    new Date().toISOString(),
+  );
 }
 
 export function loadTokens(db: Database, secret: string): GoogleTokens | null {
-  const row = db.query<{ payload: string }, SQLQueryBindings[]>("SELECT payload FROM oauth_tokens WHERE provider = 'google'").get();
+  const row = db
+    .query<{ payload: string }, SQLQueryBindings[]>(
+      "SELECT payload FROM oauth_tokens WHERE provider = 'google'",
+    )
+    .get();
   if (!row) return null;
   const raw = open(secret, row.payload);
   if (!raw) return null;
@@ -125,13 +168,22 @@ async function accessToken(deps: GoogleDeps): Promise<string> {
   const now = (deps.now ?? Date.now)();
   if (tokens.expiresAt > now + 60_000) return tokens.accessToken;
   if (!tokens.refreshToken) throw new Error("google_refresh_missing");
-  const refreshed = await refreshTokens(deps.config, tokens.refreshToken, deps.fetchImpl ?? fetch, now);
+  const refreshed = await refreshTokens(
+    deps.config,
+    tokens.refreshToken,
+    deps.fetchImpl ?? fetch,
+    now,
+  );
   saveTokens(deps.db, deps.vaultSecret, refreshed);
   return refreshed.accessToken;
 }
 
 function cursorOf(db: Database, source: string): string | null {
-  const row = db.query<{ cursor: string | null }, SQLQueryBindings[]>("SELECT cursor FROM integration_state WHERE source = ?").get(source);
+  const row = db
+    .query<{ cursor: string | null }, SQLQueryBindings[]>(
+      "SELECT cursor FROM integration_state WHERE source = ?",
+    )
+    .get(source);
   return row?.cursor ?? null;
 }
 
@@ -157,7 +209,9 @@ export async function syncGoogleCalendar(deps: GoogleDeps): Promise<SyncOutcome>
       return url.toString();
     };
 
-    let response = await fetchImpl(buildUrl(syncToken), { headers: { authorization: `Bearer ${token}` } });
+    let response = await fetchImpl(buildUrl(syncToken), {
+      headers: { authorization: `Bearer ${token}` },
+    });
     let note: string | null = null;
     let full = syncToken === null;
     if ((response.status === 410 || response.status === 400) && syncToken) {
@@ -172,9 +226,13 @@ export async function syncGoogleCalendar(deps: GoogleDeps): Promise<SyncOutcome>
     let cursor = syncToken;
     while (true) {
       if (!response.ok) throw new Error(`calendar_http_${response.status}`);
-      const body = z.object({
-        items: z.array(CalendarEventPayloadSchema).optional(), nextSyncToken: z.string().optional(), nextPageToken: z.string().optional(),
-      }).parse(await response.json());
+      const body = z
+        .object({
+          items: z.array(CalendarEventPayloadSchema).optional(),
+          nextSyncToken: z.string().optional(),
+          nextPageToken: z.string().optional(),
+        })
+        .parse(await response.json());
       for (const raw of body.items ?? []) {
         if (raw.status === "cancelled" && raw.id) deleted.push(raw.id);
         else items.push(normalizeCalendarEvent(raw));
@@ -188,11 +246,19 @@ export async function syncGoogleCalendar(deps: GoogleDeps): Promise<SyncOutcome>
     return deps.db.transaction(() => {
       if (full) deps.db.query("DELETE FROM sync_items WHERE source='calendar'").run();
       saveItems(deps.db, "calendar", items, now);
-      for (const id of deleted) deps.db.query("DELETE FROM sync_items WHERE source='calendar' AND item_id=?").run(id);
+      for (const id of deleted)
+        deps.db.query("DELETE FROM sync_items WHERE source='calendar' AND item_id=?").run(id);
       return recordOutcome(deps, "calendar", true, items.length, cursor, note);
     })();
   } catch (error) {
-    return recordOutcome(deps, "calendar", false, 0, null, error instanceof Error ? error.message : "unknown");
+    return recordOutcome(
+      deps,
+      "calendar",
+      false,
+      0,
+      null,
+      error instanceof Error ? error.message : "unknown",
+    );
   }
 }
 
@@ -200,18 +266,29 @@ async function syncGmailFull(deps: GoogleDeps, token: string, now: number): Prom
   const fetchImpl = deps.fetchImpl ?? fetch;
   // Capture the baseline before listing, so mail arriving during collection
   // is replayed by the next incremental sync rather than skipped.
-  const profile = await fetchImpl("https://gmail.googleapis.com/gmail/v1/users/me/profile", { headers: { authorization: `Bearer ${token}` } });
+  const profile = await fetchImpl("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+    headers: { authorization: `Bearer ${token}` },
+  });
   if (!profile.ok) throw new Error(`gmail_profile_http_${profile.status}`);
-  const historyId = z.object({ historyId: z.string().optional() }).parse(await profile.json()).historyId;
+  const historyId = z
+    .object({ historyId: z.string().optional() })
+    .parse(await profile.json()).historyId;
   if (!historyId) throw new Error("gmail_missing_history_id");
   const ids = new Set<string>();
   let page: string | undefined;
   do {
-    const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=newer_than:7d");
+    const url = new URL(
+      "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=100&q=newer_than:7d",
+    );
     if (page) url.searchParams.set("pageToken", page);
     const list = await fetchImpl(url.toString(), { headers: { authorization: `Bearer ${token}` } });
     if (!list.ok) throw new Error(`gmail_list_http_${list.status}`);
-    const body = z.object({ messages: z.array(z.object({ id: z.string().optional() })).optional(), nextPageToken: z.string().optional() }).parse(await list.json());
+    const body = z
+      .object({
+        messages: z.array(z.object({ id: z.string().optional() })).optional(),
+        nextPageToken: z.string().optional(),
+      })
+      .parse(await list.json());
     for (const message of body.messages ?? []) if (message.id) ids.add(message.id);
     page = body.nextPageToken;
   } while (page);
@@ -223,12 +300,19 @@ async function syncGmailFull(deps: GoogleDeps, token: string, now: number): Prom
   })();
 }
 
-async function gmailDetails(deps: GoogleDeps, token: string, ids: Iterable<string>): Promise<NormalizedItem[]> {
+async function gmailDetails(
+  deps: GoogleDeps,
+  token: string,
+  ids: Iterable<string>,
+): Promise<NormalizedItem[]> {
   const items: NormalizedItem[] = [];
   for (const id of ids) {
-    const detail = await (deps.fetchImpl ?? fetch)(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
+    const detail = await (deps.fetchImpl ?? fetch)(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`,
+      {
+        headers: { authorization: `Bearer ${token}` },
+      },
+    );
     if (!detail.ok) throw new Error(`gmail_detail_http_${detail.status}`);
     items.push(normalizeGmail(await detail.json()));
   }
@@ -248,19 +332,43 @@ export async function syncGoogleGmail(deps: GoogleDeps): Promise<SyncOutcome> {
     let page: string | undefined;
     let cursor = historyId;
     do {
-      const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${encodeURIComponent(historyId)}&maxResults=100`);
+      const url = new URL(
+        `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${encodeURIComponent(historyId)}&maxResults=100`,
+      );
       if (page) url.searchParams.set("pageToken", page);
-      const response = await fetchImpl(url.toString(), { headers: { authorization: `Bearer ${token}` } });
+      const response = await fetchImpl(url.toString(), {
+        headers: { authorization: `Bearer ${token}` },
+      });
       if (response.status === 404) return await syncGmailFull(deps, token, now);
       if (!response.ok) throw new Error(`gmail_history_http_${response.status}`);
-      const messageChange = z.array(z.object({ message: z.object({ id: z.string().optional() }).optional() }));
-      const body = z.object({
-        history: z.array(z.object({ messagesAdded: messageChange.optional(), messagesDeleted: messageChange.optional() })).optional(),
-        historyId: z.string().optional(), nextPageToken: z.string().optional(),
-      }).parse(await response.json());
+      const messageChange = z.array(
+        z.object({ message: z.object({ id: z.string().optional() }).optional() }),
+      );
+      const body = z
+        .object({
+          history: z
+            .array(
+              z.object({
+                messagesAdded: messageChange.optional(),
+                messagesDeleted: messageChange.optional(),
+              }),
+            )
+            .optional(),
+          historyId: z.string().optional(),
+          nextPageToken: z.string().optional(),
+        })
+        .parse(await response.json());
       for (const entry of body.history ?? []) {
-        for (const added of entry.messagesAdded ?? []) if (added.message?.id) { ids.add(added.message.id); deleted.delete(added.message.id); }
-        for (const removed of entry.messagesDeleted ?? []) if (removed.message?.id) { deleted.add(removed.message.id); ids.delete(removed.message.id); }
+        for (const added of entry.messagesAdded ?? [])
+          if (added.message?.id) {
+            ids.add(added.message.id);
+            deleted.delete(added.message.id);
+          }
+        for (const removed of entry.messagesDeleted ?? [])
+          if (removed.message?.id) {
+            deleted.add(removed.message.id);
+            ids.delete(removed.message.id);
+          }
       }
       cursor = body.historyId ?? cursor;
       page = body.nextPageToken;
@@ -268,10 +376,18 @@ export async function syncGoogleGmail(deps: GoogleDeps): Promise<SyncOutcome> {
     const items = await gmailDetails(deps, token, ids);
     return deps.db.transaction(() => {
       saveItems(deps.db, "gmail", items, now);
-      for (const id of deleted) deps.db.query("DELETE FROM sync_items WHERE source='gmail' AND item_id=?").run(id);
+      for (const id of deleted)
+        deps.db.query("DELETE FROM sync_items WHERE source='gmail' AND item_id=?").run(id);
       return recordOutcome(deps, "gmail", true, items.length, cursor, null);
     })();
   } catch (error) {
-    return recordOutcome(deps, "gmail", false, 0, null, error instanceof Error ? error.message : "unknown");
+    return recordOutcome(
+      deps,
+      "gmail",
+      false,
+      0,
+      null,
+      error instanceof Error ? error.message : "unknown",
+    );
   }
 }

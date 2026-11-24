@@ -2,7 +2,14 @@ import { ok } from "node:assert/strict";
 import { describe, expect, test } from "bun:test";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { migrate } from "../src/store/db";
-import { RUN_STATUSES, canTransition, isLeaseExpired, leaseExpiry, settleExpiredRuns, type RunStatus } from "../src/core/run-state";
+import {
+  RUN_STATUSES,
+  canTransition,
+  isLeaseExpired,
+  leaseExpiry,
+  settleExpiredRuns,
+  type RunStatus,
+} from "../src/core/run-state";
 
 function db(): Database {
   const database = new Database(":memory:");
@@ -11,7 +18,13 @@ function db(): Database {
   return database;
 }
 
-function insertRun(database: Database, id: string, status: string, expiresAt: string | null, now: number): void {
+function insertRun(
+  database: Database,
+  id: string,
+  status: string,
+  expiresAt: string | null,
+  now: number,
+): void {
   database
     .query(
       `INSERT INTO runs (id, origin, goal, status, lease_expires_at, budget_json, created_at)
@@ -66,17 +79,24 @@ describe("run state machine", () => {
     const settled = settleExpiredRuns(database, now);
     expect(settled).toEqual(["dead"]);
 
-    const dead = database.query<{
-      status: string;
-      cancel_intent: string;
-      settled_at: string;
-    }, SQLQueryBindings[]>("SELECT status, cancel_intent, settled_at FROM runs WHERE id = 'dead'").get();
+    const dead = database
+      .query<
+        {
+          status: string;
+          cancel_intent: string;
+          settled_at: string;
+        },
+        SQLQueryBindings[]
+      >("SELECT status, cancel_intent, settled_at FROM runs WHERE id = 'dead'")
+      .get();
     ok(dead, "fixture row exists");
     expect(dead.status).toBe("interrupted");
     expect(dead.cancel_intent).toBe("host_restart");
     expect(dead.settled_at).not.toBeNull();
 
-    const alive = database.query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = 'alive'").get();
+    const alive = database
+      .query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = 'alive'")
+      .get();
     ok(alive, "fixture row exists");
     expect(alive.status).toBe("running");
     expect(RUN_STATUSES).toContain("interrupted");

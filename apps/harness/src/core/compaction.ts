@@ -22,11 +22,16 @@ export type CompactionResult = {
 
 export function latestCompaction(db: Database, sessionId: string): CompactionView | null {
   const path = new Set(pathEntries(db, sessionId).map((entry) => entry.id));
-  const rows = db.query<{ payload_json: string }, SQLQueryBindings[]>("SELECT payload_json FROM entries WHERE session_id = ? AND kind = 'compaction' ORDER BY seq DESC")
+  const rows = db
+    .query<{ payload_json: string }, SQLQueryBindings[]>(
+      "SELECT payload_json FROM entries WHERE session_id = ? AND kind = 'compaction' ORDER BY seq DESC",
+    )
     .all(sessionId);
   for (const row of rows) {
     try {
-      const parsed = z.object({ summary: z.string(), coversSeq: z.number(), coversUpTo: z.string() }).safeParse(JSON.parse(row.payload_json));
+      const parsed = z
+        .object({ summary: z.string(), coversSeq: z.number(), coversUpTo: z.string() })
+        .safeParse(JSON.parse(row.payload_json));
       if (parsed.success && path.has(parsed.data.coversUpTo)) {
         const payload = parsed.data;
         return { summary: payload.summary, coversSeq: payload.coversSeq };
@@ -92,8 +97,14 @@ export async function maybeCompact(options: CompactionOptions): Promise<Compacti
     parts: [{ type: "text", text: summary }],
     now,
   });
-  options.db
-    .query("UPDATE entries SET payload_json = ? WHERE id = ?")
-    .run(JSON.stringify({ parts: [{ type: "text", text: summary }], summary, coversSeq: lastCovered.seq, coversUpTo: lastCovered.id }), entry.id);
+  options.db.query("UPDATE entries SET payload_json = ? WHERE id = ?").run(
+    JSON.stringify({
+      parts: [{ type: "text", text: summary }],
+      summary,
+      coversSeq: lastCovered.seq,
+      coversUpTo: lastCovered.id,
+    }),
+    entry.id,
+  );
   return { compacted: true, entryId: entry.id, coveredMessages: covered.length };
 }

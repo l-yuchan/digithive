@@ -56,7 +56,14 @@ function setup(steps: AdapterEvent[][]) {
     stream: scripted(steps),
     tools: createRegistry(builtinTools({ root })),
     policy: WORK_POLICY,
-    limits: { firstTokenMs: 5_000, idleMs: 5_000, toolMs: 2_000, maxOutputTokens: 200, maxToolRounds: 3, totalMs: 30_000 },
+    limits: {
+      firstTokenMs: 5_000,
+      idleMs: 5_000,
+      toolMs: 2_000,
+      maxOutputTokens: 200,
+      maxToolRounds: 3,
+      totalMs: 30_000,
+    },
     maxConcurrent: 2,
   };
   return { db, events, deps, root };
@@ -66,10 +73,18 @@ describe("work runner", () => {
   test("a queued run is claimed by lease and settles as succeeded with a written file", async () => {
     const { db, events, deps, root } = setup([
       [
-        { type: "tool_call", id: "c1", name: "workspace_write", arguments: JSON.stringify({ path: "note.txt", text: "회의 준비물" }) },
+        {
+          type: "tool_call",
+          id: "c1",
+          name: "workspace_write",
+          arguments: JSON.stringify({ path: "note.txt", text: "회의 준비물" }),
+        },
         { type: "done", finishReason: "tool_calls" },
       ],
-      [{ type: "text_delta", text: "파일을 작성했습니다." }, { type: "done", finishReason: "stop" }],
+      [
+        { type: "text_delta", text: "파일을 작성했습니다." },
+        { type: "done", finishReason: "stop" },
+      ],
     ]);
     const run = enqueueRun(db, events, { goal: "메모를 파일로 남겨줘" });
     expect(run.status).toBe("queued");
@@ -95,8 +110,19 @@ describe("work runner", () => {
 
   test("an ask decision pauses the run, and approving resumes it to success", async () => {
     const { db, events, deps } = setup([
-      [{ type: "tool_call", id: "c1", name: "external_action", arguments: JSON.stringify({ summary: "메일 발송" }) }, { type: "done", finishReason: "tool_calls" }],
-      [{ type: "text_delta", text: "발송 절차를 마쳤습니다." }, { type: "done", finishReason: "stop" }],
+      [
+        {
+          type: "tool_call",
+          id: "c1",
+          name: "external_action",
+          arguments: JSON.stringify({ summary: "메일 발송" }),
+        },
+        { type: "done", finishReason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "발송 절차를 마쳤습니다." },
+        { type: "done", finishReason: "stop" },
+      ],
     ]);
     const run = enqueueRun(db, events, { goal: "메일을 보내줘" });
     const claimed = requiredClaim(db, events, "w1");
@@ -104,7 +130,11 @@ describe("work runner", () => {
 
     const paused = getRun(db, run.id);
     expect(paused?.status).toBe("awaiting_approval");
-    const approval = db.query<{ id: string; status: string }, SQLQueryBindings[]>("SELECT id, status FROM approvals WHERE run_id = ?").get(run.id);
+    const approval = db
+      .query<{ id: string; status: string }, SQLQueryBindings[]>(
+        "SELECT id, status FROM approvals WHERE run_id = ?",
+      )
+      .get(run.id);
     ok(approval, "fixture row exists");
     expect(approval.status).toBe("pending");
     expect(events.after(0).map((event) => event.kind)).toContain("approval.requested");
@@ -118,25 +148,50 @@ describe("work runner", () => {
 
   test("rejecting an approval continues the run with the denial as a tool result", async () => {
     const { db, events, deps } = setup([
-      [{ type: "tool_call", id: "c1", name: "external_action", arguments: JSON.stringify({ summary: "게시" }) }, { type: "done", finishReason: "tool_calls" }],
-      [{ type: "text_delta", text: "게시하지 않았습니다." }, { type: "done", finishReason: "stop" }],
+      [
+        {
+          type: "tool_call",
+          id: "c1",
+          name: "external_action",
+          arguments: JSON.stringify({ summary: "게시" }),
+        },
+        { type: "done", finishReason: "tool_calls" },
+      ],
+      [
+        { type: "text_delta", text: "게시하지 않았습니다." },
+        { type: "done", finishReason: "stop" },
+      ],
     ]);
     const run = enqueueRun(db, events, { goal: "게시해줘" });
     await executeRun(deps, requiredClaim(db, events, "w1"));
-    const approval = db.query<{ id: string }, SQLQueryBindings[]>("SELECT id FROM approvals WHERE run_id = ?").get(run.id);
+    const approval = db
+      .query<{ id: string }, SQLQueryBindings[]>("SELECT id FROM approvals WHERE run_id = ?")
+      .get(run.id);
     ok(approval, "fixture row exists");
     decideApproval({ db, events }, { runId: run.id, approvalId: approval.id, decision: "reject" });
 
     const resumed = requiredClaim(db, events, "w2");
     expect(await executeRun(deps, resumed)).toBe("succeeded");
-    const state = z.object({ messages: z.array(z.object({ role: z.string(), content: z.string() })) }).parse(JSON.parse(getRun(db, run.id)?.stateJson ?? "{}"));
-    expect(state.messages.some((message) => message.role === "tool" && message.content.includes("거부"))).toBe(true);
+    const state = z
+      .object({ messages: z.array(z.object({ role: z.string(), content: z.string() })) })
+      .parse(JSON.parse(getRun(db, run.id)?.stateJson ?? "{}"));
+    expect(
+      state.messages.some((message) => message.role === "tool" && message.content.includes("거부")),
+    ).toBe(true);
     expect(events.after(0).map((event) => event.kind)).toContain("tool.denied");
   });
 
   test("a paused run keeps no lease and the lease reconciler leaves it alone", async () => {
     const { db, events, deps } = setup([
-      [{ type: "tool_call", id: "c1", name: "external_action", arguments: JSON.stringify({ summary: "게시" }) }, { type: "done", finishReason: "tool_calls" }],
+      [
+        {
+          type: "tool_call",
+          id: "c1",
+          name: "external_action",
+          arguments: JSON.stringify({ summary: "게시" }),
+        },
+        { type: "done", finishReason: "tool_calls" },
+      ],
     ]);
     const run = enqueueRun(db, events, { goal: "게시해줘" });
     await executeRun(deps, requiredClaim(db, events, "w1"));
@@ -172,7 +227,12 @@ describe("work runner", () => {
   });
 
   test("delegation requires all five fields", () => {
-    expect(validateDelegation({ goal: "조사" }).toSorted()).toEqual(["budget", "completionCondition", "inputRefs", "permissionProfile"]);
+    expect(validateDelegation({ goal: "조사" }).toSorted()).toEqual([
+      "budget",
+      "completionCondition",
+      "inputRefs",
+      "permissionProfile",
+    ]);
     expect(
       validateDelegation({
         goal: "조사",
@@ -185,9 +245,18 @@ describe("work runner", () => {
   });
 
   test("a delegated child reports progress to its parent run without touching the parent's own state", async () => {
-    const { db, events, deps } = setup([[{ type: "text_delta", text: "조사 끝" }, { type: "done", finishReason: "stop" }]]);
+    const { db, events, deps } = setup([
+      [
+        { type: "text_delta", text: "조사 끝" },
+        { type: "done", finishReason: "stop" },
+      ],
+    ]);
     const parent = enqueueRun(db, events, { goal: "상위 작업" });
-    const child = enqueueRun(db, events, { goal: "하위 조사", origin: "delegation", parentRunId: parent.id });
+    const child = enqueueRun(db, events, {
+      goal: "하위 조사",
+      origin: "delegation",
+      parentRunId: parent.id,
+    });
     expect(child.parentRunId).toBe(parent.id);
     db.query("UPDATE runs SET status = 'succeeded' WHERE id = ?").run(parent.id);
 
@@ -197,7 +266,9 @@ describe("work runner", () => {
 
     const progress = events.after(0).filter((event) => event.kind === "run.progress");
     expect(progress).toHaveLength(1);
-    const payload = z.object({ childRunId: z.string(), status: z.string(), summary: z.string() }).parse(progress[0]?.payload);
+    const payload = z
+      .object({ childRunId: z.string(), status: z.string(), summary: z.string() })
+      .parse(progress[0]?.payload);
     expect(payload.childRunId).toBe(child.id);
     expect(payload.status).toBe("succeeded");
     expect(payload.summary).toBe("조사 끝");

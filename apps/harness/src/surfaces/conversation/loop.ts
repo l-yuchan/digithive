@@ -82,8 +82,21 @@ export async function runTurn(
       `INSERT INTO runs (id, session_id, origin, goal, status, lease_owner, lease_expires_at, budget_json, created_at)
        VALUES (?, ?, 'conversation', ?, 'running', 'conversation', ?, ?, ?)`,
     )
-    .run(runId, input.sessionId, input.text.slice(0, 4096), leaseExpiry(startedAt), JSON.stringify({ maxOutputTokens: limits.maxOutputTokens }), new Date(startedAt).toISOString());
-  deps.events.append({ kind: "run.started", runId, sessionId: input.sessionId, payload: { runId }, now: startedAt });
+    .run(
+      runId,
+      input.sessionId,
+      input.text.slice(0, 4096),
+      leaseExpiry(startedAt),
+      JSON.stringify({ maxOutputTokens: limits.maxOutputTokens }),
+      new Date(startedAt).toISOString(),
+    );
+  deps.events.append({
+    kind: "run.started",
+    runId,
+    sessionId: input.sessionId,
+    payload: { runId },
+    now: startedAt,
+  });
 
   let userEntryId: string;
   if (input.appendUser === false) {
@@ -119,9 +132,22 @@ export async function runTurn(
     payload: { entryId: assistantEntry.id },
     now: startedAt,
   });
-  deps.events.append({ kind: "turn.started", runId, sessionId: input.sessionId, payload: { userEntryId }, now: startedAt });
+  deps.events.append({
+    kind: "turn.started",
+    runId,
+    sessionId: input.sessionId,
+    payload: { userEntryId },
+    now: startedAt,
+  });
 
-  const controller = keepLease(deps.db, deps.events, { id: runId, leaseOwner: "conversation" }, 45_000, limits.totalMs, now);
+  const controller = keepLease(
+    deps.db,
+    deps.events,
+    { id: runId, leaseOwner: "conversation" },
+    45_000,
+    limits.totalMs,
+    now,
+  );
   const parts: Part[] = [];
   let text = "";
 
@@ -137,7 +163,10 @@ export async function runTurn(
     }
     const compaction = latestCompaction(deps.db, input.sessionId);
     const history = pathEntries(deps.db, input.sessionId, userEntryId)
-      .filter((entry) => entry.kind === "message" && (entry.role === "user" || entry.role === "assistant"))
+      .filter(
+        (entry) =>
+          entry.kind === "message" && (entry.role === "user" || entry.role === "assistant"),
+      )
       .filter((entry) => !compaction || entry.seq > compaction.coversSeq)
       .map((entry) => ({
         role: entry.role === "user" ? ("user" as const) : ("assistant" as const),
@@ -155,7 +184,8 @@ export async function runTurn(
       ...(deps.maxChars === undefined ? {} : { budget: { maxChars: deps.maxChars } }),
     });
     const messages: ChatMessage[] = [{ role: "system", content: built.system }, ...built.messages];
-    if (messages.at(-1)?.content !== input.text) messages.push({ role: "user", content: input.text });
+    if (messages.at(-1)?.content !== input.text)
+      messages.push({ role: "user", content: input.text });
 
     let round = 0;
     while (round < limits.maxToolRounds) {
@@ -171,7 +201,8 @@ export async function runTurn(
         if (event.type === "text_delta") {
           text += event.text;
           const last = parts.at(-1);
-          if (last && last.type === "text") parts[parts.length - 1] = { type: "text", text: last.text + event.text };
+          if (last && last.type === "text")
+            parts[parts.length - 1] = { type: "text", text: last.text + event.text };
           else parts.push({ type: "text", text: event.text });
           deps.events.append({
             kind: "message.delta",
@@ -182,7 +213,8 @@ export async function runTurn(
           });
         } else if (event.type === "reasoning_delta") {
           const last = parts.at(-1);
-          if (last && last.type === "reasoning") parts[parts.length - 1] = { type: "reasoning", text: last.text + event.text };
+          if (last && last.type === "reasoning")
+            parts[parts.length - 1] = { type: "reasoning", text: last.text + event.text };
           else parts.push({ type: "reasoning", text: event.text });
           deps.events.append({
             kind: "message.delta",
@@ -213,16 +245,30 @@ export async function runTurn(
         let args: Record<string, unknown> = {};
         try {
           const parsed: unknown = JSON.parse(call.arguments || "{}");
-          if (parsed && typeof parsed === "object") args = z.record(z.string(), z.unknown()).parse(parsed);
+          if (parsed && typeof parsed === "object")
+            args = z.record(z.string(), z.unknown()).parse(parsed);
         } catch {
           args = {};
         }
         parts.push({ type: "tool_call", id: call.id, name: call.name, arguments: call.arguments });
-        deps.events.append({ kind: "tool.started", runId, sessionId: input.sessionId, payload: { call }, now: now() });
+        deps.events.append({
+          kind: "tool.started",
+          runId,
+          sessionId: input.sessionId,
+          payload: { call },
+          now: now(),
+        });
 
-        const decision = tool ? decide(policy, { action: tool.action, resource: z.string().parse(args["path"] ?? args["command"] ?? "*") }) : "deny";
+        const decision = tool
+          ? decide(policy, {
+              action: tool.action,
+              resource: z.string().parse(args["path"] ?? args["command"] ?? "*"),
+            })
+          : "deny";
         if (!tool || decision !== "allow") {
-          const output = tool ? "정책이 이 호출을 거부했습니다." : `알 수 없는 도구입니다: ${call.name}`;
+          const output = tool
+            ? "정책이 이 호출을 거부했습니다."
+            : `알 수 없는 도구입니다: ${call.name}`;
           parts.push({ type: "tool_result", id: call.id, name: call.name, output, denied: true });
           deps.events.append({
             kind: "tool.denied",
@@ -251,10 +297,22 @@ export async function runTurn(
         if (timedOut) {
           output = "도구 실행 시간이 초과되었습니다.";
           parts.push({ type: "tool_result", id: call.id, name: call.name, output, timeout: true });
-          deps.events.append({ kind: "tool.timeout", runId, sessionId: input.sessionId, payload: { id: call.id, name: call.name }, now: now() });
+          deps.events.append({
+            kind: "tool.timeout",
+            runId,
+            sessionId: input.sessionId,
+            payload: { id: call.id, name: call.name },
+            now: now(),
+          });
         } else {
           parts.push({ type: "tool_result", id: call.id, name: call.name, output });
-          deps.events.append({ kind: "tool.result", runId, sessionId: input.sessionId, payload: { id: call.id, name: call.name, output }, now: now() });
+          deps.events.append({
+            kind: "tool.result",
+            runId,
+            sessionId: input.sessionId,
+            payload: { id: call.id, name: call.name, output },
+            now: now(),
+          });
         }
         messages.push({ role: "tool", content: output, toolCallId: call.id });
       }
@@ -262,21 +320,44 @@ export async function runTurn(
 
     if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
     updateEntryParts(deps.db, assistantEntry.id, parts, "complete", input.sessionId);
-    deps.events.append({ kind: "message.completed", runId, sessionId: input.sessionId, payload: { entryId: assistantEntry.id }, now: now() });
-    deps.events.append({ kind: "turn.settled", runId, sessionId: input.sessionId, payload: { entryId: assistantEntry.id }, now: now() });
-    deps.db.query("UPDATE runs SET status = 'succeeded', settled_at = ?, result_json = ? WHERE id = ?").run(
-      new Date(now()).toISOString(),
-      JSON.stringify({ entryId: assistantEntry.id }),
+    deps.events.append({
+      kind: "message.completed",
       runId,
-    );
-    deps.events.append({ kind: "run.settled", runId, sessionId: input.sessionId, payload: { status: "succeeded" }, now: now() });
+      sessionId: input.sessionId,
+      payload: { entryId: assistantEntry.id },
+      now: now(),
+    });
+    deps.events.append({
+      kind: "turn.settled",
+      runId,
+      sessionId: input.sessionId,
+      payload: { entryId: assistantEntry.id },
+      now: now(),
+    });
+    deps.db
+      .query("UPDATE runs SET status = 'succeeded', settled_at = ?, result_json = ? WHERE id = ?")
+      .run(new Date(now()).toISOString(), JSON.stringify({ entryId: assistantEntry.id }), runId);
+    deps.events.append({
+      kind: "run.settled",
+      runId,
+      sessionId: input.sessionId,
+      payload: { status: "succeeded" },
+      now: now(),
+    });
     return { runId, entryId: assistantEntry.id, status: "succeeded", text };
   } catch (error) {
     const kind = reason(error);
     const interrupted = controller.signal.aborted;
-    if (!ownsLease(deps.db, runId, "conversation", now())) return { runId, entryId: assistantEntry.id, status: "aborted", text };
+    if (!ownsLease(deps.db, runId, "conversation", now()))
+      return { runId, entryId: assistantEntry.id, status: "aborted", text };
     if (text.length > 0) parts.push({ type: "text", text: "" });
-    updateEntryParts(deps.db, assistantEntry.id, parts, interrupted ? "aborted" : "failed", input.sessionId);
+    updateEntryParts(
+      deps.db,
+      assistantEntry.id,
+      parts,
+      interrupted ? "aborted" : "failed",
+      input.sessionId,
+    );
     deps.events.append({
       kind: "message.aborted",
       runId,
@@ -284,16 +365,32 @@ export async function runTurn(
       payload: { entryId: assistantEntry.id, reason: interrupted ? "timeout" : kind },
       now: now(),
     });
-    deps.events.append({ kind: "turn.aborted", runId, sessionId: input.sessionId, payload: { reason: interrupted ? "timeout" : kind }, now: now() });
-    const status = interrupted ? "interrupted" : "failed";
-    deps.db.query("UPDATE runs SET status = ?, cancel_intent = ?, settled_at = ?, result_json = ? WHERE id = ?").run(
-      status,
-      interrupted ? "timeout" : null,
-      new Date(now()).toISOString(),
-      JSON.stringify({ error: kind }),
+    deps.events.append({
+      kind: "turn.aborted",
       runId,
-    );
-    deps.events.append({ kind: interrupted ? "run.interrupted" : "run.failed", runId, sessionId: input.sessionId, payload: { reason: kind }, now: now() });
+      sessionId: input.sessionId,
+      payload: { reason: interrupted ? "timeout" : kind },
+      now: now(),
+    });
+    const status = interrupted ? "interrupted" : "failed";
+    deps.db
+      .query(
+        "UPDATE runs SET status = ?, cancel_intent = ?, settled_at = ?, result_json = ? WHERE id = ?",
+      )
+      .run(
+        status,
+        interrupted ? "timeout" : null,
+        new Date(now()).toISOString(),
+        JSON.stringify({ error: kind }),
+        runId,
+      );
+    deps.events.append({
+      kind: interrupted ? "run.interrupted" : "run.failed",
+      runId,
+      sessionId: input.sessionId,
+      payload: { reason: kind },
+      now: now(),
+    });
     return { runId, entryId: assistantEntry.id, status: interrupted ? "aborted" : "failed", text };
   } finally {
     controller.close();

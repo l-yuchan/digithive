@@ -13,7 +13,12 @@ describe("policy", () => {
 
   test("no matching rule asks instead of silently allowing", () => {
     expect(decide([], { action: "write", resource: "/tmp/a" })).toBe("ask");
-    expect(decide([{ action: "read", resource: "*", effect: "allow" }], { action: "write", resource: "/tmp/a" })).toBe("ask");
+    expect(
+      decide([{ action: "read", resource: "*", effect: "allow" }], {
+        action: "write",
+        resource: "/tmp/a",
+      }),
+    ).toBe("ask");
   });
 
   test("wildcards match whole values, and ? matches exactly one character", () => {
@@ -26,7 +31,9 @@ describe("policy", () => {
   test("a saved approval can never widen a configured deny", () => {
     const configured = [{ action: "shell", resource: "rm *", effect: "deny" as const }];
     const saved = [{ action: "shell", resource: "*", effect: "allow" as const }];
-    expect(decideWithSaved(configured, saved, { action: "shell", resource: "rm -rf /tmp" })).toEqual({
+    expect(
+      decideWithSaved(configured, saved, { action: "shell", resource: "rm -rf /tmp" }),
+    ).toEqual({
       decision: "deny",
       by: "policy",
     });
@@ -35,11 +42,15 @@ describe("policy", () => {
   test("a saved approval is used when policy has no stronger rule", () => {
     const configured = [{ action: "*", resource: "*", effect: "ask" as const }];
     const saved = [{ action: "shell", resource: "git status *", effect: "allow" as const }];
-    expect(decideWithSaved(configured, saved, { action: "shell", resource: "git status --short" })).toEqual({
+    expect(
+      decideWithSaved(configured, saved, { action: "shell", resource: "git status --short" }),
+    ).toEqual({
       decision: "allow",
       by: "saved",
     });
-    expect(decideWithSaved(configured, saved, { action: "shell", resource: "git push" }).decision).toBe("ask");
+    expect(
+      decideWithSaved(configured, saved, { action: "shell", resource: "git push" }).decision,
+    ).toBe("ask");
   });
 
   test("base policy asks before reading env files", () => {

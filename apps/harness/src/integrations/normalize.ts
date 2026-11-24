@@ -11,9 +11,13 @@ export type NormalizedItem = {
 };
 
 const GmailPartSchema = z.object({
-  headers: z.array(z.object({ name: z.string().optional(), value: z.string().optional() })).optional(),
+  headers: z
+    .array(z.object({ name: z.string().optional(), value: z.string().optional() }))
+    .optional(),
   body: z.object({ data: z.string().optional() }).optional(),
-  get parts() { return z.array(GmailPartSchema).optional(); },
+  get parts() {
+    return z.array(GmailPartSchema).optional();
+  },
 });
 export type GmailPart = z.infer<typeof GmailPartSchema>;
 export const GmailPayloadSchema = z.object({
@@ -25,7 +29,9 @@ export const GmailPayloadSchema = z.object({
 export type GmailPayload = z.infer<typeof GmailPayloadSchema>;
 
 function header(headers: GmailPart["headers"], name: string): string {
-  return headers?.find((entry) => (entry.name ?? "").toLowerCase() === name.toLowerCase())?.value ?? "";
+  return (
+    headers?.find((entry) => (entry.name ?? "").toLowerCase() === name.toLowerCase())?.value ?? ""
+  );
 }
 
 function decodeBase64Url(data: string): string {
@@ -77,12 +83,12 @@ export function normalizeCalendarEvent(raw: unknown): NormalizedItem {
   const event = CalendarEventPayloadSchema.parse(raw);
   const start = event.start?.dateTime ?? event.start?.date ?? null;
   return {
-    id: (event.id ?? ""),
+    id: event.id ?? "",
     source: "calendar",
-    title: (event.summary ?? "(제목 없음)"),
+    title: event.summary ?? "(제목 없음)",
     at: start,
     detail: (event.description ?? "") + (event.recurringEventId ? " (반복 일정)" : ""),
-    url: event.htmlLink ? (event.htmlLink) : null,
+    url: event.htmlLink ? event.htmlLink : null,
   };
 }
 
@@ -101,10 +107,10 @@ export function normalizeCanvasAssignment(raw: unknown): NormalizedItem {
   return {
     id: String(assignment.id ?? ""),
     source: "canvas",
-    title: (assignment.name ?? "(제목 없음)"),
-    at: assignment.due_at ? (assignment.due_at) : null,
+    title: assignment.name ?? "(제목 없음)",
+    at: assignment.due_at ? assignment.due_at : null,
     detail: `과목 ${String(assignment.course_id ?? "-")} · ${(assignment.description ?? "").slice(0, 200)}`,
-    url: assignment.html_url ? (assignment.html_url) : null,
+    url: assignment.html_url ? assignment.html_url : null,
   };
 }
 
@@ -116,11 +122,19 @@ export type SyncOutcome = {
   readonly error: string | null;
 };
 
-export function syncStates(db: Database): { source: string; ok: boolean; lastSyncAt: string | null; error: string | null }[] {
-  return (db.query<{ source: string; ok: number; last_sync_at: string | null; error: string | null }, SQLQueryBindings[]>("SELECT source, ok, last_sync_at, error FROM integration_state ORDER BY source").all()).map((row) => ({
-    source: (row["source"]),
-    ok: (row["ok"]) === 1,
-    lastSyncAt: row["last_sync_at"] === null ? null : (row["last_sync_at"]),
-    error: row["error"] === null ? null : (row["error"]),
-  }));
+export function syncStates(
+  db: Database,
+): { source: string; ok: boolean; lastSyncAt: string | null; error: string | null }[] {
+  return db
+    .query<
+      { source: string; ok: number; last_sync_at: string | null; error: string | null },
+      SQLQueryBindings[]
+    >("SELECT source, ok, last_sync_at, error FROM integration_state ORDER BY source")
+    .all()
+    .map((row) => ({
+      source: row["source"],
+      ok: row["ok"] === 1,
+      lastSyncAt: row["last_sync_at"] === null ? null : row["last_sync_at"],
+      error: row["error"] === null ? null : row["error"],
+    }));
 }

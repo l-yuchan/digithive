@@ -15,10 +15,21 @@ describe("store migrations", () => {
   test("fresh migration creates the core storage tables at the latest schema version", () => {
     const db = memoryDb();
     const names = db
-      .query<{ name: string }, SQLQueryBindings[]>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .query<{ name: string }, SQLQueryBindings[]>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+      )
       .all()
       .map((row) => row.name);
-    for (const table of ["approvals", "entries", "events", "parts", "runs", "saved_approvals", "sessions", "tool_calls"]) {
+    for (const table of [
+      "approvals",
+      "entries",
+      "events",
+      "parts",
+      "runs",
+      "saved_approvals",
+      "sessions",
+      "tool_calls",
+    ]) {
       expect(names).toContain(table);
     }
     expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
@@ -34,7 +45,9 @@ describe("store migrations", () => {
     const db = memoryDb();
     expect(() =>
       db
-        .query("INSERT INTO entries (id, session_id, kind, payload_json, created_at, seq) VALUES ('e1','missing','message','{}','now',1)")
+        .query(
+          "INSERT INTO entries (id, session_id, kind, payload_json, created_at, seq) VALUES ('e1','missing','message','{}','now',1)",
+        )
         .run(),
     ).toThrow("FOREIGN KEY");
   });
@@ -62,13 +75,23 @@ test("upgrading an older schema preserves its stored conversation", () => {
   try {
     for (const migration of MIGRATIONS.slice(0, 2)) db.exec(migration.sql);
     db.exec("PRAGMA user_version=2");
-    db.query("INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','retained','now','now')").run();
-    db.query("INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user','{\"parts\":[{\"type\":\"text\",\"text\":\"original\"}]}','now',1)").run();
+    db.query(
+      "INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','retained','now','now')",
+    ).run();
+    db.query(
+      "INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user','{\"parts\":[{\"type\":\"text\",\"text\":\"original\"}]}','now',1)",
+    ).run();
     migrate(db);
-    expect(db.query("SELECT title FROM sessions WHERE id='s'").get()).toEqual({ title: "retained" });
-    expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({ payload_json: '{"parts":[{"type":"text","text":"original"}]}' });
+    expect(db.query("SELECT title FROM sessions WHERE id='s'").get()).toEqual({
+      title: "retained",
+    });
+    expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
+      payload_json: '{"parts":[{"type":"text","text":"original"}]}',
+    });
     expect(migrate(db)).toBe(0);
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 });
 
 test("a failed migration rolls back its earlier statements and leaves the previous version", () => {
@@ -80,5 +103,7 @@ test("a failed migration rolls back its earlier statements and leaves the previo
     expect(() => migrate(db)).toThrow("already exists");
     expect(db.query("SELECT name FROM sqlite_master WHERE name='memories'").all()).toEqual([]);
     expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 });

@@ -20,8 +20,14 @@ if (!result.success) {
   process.exit(1);
 }
 
-await Bun.write(resolve(outdir, "index.html"), await Bun.file(resolve(root, "web/index.html")).text());
-await Bun.write(resolve(outdir, "styles.css"), await Bun.file(resolve(root, "web/src/styles.css")).text());
+await Bun.write(
+  resolve(outdir, "index.html"),
+  await Bun.file(resolve(root, "web/index.html")).text(),
+);
+await Bun.write(
+  resolve(outdir, "styles.css"),
+  await Bun.file(resolve(root, "web/src/styles.css")).text(),
+);
 await Bun.write(resolve(outdir, "sw.js"), await Bun.file(resolve(root, "web/sw.js")).text());
 
 console.log(`web built: ${result.outputs.map((output) => output.path).join(", ")}`);

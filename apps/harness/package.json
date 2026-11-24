@@ -26,9 +26,9 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@types/web-push": "^3.6.4",
-    "typescript": "^5.9.3",
+    "oxfmt": "0.80.0",
     "oxlint": "1.95.0",
     "oxlint-tsgolint": "7.0.2008",
-    "oxfmt": "0.80.0"
+    "typescript": "^5.9.3"
   }
 }

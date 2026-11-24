@@ -29,7 +29,12 @@ const EntryRow = z.object({
   seq: z.number(),
 });
 
-const SessionRow = z.object({ id: z.string(), title: z.string(), created_at: z.string(), updated_at: z.string() });
+const SessionRow = z.object({
+  id: z.string(),
+  title: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
 export type Session = z.infer<typeof SessionRow>;
 
 function toEntry(row: z.infer<typeof EntryRow>): Entry {
@@ -63,18 +68,29 @@ export function createSession(db: Database, title: string, now = Date.now()): Se
 }
 
 export function getSession(db: Database, id: string): Session | null {
-  const row = db.query("SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND deleted_at IS NULL").get(id);
+  const row = db
+    .query(
+      "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND deleted_at IS NULL",
+    )
+    .get(id);
   return row ? SessionRow.parse(row) : null;
 }
 
 export function listSessions(db: Database): Session[] {
   return db
-    .query("SELECT id, title, created_at, updated_at FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC")
+    .query(
+      "SELECT id, title, created_at, updated_at FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+    )
     .all()
     .map((row) => SessionRow.parse(row));
 }
 
-export function renameSession(db: Database, id: string, title: string, now = Date.now()): Session | null {
+export function renameSession(
+  db: Database,
+  id: string,
+  title: string,
+  now = Date.now(),
+): Session | null {
   const trimmed = title.trim().slice(0, 200);
   if (trimmed.length === 0) return null;
   db.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(
@@ -86,14 +102,27 @@ export function renameSession(db: Database, id: string, title: string, now = Dat
 }
 
 /** Soft delete: the row and its entries stay readable, live runs are cancelled. */
-export function softDeleteSession(db: Database, id: string, now = Date.now()): { cancelledRuns: number } {
+export function softDeleteSession(
+  db: Database,
+  id: string,
+  now = Date.now(),
+): { cancelledRuns: number } {
   const iso = new Date(now).toISOString();
   const result = db.transaction(() => {
-    const live = db.query<{
-      id: string;
-    }, SQLQueryBindings[]>("SELECT id FROM runs WHERE session_id = ? AND status IN ('queued','running','awaiting_approval')").all(id);
+    const live = db
+      .query<
+        {
+          id: string;
+        },
+        SQLQueryBindings[]
+      >(
+        "SELECT id FROM runs WHERE session_id = ? AND status IN ('queued','running','awaiting_approval')",
+      )
+      .all(id);
     for (const run of live) {
-      db.query("UPDATE runs SET status = 'cancelled', cancel_intent = 'policy', settled_at = ? WHERE id = ?").run(iso, run.id);
+      db.query(
+        "UPDATE runs SET status = 'cancelled', cancel_intent = 'policy', settled_at = ? WHERE id = ?",
+      ).run(iso, run.id);
     }
     db.query("UPDATE sessions SET deleted_at = ?, leaf_id = NULL WHERE id = ?").run(iso, id);
     return live.length;
@@ -113,9 +142,14 @@ export function appendEntry(
     readonly now?: number;
   },
 ): Entry {
-  const seqRow = db.query<{
-    next: number;
-  }, SQLQueryBindings[]>("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM entries WHERE session_id = ?").get(input.sessionId);
+  const seqRow = db
+    .query<
+      {
+        next: number;
+      },
+      SQLQueryBindings[]
+    >("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM entries WHERE session_id = ?")
+    .get(input.sessionId);
   ok(seqRow, "sequence query returns one aggregate row");
   const id = crypto.randomUUID();
   const createdAt = new Date(input.now ?? Date.now()).toISOString();
@@ -155,11 +189,20 @@ export function updateEntryParts(
   status: "complete" | "aborted" | "failed",
   sessionId?: string,
 ): void {
-  db.query("UPDATE entries SET payload_json = ?, status = ? WHERE id = ?").run(JSON.stringify({ parts }), status, entryId);
+  db.query("UPDATE entries SET payload_json = ?, status = ? WHERE id = ?").run(
+    JSON.stringify({ parts }),
+    status,
+    entryId,
+  );
   if (sessionId) indexParts(db, entryId, sessionId, parts);
 }
 
-function indexParts(db: Database, entryId: string, sessionId: string, parts: readonly Part[]): void {
+function indexParts(
+  db: Database,
+  entryId: string,
+  sessionId: string,
+  parts: readonly Part[],
+): void {
   const text = parts
     .filter((part): part is { type: "text"; text: string } => part.type === "text")
     .map((part) => part.text)
@@ -167,7 +210,12 @@ function indexParts(db: Database, entryId: string, sessionId: string, parts: rea
     .trim();
   try {
     db.query("DELETE FROM entries_fts WHERE entry_id = ?").run(entryId);
-    if (text.length >= 3) db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?, ?, ?)").run(entryId, sessionId, text);
+    if (text.length >= 3)
+      db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?, ?, ?)").run(
+        entryId,
+        sessionId,
+        text,
+      );
   } catch {
     // an older database without the FTS table keeps working; search falls back to LIKE
   }
@@ -182,7 +230,10 @@ export function listEntries(db: Database, sessionId: string): Entry[] {
     .map((row) => toEntry(EntryRow.parse(row)));
 }
 
-export function historyMessages(db: Database, sessionId: string): { role: "user" | "assistant"; content: string }[] {
+export function historyMessages(
+  db: Database,
+  sessionId: string,
+): { role: "user" | "assistant"; content: string }[] {
   const out: { role: "user" | "assistant"; content: string }[] = [];
   for (const entry of listEntries(db, sessionId)) {
     if (entry.kind !== "message") continue;

@@ -14,7 +14,10 @@ export type PolicyRequest = {
 /** Whole-value `*`/`?` wildcards, matching OpenCode's documented semantics. */
 export function matches(pattern: string, value: string): boolean {
   if (pattern === "*") return true;
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
   return new RegExp(`^${escaped}$`).test(value);
 }
 

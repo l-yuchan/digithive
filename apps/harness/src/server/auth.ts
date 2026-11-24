@@ -39,7 +39,9 @@ export function verifyCookie(config: AuthConfig, cookie: string | null, now = Da
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
   try {
-    const parsed = z.object({ exp: z.unknown().optional() }).parse(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
+    const parsed = z
+      .object({ exp: z.unknown().optional() })
+      .parse(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
     return typeof parsed.exp === "number" && parsed.exp > now;
   } catch {
     return false;
@@ -57,7 +59,8 @@ export function readCookie(header: string | null, name = COOKIE_NAME): string | 
 
 /** Routes that must work before login so the client can render its gate. */
 export function isPublicRoute(path: string, method: string): boolean {
-  if (path === "/" || path === "/index.html" || path === "/main.js" || path === "/styles.css") return true;
+  if (path === "/" || path === "/index.html" || path === "/main.js" || path === "/styles.css")
+    return true;
   if (path === "/api/session") return true;
   if (path === "/api/login" && method === "POST") return true;
   if (path === "/api/logout" && method === "POST") return true;

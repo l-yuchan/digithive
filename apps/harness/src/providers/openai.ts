@@ -17,7 +17,12 @@ export type ToolSpec = {
 export type AdapterEvent =
   | { readonly type: "text_delta"; readonly text: string }
   | { readonly type: "reasoning_delta"; readonly text: string }
-  | { readonly type: "tool_call"; readonly id: string; readonly name: string; readonly arguments: string }
+  | {
+      readonly type: "tool_call";
+      readonly id: string;
+      readonly name: string;
+      readonly arguments: string;
+    }
   | { readonly type: "usage"; readonly promptTokens: number; readonly completionTokens: number }
   | { readonly type: "done"; readonly finishReason: string | null };
 
@@ -81,16 +86,31 @@ async function readWithTimeout(
 
 type ToolCallAccumulator = { id: string; name: string; arguments: string };
 const StreamFrameSchema = z.object({
-  choices: z.array(z.object({
-    finish_reason: z.string().nullish(),
-    delta: z.object({
-      content: z.string().nullish(), reasoning_content: z.string().nullish(), reasoning: z.string().nullish(),
-      tool_calls: z.array(z.object({
-        index: z.number().optional(), id: z.string().optional(),
-        function: z.object({ name: z.string().optional(), arguments: z.string().optional() }).optional(),
-      })).optional(),
-    }).optional(),
-  })).optional(),
+  choices: z
+    .array(
+      z.object({
+        finish_reason: z.string().nullish(),
+        delta: z
+          .object({
+            content: z.string().nullish(),
+            reasoning_content: z.string().nullish(),
+            reasoning: z.string().nullish(),
+            tool_calls: z
+              .array(
+                z.object({
+                  index: z.number().optional(),
+                  id: z.string().optional(),
+                  function: z
+                    .object({ name: z.string().optional(), arguments: z.string().optional() })
+                    .optional(),
+                }),
+              )
+              .optional(),
+          })
+          .optional(),
+      }),
+    )
+    .optional(),
   usage: z.object({ prompt_tokens: z.number(), completion_tokens: z.number() }).nullish(),
 });
 
@@ -104,10 +124,16 @@ export function openAiStream(config: ProviderConfig): StreamFn {
   return async function* stream(messages, tools, options) {
     const fetchImpl = options.fetchImpl ?? fetch;
     const controller = new AbortController();
-    const firstTokenDeadline = setTimeout(() => controller.abort(new ProviderError("timeout")), options.firstTokenTimeoutMs);
+    const firstTokenDeadline = setTimeout(
+      () => controller.abort(new ProviderError("timeout")),
+      options.firstTokenTimeoutMs,
+    );
     const onAbort = () => controller.abort();
     if (options.signal) {
-      if (options.signal.aborted) { clearTimeout(firstTokenDeadline); throw new ProviderError("aborted"); }
+      if (options.signal.aborted) {
+        clearTimeout(firstTokenDeadline);
+        throw new ProviderError("aborted");
+      }
       options.signal.addEventListener("abort", onAbort, { once: true });
     }
     try {
@@ -124,9 +150,15 @@ export function openAiStream(config: ProviderConfig): StreamFn {
             role: message.role,
             content: message.content,
             ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
-            ...(message.toolCalls ? { tool_calls: message.toolCalls.map((call) => ({
-              id: call.id, type: "function", function: { name: call.name, arguments: call.arguments },
-            })) } : {}),
+            ...(message.toolCalls
+              ? {
+                  tool_calls: message.toolCalls.map((call) => ({
+                    id: call.id,
+                    type: "function",
+                    function: { name: call.name, arguments: call.arguments },
+                  })),
+                }
+              : {}),
           })),
           stream: true,
           max_tokens: options.maxOutputTokens,
@@ -135,7 +167,11 @@ export function openAiStream(config: ProviderConfig): StreamFn {
             : {
                 tools: tools.map((tool) => ({
                   type: "function",
-                  function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+                  function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                  },
                 })),
                 tool_choice: "auto",
               }),
@@ -153,7 +189,10 @@ export function openAiStream(config: ProviderConfig): StreamFn {
       let sawFirst = false;
 
       while (true) {
-        const next = await readWithTimeout(reader, sawFirst ? options.idleTimeoutMs : options.firstTokenTimeoutMs);
+        const next = await readWithTimeout(
+          reader,
+          sawFirst ? options.idleTimeoutMs : options.firstTokenTimeoutMs,
+        );
         if (next.done) break;
         clearTimeout(firstTokenDeadline);
         sawFirst = true;
@@ -195,7 +234,11 @@ export function openAiStream(config: ProviderConfig): StreamFn {
               for (const raw of toolCalls) {
                 const call = raw;
                 const index = call.index ?? 0;
-                const current = calls.get(index) ?? { id: `call_${index}`, name: "", arguments: "" };
+                const current = calls.get(index) ?? {
+                  id: `call_${index}`,
+                  name: "",
+                  arguments: "",
+                };
                 if (call.id) current.id = call.id;
                 if (call.function?.name) current.name += call.function.name;
                 if (call.function?.arguments) current.arguments += call.function.arguments;
@@ -203,8 +246,16 @@ export function openAiStream(config: ProviderConfig): StreamFn {
               }
             }
             const usage = envelope.usage;
-            if (usage && typeof usage.prompt_tokens === "number" && typeof usage.completion_tokens === "number") {
-              yield { type: "usage", promptTokens: usage.prompt_tokens, completionTokens: usage.completion_tokens };
+            if (
+              usage &&
+              typeof usage.prompt_tokens === "number" &&
+              typeof usage.completion_tokens === "number"
+            ) {
+              yield {
+                type: "usage",
+                promptTokens: usage.prompt_tokens,
+                completionTokens: usage.completion_tokens,
+              };
             }
           }
           boundary = buffer.indexOf("\n\n");

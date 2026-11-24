@@ -2,7 +2,17 @@ import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { getJson, postJson } from "../api";
 
-const RunSchema = z.object({ id: z.string(), origin: z.string(), goal: z.string(), status: z.string(), parentRunId: z.union([z.string(), z.null()]), resultJson: z.union([z.string(), z.null()]), createdAt: z.string(), pendingApprovalId: z.union([z.string(), z.null()]).optional(), pendingTool: z.union([z.string(), z.null()]).optional() });
+const RunSchema = z.object({
+  id: z.string(),
+  origin: z.string(),
+  goal: z.string(),
+  status: z.string(),
+  parentRunId: z.union([z.string(), z.null()]),
+  resultJson: z.union([z.string(), z.null()]),
+  createdAt: z.string(),
+  pendingApprovalId: z.union([z.string(), z.null()]).optional(),
+  pendingTool: z.union([z.string(), z.null()]).optional(),
+});
 export type Run = z.infer<typeof RunSchema>;
 
 const LABELS: Record<string, string> = {
@@ -21,16 +31,23 @@ export function WorkPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(() =>
-    getJson("/api/runs", z.object({ runs: z.array(RunSchema) })).then((body) => {
-      setRuns(body.runs);
-    }).catch((failure: unknown) => {
-      setError(String(failure));
-    }), []);
+  const load = useCallback(
+    () =>
+      getJson("/api/runs", z.object({ runs: z.array(RunSchema) }))
+        .then((body) => {
+          setRuns(body.runs);
+        })
+        .catch((failure: unknown) => {
+          setError(String(failure));
+        }),
+    [],
+  );
 
   useEffect(() => {
     load().catch((failure: unknown) => setError(String(failure)));
-    const timer = setInterval(() => { load().catch((failure: unknown) => setError(String(failure))); }, 1_500);
+    const timer = setInterval(() => {
+      load().catch((failure: unknown) => setError(String(failure)));
+    }, 1_500);
     return () => clearInterval(timer);
   }, [load]);
 
@@ -97,10 +114,20 @@ export function WorkPanel() {
             {run.status === "awaiting_approval" && run.pendingApprovalId ? (
               <div className="run-actions">
                 <span className="run-meta">승인 필요 · {run.pendingTool ?? "도구 호출"}</span>
-                <button className="primary" type="button" data-testid="approve" onClick={() => void decide(run, "approve")}>
+                <button
+                  className="primary"
+                  type="button"
+                  data-testid="approve"
+                  onClick={() => void decide(run, "approve")}
+                >
                   승인
                 </button>
-                <button className="ghost" type="button" data-testid="reject" onClick={() => void decide(run, "reject")}>
+                <button
+                  className="ghost"
+                  type="button"
+                  data-testid="reject"
+                  onClick={() => void decide(run, "reject")}
+                >
                   거부
                 </button>
               </div>
@@ -114,7 +141,9 @@ export function WorkPanel() {
 
 function summarizeResult(resultJson: string): string {
   try {
-    const parsed = z.object({ text: z.unknown().optional(), error: z.unknown().optional() }).parse(JSON.parse(resultJson));
+    const parsed = z
+      .object({ text: z.unknown().optional(), error: z.unknown().optional() })
+      .parse(JSON.parse(resultJson));
     if (typeof parsed.text === "string") return parsed.text.slice(0, 200);
     if (typeof parsed.error === "string") return `오류: ${parsed.error}`;
   } catch {

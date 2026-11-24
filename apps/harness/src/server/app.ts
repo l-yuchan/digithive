@@ -1,13 +1,53 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
-import { createSession, getSession, listSessions, renameSession, softDeleteSession } from "../core/sessions";
-import { deepestDescendant, editUserMessage, forkSession, pathEntries, regeneratePoint, searchSessions, setLeaf, siblings } from "../core/tree";
+import {
+  createSession,
+  getSession,
+  listSessions,
+  renameSession,
+  softDeleteSession,
+} from "../core/sessions";
+import {
+  deepestDescendant,
+  editUserMessage,
+  forkSession,
+  pathEntries,
+  regeneratePoint,
+  searchSessions,
+  setLeaf,
+  siblings,
+} from "../core/tree";
 import { runTurn } from "../surfaces/conversation/loop";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
-import { decideApproval, enqueueRun, getRun, listRuns, validateDelegation, withApprovals, type WorkDeps } from "../surfaces/work/runner";
-import { COOKIE_NAME, checkPassphrase, isPublicRoute, issueCookie, readCookie, verifyCookie, type AuthConfig } from "./auth";
-import { authUrl, exchangeCode, loadTokens, saveTokens, syncGoogleCalendar, syncGoogleGmail, type GoogleConfig, type GoogleDeps } from "../integrations/google";
+import {
+  decideApproval,
+  enqueueRun,
+  getRun,
+  listRuns,
+  validateDelegation,
+  withApprovals,
+  type WorkDeps,
+} from "../surfaces/work/runner";
+import {
+  COOKIE_NAME,
+  checkPassphrase,
+  isPublicRoute,
+  issueCookie,
+  readCookie,
+  verifyCookie,
+  type AuthConfig,
+} from "./auth";
+import {
+  authUrl,
+  exchangeCode,
+  loadTokens,
+  saveTokens,
+  syncGoogleCalendar,
+  syncGoogleGmail,
+  type GoogleConfig,
+  type GoogleDeps,
+} from "../integrations/google";
 import { syncCanvas, type CanvasConfig } from "../integrations/canvas";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
 import { latestBriefing, runBriefing } from "../scheduler/compose";
@@ -18,15 +58,24 @@ export type AppDeps = {
   readonly events: EventLog;
   readonly conversation: ConversationDeps;
   readonly work: WorkDeps;
-  readonly google: Pick<GoogleDeps, "db" | "events" | "vaultSecret"> & { readonly config: GoogleConfig };
-  readonly canvas: { readonly db: Database; readonly events: EventLog; readonly config: CanvasConfig };
+  readonly google: Pick<GoogleDeps, "db" | "events" | "vaultSecret"> & {
+    readonly config: GoogleConfig;
+  };
+  readonly canvas: {
+    readonly db: Database;
+    readonly events: EventLog;
+    readonly config: CanvasConfig;
+  };
   readonly vapid: PushConfig;
   readonly webRoot: string;
   readonly auth: AuthConfig;
 };
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
 }
 
 function sse(request: Request, deps: AppDeps, after: number, sessionId: string | null): Response {
@@ -36,12 +85,19 @@ function sse(request: Request, deps: AppDeps, after: number, sessionId: string |
 
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
-      const send = (event: { seq: number; kind: string; payload: unknown; sessionId: string | null }) => {
+      const send = (event: {
+        seq: number;
+        kind: string;
+        payload: unknown;
+        sessionId: string | null;
+      }) => {
         if (event.seq <= lastWritten) return;
         if (sessionId && event.sessionId !== sessionId) return;
         lastWritten = event.seq;
         controller.enqueue(
-          encoder.encode(`id: ${event.seq}\nevent: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`),
+          encoder.encode(
+            `id: ${event.seq}\nevent: ${event.kind}\ndata: ${JSON.stringify(event)}\n\n`,
+          ),
         );
       };
       const snapshot = {
@@ -109,14 +165,20 @@ async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
         : file.endsWith(".css")
           ? "text/css; charset=utf-8"
           : "text/html; charset=utf-8";
-      return new Response(handle, { headers: { "content-type": type, "cache-control": "no-cache" } });
+      return new Response(handle, {
+        headers: { "content-type": type, "cache-control": "no-cache" },
+      });
     }
   }
   return new Response("client build missing: run `bun run build:web`", { status: 404 });
 }
 
 export function createApp(deps: AppDeps): (request: Request) => Promise<Response> {
-  const start = (sessionId: string, text: string, extra: { appendUser?: boolean; parentId?: string | null } = {}) => {
+  const start = (
+    sessionId: string,
+    text: string,
+    extra: { appendUser?: boolean; parentId?: string | null } = {},
+  ) => {
     void runTurn(deps.conversation, { sessionId, text, ...extra }).catch((error: unknown) => {
       console.error("turn failed", error);
     });
@@ -127,11 +189,17 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     const path = url.pathname;
 
     if (path === "/api/session") {
-      const authenticated = verifyCookie(deps.auth, readCookie(request.headers.get("cookie"), COOKIE_NAME));
+      const authenticated = verifyCookie(
+        deps.auth,
+        readCookie(request.headers.get("cookie"), COOKIE_NAME),
+      );
       return json({ authenticated, authRequired: deps.auth.passphrase.length > 0 });
     }
     if (path === "/api/login" && request.method === "POST") {
-      const raw = z.object({ passphrase: z.unknown().optional() }).catch({}).parse((await request.json().catch(() => ({}))));
+      const raw = z
+        .object({ passphrase: z.unknown().optional() })
+        .catch({})
+        .parse(await request.json().catch(() => ({})));
       const candidate = typeof raw.passphrase === "string" ? raw.passphrase : "";
       if (!checkPassphrase(deps.auth, candidate)) return json({ error: "invalid_passphrase" }, 401);
       const secure = url.protocol === "https:" ? "; Secure" : "";
@@ -146,12 +214,18 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     if (path === "/api/logout" && request.method === "POST") {
       return new Response(JSON.stringify({ authenticated: false }), {
         status: 200,
-        headers: { "content-type": "application/json; charset=utf-8", "set-cookie": `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` },
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "set-cookie": `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+        },
       });
     }
 
     if (!isPublicRoute(path, request.method)) {
-      const authenticated = verifyCookie(deps.auth, readCookie(request.headers.get("cookie"), COOKIE_NAME));
+      const authenticated = verifyCookie(
+        deps.auth,
+        readCookie(request.headers.get("cookie"), COOKIE_NAME),
+      );
       if (!authenticated) return json({ error: "unauthenticated" }, 401);
     }
 
@@ -160,7 +234,8 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     if (path === "/api/connections" && request.method === "GET") {
       return json({
         googleConnected: loadTokens(deps.db, deps.google.vaultSecret) !== null,
-        canvasConfigured: deps.canvas.config.baseUrl.length > 0 && deps.canvas.config.token.length > 0,
+        canvasConfigured:
+          deps.canvas.config.baseUrl.length > 0 && deps.canvas.config.token.length > 0,
         pushConfigured: pushConfigured(deps.vapid),
         states: syncStates(deps.db),
       });
@@ -174,7 +249,8 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/oauth/google/start" && request.method === "GET") {
-      if (deps.google.config.clientId.length === 0) return json({ error: "google_not_configured" }, 409);
+      if (deps.google.config.clientId.length === 0)
+        return json({ error: "google_not_configured" }, 409);
       return new Response(null, {
         status: 302,
         headers: { location: authUrl(deps.google.config, issueCookie(deps.auth)) },
@@ -184,37 +260,59 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     if (path === "/api/oauth/google/callback" && request.method === "GET") {
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
-      if (!code || !verifyCookie(deps.auth, state)) return Response.redirect(`${url.origin}/?oauth=error`, 302);
+      if (!code || !verifyCookie(deps.auth, state))
+        return Response.redirect(`${url.origin}/?oauth=error`, 302);
       try {
         const tokens = await exchangeCode(deps.google.config, code);
         saveTokens(deps.db, deps.google.vaultSecret, tokens);
-        deps.events.append({ kind: "integration.connected", payload: { provider: "google", scope: tokens.scope } });
+        deps.events.append({
+          kind: "integration.connected",
+          payload: { provider: "google", scope: tokens.scope },
+        });
         await syncGoogleCalendar(deps.google);
         await syncGoogleGmail(deps.google);
         return Response.redirect(`${url.origin}/?oauth=ok`, 302);
       } catch (error) {
-        deps.events.append({ kind: "integration.sync_state", payload: { source: "google", ok: false, error: error instanceof Error ? error.message : "oauth_failed" } });
+        deps.events.append({
+          kind: "integration.sync_state",
+          payload: {
+            source: "google",
+            ok: false,
+            error: error instanceof Error ? error.message : "oauth_failed",
+          },
+        });
         return Response.redirect(`${url.origin}/?oauth=error`, 302);
       }
     }
 
-    if (path === "/api/push/key" && request.method === "GET") return json({ publicKey: deps.vapid.publicKey });
+    if (path === "/api/push/key" && request.method === "GET")
+      return json({ publicKey: deps.vapid.publicKey });
 
     if (path === "/api/push/subscribe" && request.method === "POST") {
-      const raw = z.union([z.object({ subscription: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+      const raw = z
+        .union([z.object({ subscription: z.unknown().optional() }), z.null()])
+        .catch(null)
+        .parse(await request.json().catch(() => null));
       try {
         return json(addSubscription(deps.db, raw?.subscription));
       } catch (error) {
-        return json({ error: error instanceof Error ? error.message : "invalid_subscription" }, 422);
+        return json(
+          { error: error instanceof Error ? error.message : "invalid_subscription" },
+          422,
+        );
       }
     }
 
     if (path === "/api/push/test" && request.method === "POST") {
-      const outcome = await sendPush(deps.db, deps.vapid, { title: "digithive 알림 테스트", body: "알림이 도착하면 정상입니다." });
+      const outcome = await sendPush(deps.db, deps.vapid, {
+        title: "digithive 알림 테스트",
+        body: "알림이 도착하면 정상입니다.",
+      });
       return json(outcome);
     }
 
-    if (path === "/api/briefings/latest" && request.method === "GET") return json(latestBriefing(deps.db));
+    if (path === "/api/briefings/latest" && request.method === "GET")
+      return json(latestBriefing(deps.db));
 
     if (path === "/api/briefings/run" && request.method === "POST") {
       const result = await runBriefing(
@@ -223,7 +321,10 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
           events: deps.events,
           push: async (payload) => {
             const outcome = await sendPush(deps.db, deps.vapid, payload);
-            return { ok: outcome.sent > 0, ...(outcome.sent > 0 ? {} : { error: outcome.errors.join(",") || "no_device" }) };
+            return {
+              ok: outcome.sent > 0,
+              ...(outcome.sent > 0 ? {} : { error: outcome.errors.join(",") || "no_device" }),
+            };
           },
         },
         true,
@@ -232,9 +333,16 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/runs") {
-      if (request.method === "GET") return json({ runs: withApprovals(deps.db, listRuns(deps.db)) });
+      if (request.method === "GET")
+        return json({ runs: withApprovals(deps.db, listRuns(deps.db)) });
       if (request.method === "POST") {
-        const raw = z.union([z.object({ goal: z.unknown().optional(), sessionId: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+        const raw = z
+          .union([
+            z.object({ goal: z.unknown().optional(), sessionId: z.unknown().optional() }),
+            z.null(),
+          ])
+          .catch(null)
+          .parse(await request.json().catch(() => null));
         const goal = typeof raw?.goal === "string" ? raw.goal.trim() : "";
         if (goal.length === 0 || goal.length > 4_096) return json({ error: "invalid_goal" }, 422);
         const sessionId = typeof raw?.sessionId === "string" ? raw.sessionId : null;
@@ -243,18 +351,29 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       }
     }
 
-    const runMatch = /^\/api\/runs\/([^/]+)(?:\/(events|delegate))?(?:\/approvals\/([^/]+))?$/.exec(path);
+    const runMatch = /^\/api\/runs\/([^/]+)(?:\/(events|delegate))?(?:\/approvals\/([^/]+))?$/.exec(
+      path,
+    );
     if (runMatch) {
       const runId = runMatch[1] ?? "";
       const run = getRun(deps.db, runId);
       if (!run) return json({ error: "run_not_found" }, 404);
 
       if (runMatch[3] && request.method === "POST") {
-        const raw = z.union([z.object({ decision: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
-        const decision = raw?.decision === "approve" ? "approve" : raw?.decision === "reject" ? "reject" : null;
+        const raw = z
+          .union([z.object({ decision: z.unknown().optional() }), z.null()])
+          .catch(null)
+          .parse(await request.json().catch(() => null));
+        const decision =
+          raw?.decision === "approve" ? "approve" : raw?.decision === "reject" ? "reject" : null;
         if (!decision) return json({ error: "invalid_decision" }, 422);
         try {
-          return json(decideApproval({ db: deps.db, events: deps.events }, { runId, approvalId: runMatch[3], decision }));
+          return json(
+            decideApproval(
+              { db: deps.db, events: deps.events },
+              { runId, approvalId: runMatch[3], decision },
+            ),
+          );
         } catch (error) {
           return json({ error: error instanceof Error ? error.message : "failed" }, 409);
         }
@@ -263,20 +382,38 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       if (runMatch[2] === "events" && request.method === "GET") {
         const after = Number(url.searchParams.get("after") ?? "0");
         const rows = deps.db
-          .query("SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE run_id = ? AND seq > ? ORDER BY seq")
+          .query(
+            "SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE run_id = ? AND seq > ? ORDER BY seq",
+          )
           .all(runId, Number.isFinite(after) ? after : 0);
         return json({ events: rows });
       }
 
       if (runMatch[2] === "delegate" && request.method === "POST") {
-        const raw = z.record(z.string(), z.unknown()).catch({}).parse((await request.json().catch(() => ({}))));
-        const budget = z.union([z.object({ maxMicroUsd: z.unknown().optional(), maxToolCalls: z.unknown().optional() }), z.undefined()]).catch(undefined).parse(raw["budget"]);
+        const raw = z
+          .record(z.string(), z.unknown())
+          .catch({})
+          .parse(await request.json().catch(() => ({})));
+        const budget = z
+          .union([
+            z.object({ maxMicroUsd: z.unknown().optional(), maxToolCalls: z.unknown().optional() }),
+            z.undefined(),
+          ])
+          .catch(undefined)
+          .parse(raw["budget"]);
         const fields = {
           goal: typeof raw["goal"] === "string" ? raw["goal"] : "",
-          inputRefs: Array.isArray(raw["inputRefs"]) ? (z.array(z.string()).catch([]).parse(raw["inputRefs"])) : [],
-          permissionProfile: typeof raw["permissionProfile"] === "string" ? raw["permissionProfile"] : "",
-          budget: { maxMicroUsd: Number(budget?.maxMicroUsd ?? Number.NaN), maxToolCalls: Number(budget?.maxToolCalls ?? Number.NaN) },
-          completionCondition: typeof raw["completionCondition"] === "string" ? raw["completionCondition"] : "",
+          inputRefs: Array.isArray(raw["inputRefs"])
+            ? z.array(z.string()).catch([]).parse(raw["inputRefs"])
+            : [],
+          permissionProfile:
+            typeof raw["permissionProfile"] === "string" ? raw["permissionProfile"] : "",
+          budget: {
+            maxMicroUsd: Number(budget?.maxMicroUsd ?? Number.NaN),
+            maxToolCalls: Number(budget?.maxToolCalls ?? Number.NaN),
+          },
+          completionCondition:
+            typeof raw["completionCondition"] === "string" ? raw["completionCondition"] : "",
         };
         const missing = validateDelegation(fields);
         if (missing.length > 0) return json({ error: "incomplete_delegation", missing }, 422);
@@ -291,11 +428,14 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
         return json({ child, fields }, 201);
       }
 
-      if (runMatch[2] === undefined && request.method === "GET") return json(withApprovals(deps.db, [run])[0]);
+      if (runMatch[2] === undefined && request.method === "GET")
+        return json(withApprovals(deps.db, [run])[0]);
     }
 
     if (path === "/api/events" && request.method === "GET") {
-      const after = Number(request.headers.get("last-event-id") ?? url.searchParams.get("after") ?? "0");
+      const after = Number(
+        request.headers.get("last-event-id") ?? url.searchParams.get("after") ?? "0",
+      );
       const session = url.searchParams.get("session");
       return sse(request, deps, Number.isFinite(after) ? after : 0, session);
     }
@@ -303,19 +443,32 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     if (path === "/api/sessions") {
       if (request.method === "GET") {
         const query = url.searchParams.get("q");
-        if (query && query.trim().length > 0) return json({ sessions: searchSessions(deps.db, query) });
+        if (query && query.trim().length > 0)
+          return json({ sessions: searchSessions(deps.db, query) });
         return json({ sessions: listSessions(deps.db) });
       }
       if (request.method === "POST") {
-        const raw = z.object({ title: z.unknown().optional() }).catch({}).parse((await request.json().catch(() => ({}))));
-        const title = typeof raw.title === "string" && raw.title.trim().length > 0 ? raw.title.trim() : "새 대화";
+        const raw = z
+          .object({ title: z.unknown().optional() })
+          .catch({})
+          .parse(await request.json().catch(() => ({})));
+        const title =
+          typeof raw.title === "string" && raw.title.trim().length > 0
+            ? raw.title.trim()
+            : "새 대화";
         const session = createSession(deps.db, title);
-        deps.events.append({ kind: "session.created", sessionId: session.id, payload: { id: session.id, title: session.title } });
+        deps.events.append({
+          kind: "session.created",
+          sessionId: session.id,
+          payload: { id: session.id, title: session.title },
+        });
         return json(session, 201);
       }
     }
 
-    const entryMatch = /^\/api\/sessions\/([^/]+)\/entries\/([^/]+)\/(edit|regenerate|leaf)$/.exec(path);
+    const entryMatch = /^\/api\/sessions\/([^/]+)\/entries\/([^/]+)\/(edit|regenerate|leaf)$/.exec(
+      path,
+    );
     if (entryMatch && request.method === "POST") {
       const sessionId = entryMatch[1] ?? "";
       const entryId = entryMatch[2] ?? "";
@@ -323,11 +476,18 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       if (!getSession(deps.db, sessionId)) return json({ error: "session_not_found" }, 404);
       try {
         if (action === "edit") {
-          const raw = z.union([z.object({ text: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+          const raw = z
+            .union([z.object({ text: z.unknown().optional() }), z.null()])
+            .catch(null)
+            .parse(await request.json().catch(() => null));
           const text = typeof raw?.text === "string" ? raw.text.trim() : "";
           if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
           const result = editUserMessage(deps.db, { sessionId, entryId, text });
-          deps.events.append({ kind: "context.edited", sessionId, payload: { entryId: result.entry.id, replaced: entryId } });
+          deps.events.append({
+            kind: "context.edited",
+            sessionId,
+            payload: { entryId: result.entry.id, replaced: entryId },
+          });
           start(sessionId, text, { appendUser: false, parentId: result.entry.id });
           return json({ entryId: result.entry.id }, 202);
         }
@@ -336,7 +496,10 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
           start(sessionId, point.userText, { appendUser: false, parentId: point.parentId });
           return json({ parentId: point.parentId }, 202);
         }
-        const raw = z.union([z.object({ entryId: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+        const raw = z
+          .union([z.object({ entryId: z.unknown().optional() }), z.null()])
+          .catch(null)
+          .parse(await request.json().catch(() => null));
         const leaf = typeof raw?.entryId === "string" ? raw.entryId : null;
         if (!leaf) return json({ error: "invalid_leaf" }, 422);
         const target = deepestDescendant(deps.db, sessionId, leaf);
@@ -350,12 +513,22 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     const forkMatch = /^\/api\/sessions\/([^/]+)\/fork$/.exec(path);
     if (forkMatch && request.method === "POST") {
       const sessionId = forkMatch[1] ?? "";
-      const raw = z.union([z.object({ entryId: z.unknown().optional(), title: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+      const raw = z
+        .union([
+          z.object({ entryId: z.unknown().optional(), title: z.unknown().optional() }),
+          z.null(),
+        ])
+        .catch(null)
+        .parse(await request.json().catch(() => null));
       const entryId = typeof raw?.entryId === "string" ? raw.entryId : "";
       const title = typeof raw?.title === "string" ? raw.title : "분기 대화";
       try {
         const forked = forkSession(deps.db, { sessionId, entryId, title });
-        deps.events.append({ kind: "session.created", sessionId: forked.sessionId, payload: { id: forked.sessionId, title } });
+        deps.events.append({
+          kind: "session.created",
+          sessionId: forked.sessionId,
+          payload: { id: forked.sessionId, title },
+        });
         return json(forked, 201);
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : "failed" }, 409);
@@ -372,23 +545,37 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
         return json({ entries: withBranches(deps.db, id) });
       }
       if (sessionMatch[2] === "messages" && request.method === "POST") {
-        const raw = z.union([z.object({ text: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+        const raw = z
+          .union([z.object({ text: z.unknown().optional() }), z.null()])
+          .catch(null)
+          .parse(await request.json().catch(() => null));
         const text = typeof raw?.text === "string" ? raw.text.trim() : "";
         if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
         start(id, text);
         return json({ accepted: true }, 202);
       }
       if (sessionMatch[2] === undefined && request.method === "PATCH") {
-        const raw = z.union([z.object({ title: z.unknown().optional() }), z.null()]).catch(null).parse((await request.json().catch(() => null)));
+        const raw = z
+          .union([z.object({ title: z.unknown().optional() }), z.null()])
+          .catch(null)
+          .parse(await request.json().catch(() => null));
         const title = typeof raw?.title === "string" ? raw.title : "";
         const renamed = renameSession(deps.db, id, title);
         if (!renamed) return json({ error: "invalid_title" }, 422);
-        deps.events.append({ kind: "session.renamed", sessionId: id, payload: { title: renamed.title } });
+        deps.events.append({
+          kind: "session.renamed",
+          sessionId: id,
+          payload: { title: renamed.title },
+        });
         return json(renamed);
       }
       if (sessionMatch[2] === undefined && request.method === "DELETE") {
         const result = softDeleteSession(deps.db, id);
-        deps.events.append({ kind: "session.deleted", sessionId: id, payload: { cancelledRuns: result.cancelledRuns } });
+        deps.events.append({
+          kind: "session.deleted",
+          sessionId: id,
+          payload: { cancelledRuns: result.cancelledRuns },
+        });
         return json({ deleted: true, cancelledRuns: result.cancelledRuns });
       }
     }

@@ -106,7 +106,13 @@ export class EventLog {
          VALUES (?, ?, ?, ?, ?)
          RETURNING seq, run_id, session_id, kind, payload_json, created_at`,
       )
-      .get(input.runId ?? null, input.sessionId ?? null, input.kind, JSON.stringify(input.payload ?? null), createdAt);
+      .get(
+        input.runId ?? null,
+        input.sessionId ?? null,
+        input.kind,
+        JSON.stringify(input.payload ?? null),
+        createdAt,
+      );
     const event = toLogged(EventRow.parse(row));
     for (const listener of this.#listeners) listener(event);
     return event;
@@ -114,13 +120,23 @@ export class EventLog {
 
   after(seq: number, sessionId?: string): LoggedEvent[] {
     const rows = sessionId
-      ? this.#db.query("SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE seq > ? AND session_id = ? ORDER BY seq").all(seq, sessionId)
-      : this.#db.query("SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE seq > ? ORDER BY seq").all(seq);
+      ? this.#db
+          .query(
+            "SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE seq > ? AND session_id = ? ORDER BY seq",
+          )
+          .all(seq, sessionId)
+      : this.#db
+          .query(
+            "SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE seq > ? ORDER BY seq",
+          )
+          .all(seq);
     return rows.map((row) => toLogged(EventRow.parse(row)));
   }
 
   lastSeq(): number {
-    const row = this.#db.query<{ seq: number }, SQLQueryBindings[]>("SELECT COALESCE(MAX(seq), 0) AS seq FROM events").get();
+    const row = this.#db
+      .query<{ seq: number }, SQLQueryBindings[]>("SELECT COALESCE(MAX(seq), 0) AS seq FROM events")
+      .get();
     ok(row, "sequence query returns one aggregate row");
     return row.seq;
   }
