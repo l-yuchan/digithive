@@ -64,7 +64,7 @@ W2(대화 관리)·W3(맥락·압축)·W4(작업 계층)·W5(위임)·W6(이전)
 - SSE 재연결은 EventSource 기본 동작(`Last-Event-ID`)에 의존한다. 서버는 스냅샷을 먼저 보내므로 화면 복원은 안전하다.
 - 대화 삭제·제목 변경·편집·분기는 W2.
 
-## 배포 (mini, https://digithive.chanoil.com/app2/)
+## 배포 (mini, https://digithive.chanoil.com/)
 
 ```bash
 # 서버에서
@@ -74,9 +74,34 @@ docker compose up -d --build
 ```
 
 - 두 서비스: `harness`(웹, 4318, caddy_expose) + `harness-worker`(실행 계층).
-- Caddy는 `handle_path /app2/*`로 접두사를 벗겨 프록시한다. 클라이언트는 `/app2` 아래에서 API 경로에 자동으로 접두사를 붙인다(`apiUrl`).
+- Caddy는 `handle /app2*`로 308 리다이렉트 후 `/`를 `harness:4318`으로 프록시한다.
 - 인증: `HARNESS_PASSPHRASE`(빈 값이면 로컬 개발용으로 인증 비활성), `HARNESS_SESSION_SECRET`으로 서명한 HttpOnly 쿠키.
 - 되돌림: `~/caddy/Caddyfile.bak-*`를 `docker exec -i caddy_proxy sh -c 'cat > /etc/caddy/Caddyfile'`로 복원 후 `caddy reload`. (파일 bind-mount라 sed -i 금지)
+
+## CI/CD (GitHub Actions)
+
+| 워크플로 | 트리거 | 하는 일 |
+|---|---|---|
+| `ci` | `main` push, PR, 수동 | `apps/harness`에서 `bun install --frozen-lockfile` → lint → typecheck → build:web → test → fmt:check, 그리고 push 없이 `docker build` |
+| `cd` | `main` push, 수동 | `ghcr.io/<owner>/digithive-harness:<sha>`·`:latest` 발행 → mini 러너에서 배포 |
+
+배포 job은 `runs-on: [self-hosted, mini]`에서 돈다(서버가 LAN에 있어
+GitHub 호스티드 러너가 직접 닿지 못한다). 순서:
+
+1. `deploy/compose.yml`을 `~/digithive-harness/deploy/compose.yml`로 동기화
+2. 현재 이미지를 `deploy/.harness_image`에 기록
+3. job 한정 `DOCKER_CONFIG`로 GHCR 로그인 후 `docker compose pull`
+4. `docker compose up -d --no-build`
+5. `https://digithive.chanoil.com/api/session`이 60초 안에 응답하는지 확인
+6. 실패하면 기록해 둔 직전 이미지로 되돌리고 job 실패
+
+러너는 mini의 `~/actions-runner`(이름 `mini-digithive`, 라벨 `mini`)에 있고,
+`~/.config/systemd/user/actions-runner.service` 유닛이 준비되어 있다. 이 서버는
+passwordless sudo가 없고 libicu가 빠져 있어 실행 시
+`LD_LIBRARY_PATH=$HOME/libicu/usr/lib/x86_64-linux-gnu`가 필요하다(유닛에 설정됨).
+재부팅 후에도 살아 있으려면 소유자가 한 번
+`sudo loginctl enable-linger leefam`을 실행한 뒤
+`systemctl --user enable --now actions-runner`를 켜야 한다.
 - 운영 DB는 볼륨 `deploy_harness-data`(/data). v2 데이터는 `bun scripts/migrate-v2.ts --from <v2.db> --to /data/harness.db`로 옮긴다.
 
 ## 연동 환경변수
