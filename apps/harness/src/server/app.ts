@@ -5,6 +5,7 @@ import { deepestDescendant, editUserMessage, forkSession, pathEntries, regenerat
 import { runTurn } from "../surfaces/conversation/loop";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
 import { decideApproval, enqueueRun, getRun, listRuns, validateDelegation, withApprovals, type WorkDeps } from "../surfaces/work/runner";
+import { COOKIE_NAME, checkPassphrase, isPublicRoute, issueCookie, readCookie, verifyCookie, type AuthConfig } from "./auth";
 
 export type AppDeps = {
   readonly db: Database;
@@ -12,6 +13,7 @@ export type AppDeps = {
   readonly conversation: ConversationDeps;
   readonly work: WorkDeps;
   readonly webRoot: string;
+  readonly auth: AuthConfig;
 };
 
 function json(body: unknown, status = 200): Response {
@@ -114,6 +116,35 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
   return async (request) => {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (path === "/api/session") {
+      const authenticated = verifyCookie(deps.auth, readCookie(request.headers.get("cookie"), COOKIE_NAME));
+      return json({ authenticated, authRequired: deps.auth.passphrase.length > 0 });
+    }
+    if (path === "/api/login" && request.method === "POST") {
+      const raw = (await request.json().catch(() => ({}))) as { passphrase?: unknown };
+      const candidate = typeof raw.passphrase === "string" ? raw.passphrase : "";
+      if (!checkPassphrase(deps.auth, candidate)) return json({ error: "invalid_passphrase" }, 401);
+      const secure = url.protocol === "https:" ? "; Secure" : "";
+      return new Response(JSON.stringify({ authenticated: true }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "set-cookie": `${COOKIE_NAME}=${issueCookie(deps.auth)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 60 * 60}${secure}`,
+        },
+      });
+    }
+    if (path === "/api/logout" && request.method === "POST") {
+      return new Response(JSON.stringify({ authenticated: false }), {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8", "set-cookie": `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0` },
+      });
+    }
+
+    if (!isPublicRoute(path, request.method)) {
+      const authenticated = verifyCookie(deps.auth, readCookie(request.headers.get("cookie"), COOKIE_NAME));
+      if (!authenticated) return json({ error: "unauthenticated" }, 401);
+    }
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
 

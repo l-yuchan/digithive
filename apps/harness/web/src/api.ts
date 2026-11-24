@@ -21,8 +21,13 @@ export type Entry = {
   siblingIds?: string[];
 };
 
+export function apiUrl(path: string): string {
+  const base = window.location.pathname.startsWith("/app2") ? "/app2" : "";
+  return `${base}${path}`;
+}
+
 export async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await fetch(apiUrl(url));
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return (await response.json()) as T;
 }
@@ -36,7 +41,7 @@ export async function sendJson<T>(method: string, url: string, body?: unknown): 
     body === undefined
       ? { method }
       : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
-  const response = await fetch(url, init);
+  const response = await fetch(apiUrl(url), init);
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return (await response.json()) as T;
 }

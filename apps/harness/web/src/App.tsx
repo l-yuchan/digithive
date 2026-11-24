@@ -1,7 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
+import { apiUrl, getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
 import { Composer } from "./composer/Composer";
 import { WorkPanel } from "./work/WorkPanel";
+import { Login } from "./auth/Login";
 
 type State = {
   readonly sessions: Session[];
@@ -142,6 +143,13 @@ export function App() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"chat" | "work">("chat");
+  const [authed, setAuthed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void getJson<{ authenticated: boolean }>("/api/session")
+      .then((body) => setAuthed(body.authenticated))
+      .catch(() => setAuthed(false));
+  }, []);
   const activeRef = useRef<string | null>(null);
   activeRef.current = state.activeId;
 
@@ -158,6 +166,7 @@ export function App() {
   };
 
   useEffect(() => {
+    if (authed !== true) return;
     let cancelled = false;
     void (async () => {
       const sessions = await reloadSessions();
@@ -173,15 +182,16 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [authed]);
 
   useEffect(() => {
+    if (authed !== true) return;
     const id = state.activeId;
     if (!id) return;
     let cancelled = false;
     void reloadEntries(id).catch((error: unknown) => dispatch({ type: "error", message: String(error) }));
 
-    const source = new EventSource(`/api/events?after=0&session=${encodeURIComponent(id)}`);
+    const source = new EventSource(apiUrl(`/api/events?after=0&session=${encodeURIComponent(id)}`));
     source.addEventListener("snapshot", (event) => {
       const data = JSON.parse((event as MessageEvent<string>).data) as { sessions: Session[]; entries: Entry[]; lastSeq: number };
       dispatch({ type: "snapshot", sessions: data.sessions, entries: data.entries, lastSeq: data.lastSeq });
@@ -215,7 +225,7 @@ export function App() {
       cancelled = true;
       source.close();
     };
-  }, [state.activeId]);
+  }, [state.activeId, authed]);
 
   const send = async (text: string) => {
     const id = state.activeId;
@@ -318,6 +328,9 @@ export function App() {
       dispatch({ type: "error", message: String(error) });
     }
   };
+
+  if (authed === null) return <div className="login"><p>불러오는 중…</p></div>;
+  if (authed !== true) return <Login onDone={() => setAuthed(true)} />;
 
   return (
     <div className="shell">

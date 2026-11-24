@@ -2,6 +2,8 @@ export type ProviderConfig = {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;
+  /** Extra request headers some gateways require (e.g. a session header). */
+  readonly headers?: Readonly<Record<string, string>>;
 };
 
 export type ChatMessage = {
@@ -104,6 +106,7 @@ export function openAiStream(config: ProviderConfig): StreamFn {
         headers: {
           authorization: `Bearer ${config.apiKey}`,
           "content-type": "application/json",
+          ...(config.headers ?? {}),
         },
         body: JSON.stringify({
           model: config.model,

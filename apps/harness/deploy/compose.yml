@@ -1,0 +1,45 @@
+services:
+  harness:
+    build: ..
+    environment:
+      PORT: "4318"
+      HARNESS_DB: /data/harness.db
+      HARNESS_WORKSPACE: /data/workspace
+      HARNESS_PASSPHRASE: ${HARNESS_PASSPHRASE:?set HARNESS_PASSPHRASE in .env}
+      HARNESS_SESSION_SECRET: ${HARNESS_SESSION_SECRET:?set HARNESS_SESSION_SECRET in .env}
+      HARNESS_MAX_CHARS: ${HARNESS_MAX_CHARS:-24000}
+      HARNESS_MAX_CONCURRENT: ${HARNESS_MAX_CONCURRENT:-2}
+      HARNESS_LEASE_MS: ${HARNESS_LEASE_MS:-45000}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:?set MODEL_BASE_URL in .env}
+      MODEL_API_KEY: ${MODEL_API_KEY:?set MODEL_API_KEY in .env}
+      MODEL_NAME: ${MODEL_NAME:-deepseek-v4.1-flash}
+      HARNESS_MODEL_HEADERS: ${HARNESS_MODEL_HEADERS:-{}}
+    networks:
+      - default
+      - caddy_expose
+    restart: unless-stopped
+
+  harness-worker:
+    build: ..
+    command: ["bun", "scripts/worker.ts"]
+    environment:
+      HARNESS_DB: /data/harness.db
+      HARNESS_WORKSPACE: /data/workspace
+      HARNESS_LEASE_MS: ${HARNESS_LEASE_MS:-45000}
+      HARNESS_MAX_CONCURRENT: ${HARNESS_MAX_CONCURRENT:-2}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:?set MODEL_BASE_URL in .env}
+      MODEL_API_KEY: ${MODEL_API_KEY:?set MODEL_API_KEY in .env}
+      MODEL_NAME: ${MODEL_NAME:-deepseek-v4.1-flash}
+      HARNESS_MODEL_HEADERS: ${HARNESS_MODEL_HEADERS:-{}}
+    volumes:
+      - harness-data:/data
+    depends_on:
+      - harness
+    restart: unless-stopped
+
+volumes:
+  harness-data:
+
+networks:
+  caddy_expose:
+    external: true

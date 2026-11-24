@@ -43,7 +43,14 @@ export function createHarness(config: HarnessConfig): {
     maxChars: config.maxChars,
   };
 
-  const deps: AppDeps = { db, events, conversation, work: runtime.work, webRoot: resolve(config.webRoot) };
+  const deps: AppDeps = {
+    db,
+    events,
+    conversation,
+    work: runtime.work,
+    webRoot: resolve(config.webRoot),
+    auth: { passphrase: config.passphrase, secret: config.sessionSecret },
+  };
   return { deps, handler: createApp(deps), close: runtime.close, work: runtime.work };
 }
 

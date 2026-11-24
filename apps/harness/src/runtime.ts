@@ -22,6 +22,9 @@ export type HarnessConfig = {
   readonly maxChars: number;
   readonly maxConcurrent: number;
   readonly leaseMs: number;
+  readonly passphrase: string;
+  readonly sessionSecret: string;
+  readonly modelHeaders: string;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): HarnessConfig {
@@ -30,13 +33,16 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: Number(env["PORT"] ?? "8799"),
     dbPath: env["HARNESS_DB"] ?? resolve(dataDir, "harness.db"),
     webRoot: resolve(appRoot, "web/dist"),
-    workspaceRoot: resolve(appRoot, "data/workspace"),
+    workspaceRoot: env["HARNESS_WORKSPACE"] ?? resolve(dataDir, "workspace"),
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
     model: env["MODEL_NAME"] ?? "mock-model",
     maxChars: Number(env["HARNESS_MAX_CHARS"] ?? "24000"),
     maxConcurrent: Number(env["HARNESS_MAX_CONCURRENT"] ?? "2"),
     leaseMs: Number(env["HARNESS_LEASE_MS"] ?? "45000"),
+    passphrase: env["HARNESS_PASSPHRASE"] ?? "",
+    sessionSecret: env["HARNESS_SESSION_SECRET"] ?? crypto.randomUUID(),
+    modelHeaders: env["HARNESS_MODEL_HEADERS"] ?? "",
   };
 }
 
@@ -46,7 +52,12 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   mkdirSync(config.workspaceRoot, { recursive: true });
   const db = openDatabase(config.dbPath);
   const events = new EventLog(db);
-  const stream = openAiStream({ baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model });
+  const stream = openAiStream({
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    model: config.model,
+    headers: parseHeaders(config.modelHeaders),
+  });
   const tools = createRegistry(builtinTools({ root: config.workspaceRoot }));
   const work: WorkDeps = {
     db,
@@ -62,3 +73,19 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
 }
 
 export { claimNext, executeRun, reconcileWork, settleExpiredRuns };
+
+function parseHeaders(raw: string): Record<string, string> {
+  if (raw.trim().length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === "string") out[key] = value;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+

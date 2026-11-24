@@ -39,3 +39,19 @@ W2(대화 관리)·W3(맥락·압축)·W4(작업 계층)·W5(위임)·W6(이전)
 - 도구 레지스트리가 비어 있다(승인 게이트·실행 경계는 W4에서 도구와 함께 채운다).
 - SSE 재연결은 EventSource 기본 동작(`Last-Event-ID`)에 의존한다. 서버는 스냅샷을 먼저 보내므로 화면 복원은 안전하다.
 - 대화 삭제·제목 변경·편집·분기는 W2.
+
+## 배포 (mini, https://digithive.chanoil.com/app2/)
+
+```bash
+# 서버에서
+cd ~/digithive-harness/deploy
+# .env: HARNESS_PASSPHRASE, HARNESS_SESSION_SECRET, MODEL_BASE_URL, MODEL_API_KEY, MODEL_NAME, HARNESS_MODEL_HEADERS
+docker compose up -d --build
+```
+
+- 두 서비스: `harness`(웹, 4318, caddy_expose) + `harness-worker`(실행 계층).
+- Caddy는 `handle_path /app2/*`로 접두사를 벗겨 프록시한다. 클라이언트는 `/app2` 아래에서 API 경로에 자동으로 접두사를 붙인다(`apiUrl`).
+- 인증: `HARNESS_PASSPHRASE`(빈 값이면 로컬 개발용으로 인증 비활성), `HARNESS_SESSION_SECRET`으로 서명한 HttpOnly 쿠키.
+- 되돌림: `~/caddy/Caddyfile.bak-*`를 `docker exec -i caddy_proxy sh -c 'cat > /etc/caddy/Caddyfile'`로 복원 후 `caddy reload`. (파일 bind-mount라 sed -i 금지)
+- 운영 DB는 볼륨 `deploy_harness-data`(/data). v2 데이터는 `bun scripts/migrate-v2.ts --from <v2.db> --to /data/harness.db`로 옮긴다.
+
