@@ -95,13 +95,14 @@ GitHub 호스티드 러너가 직접 닿지 못한다). 순서:
 5. `https://digithive.chanoil.com/api/session`이 60초 안에 응답하는지 확인
 6. 실패하면 기록해 둔 직전 이미지로 되돌리고 job 실패
 
-러너는 mini의 `~/actions-runner`(이름 `mini-digithive`, 라벨 `mini`)에 있고,
-`~/.config/systemd/user/actions-runner.service` 유닛이 준비되어 있다. 이 서버는
-passwordless sudo가 없고 libicu가 빠져 있어 실행 시
-`LD_LIBRARY_PATH=$HOME/libicu/usr/lib/x86_64-linux-gnu`가 필요하다(유닛에 설정됨).
-재부팅 후에도 살아 있으려면 소유자가 한 번
-`sudo loginctl enable-linger leefam`을 실행한 뒤
-`systemctl --user enable --now actions-runner`를 켜야 한다.
+러너는 mini의 컨테이너 `digithive-runner`(이름 `mini-digithive`, 라벨 `mini`)로 돈다.
+이미지는 `ghcr.io/actions/actions-runner:latest`이고 `--restart unless-stopped`라서
+dockerd가 부팅 때 함께 살린다. 러너 파일과 등록 상태는 호스트
+`~/runner-container`(컨테이너 `/home/runner`)에 있고, 컨테이너에는 도커 소켓,
+호스트 `docker`/compose 플러그인, `~/digithive-harness`가 마운트된다. libicu가
+이미지 안에 있어 이전의 `LD_LIBRARY_PATH` 꼼수는 필요 없다. 이전 호스트 설치
+`~/actions-runner`와 `~/.config/systemd/user/actions-runner.service` 유닛은
+쓰지 않는 채로 남아 있다. 재등록 절차는 `docs/ci-cd.md`에 있다.
 
 - 운영 DB는 볼륨 `deploy_harness-data`(/data). v2 데이터는 `bun scripts/migrate-v2.ts --from <v2.db> --to /data/harness.db`로 옮긴다.
 
@@ -120,3 +121,5 @@ passwordless sudo가 없고 libicu가 빠져 있어 실행 시
 - 수동 동기화: `POST /api/connections/sync` → 소스별 {ok,count,cursor,error}
 - Google 연결: `GET /api/oauth/google/start`가 돌려준 URL로 1회 동의하면 콜백이 토큰을 암호화 저장하고 즉시 1회 동기화한다.
 - 알림: 브라우저에서 구독하면 `POST /api/push/subscribe`로 저장되고, 브리핑 발행 시 전송된다. 점검은 `POST /api/push/test`.
+
+
