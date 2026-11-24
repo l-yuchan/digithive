@@ -14,6 +14,16 @@ services:
       MODEL_API_KEY: ${MODEL_API_KEY:?set MODEL_API_KEY in .env}
       MODEL_NAME: ${MODEL_NAME:-deepseek-v4.1-flash}
       HARNESS_MODEL_HEADERS: ${HARNESS_MODEL_HEADERS:-{}}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      CANVAS_URL: ${CANVAS_URL:-}
+      CANVAS_TOKEN: ${CANVAS_TOKEN:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+    volumes:
+      - harness-data:/data
     networks:
       - default
       - caddy_expose
@@ -31,6 +41,14 @@ services:
       MODEL_API_KEY: ${MODEL_API_KEY:?set MODEL_API_KEY in .env}
       MODEL_NAME: ${MODEL_NAME:-deepseek-v4.1-flash}
       HARNESS_MODEL_HEADERS: ${HARNESS_MODEL_HEADERS:-{}}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      CANVAS_URL: ${CANVAS_URL:-}
+      CANVAS_TOKEN: ${CANVAS_TOKEN:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-}
     volumes:
       - harness-data:/data
     depends_on:

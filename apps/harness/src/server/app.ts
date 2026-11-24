@@ -6,12 +6,20 @@ import { runTurn } from "../surfaces/conversation/loop";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
 import { decideApproval, enqueueRun, getRun, listRuns, validateDelegation, withApprovals, type WorkDeps } from "../surfaces/work/runner";
 import { COOKIE_NAME, checkPassphrase, isPublicRoute, issueCookie, readCookie, verifyCookie, type AuthConfig } from "./auth";
+import { authUrl, exchangeCode, loadTokens, saveTokens, syncGoogleCalendar, syncGoogleGmail, type GoogleConfig, type GoogleDeps } from "../integrations/google";
+import { syncCanvas, type CanvasConfig } from "../integrations/canvas";
+import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
+import { latestBriefing, runBriefing } from "../scheduler/compose";
+import { syncStates } from "../integrations/normalize";
 
 export type AppDeps = {
   readonly db: Database;
   readonly events: EventLog;
   readonly conversation: ConversationDeps;
   readonly work: WorkDeps;
+  readonly google: Pick<GoogleDeps, "db" | "events" | "vaultSecret"> & { readonly config: GoogleConfig };
+  readonly canvas: { readonly db: Database; readonly events: EventLog; readonly config: CanvasConfig };
+  readonly vapid: PushConfig;
   readonly webRoot: string;
   readonly auth: AuthConfig;
 };
@@ -147,6 +155,77 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
+
+    if (path === "/api/connections" && request.method === "GET") {
+      return json({
+        googleConnected: loadTokens(deps.db, deps.google.vaultSecret) !== null,
+        canvasConfigured: deps.canvas.config.baseUrl.length > 0 && deps.canvas.config.token.length > 0,
+        pushConfigured: pushConfigured(deps.vapid),
+        states: syncStates(deps.db),
+      });
+    }
+
+    if (path === "/api/connections/sync" && request.method === "POST") {
+      const calendar = await syncGoogleCalendar(deps.google);
+      const gmail = await syncGoogleGmail(deps.google);
+      const canvas = await syncCanvas(deps.canvas);
+      return json({ results: [calendar, gmail, canvas] });
+    }
+
+    if (path === "/api/oauth/google/start" && request.method === "GET") {
+      if (deps.google.config.clientId.length === 0) return json({ error: "google_not_configured" }, 409);
+      return json({ url: authUrl(deps.google.config, issueCookie(deps.auth)) });
+    }
+
+    if (path === "/api/oauth/google/callback" && request.method === "GET") {
+      const code = url.searchParams.get("code");
+      const state = url.searchParams.get("state");
+      if (!code || !verifyCookie(deps.auth, state)) return Response.redirect(`${url.origin}/?oauth=error`, 302);
+      try {
+        const tokens = await exchangeCode(deps.google.config, code);
+        saveTokens(deps.db, deps.google.vaultSecret, tokens);
+        deps.events.append({ kind: "integration.connected", payload: { provider: "google", scope: tokens.scope } });
+        await syncGoogleCalendar(deps.google);
+        await syncGoogleGmail(deps.google);
+        return Response.redirect(`${url.origin}/?oauth=ok`, 302);
+      } catch (error) {
+        deps.events.append({ kind: "integration.sync_state", payload: { source: "google", ok: false, error: error instanceof Error ? error.message : "oauth_failed" } });
+        return Response.redirect(`${url.origin}/?oauth=error`, 302);
+      }
+    }
+
+    if (path === "/api/push/key" && request.method === "GET") return json({ publicKey: deps.vapid.publicKey });
+
+    if (path === "/api/push/subscribe" && request.method === "POST") {
+      const raw = (await request.json().catch(() => null)) as { subscription?: unknown } | null;
+      try {
+        return json(addSubscription(deps.db, raw?.subscription));
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : "invalid_subscription" }, 422);
+      }
+    }
+
+    if (path === "/api/push/test" && request.method === "POST") {
+      const outcome = await sendPush(deps.db, deps.vapid, { title: "digithive 알림 테스트", body: "알림이 도착하면 정상입니다." });
+      return json(outcome);
+    }
+
+    if (path === "/api/briefings/latest" && request.method === "GET") return json(latestBriefing(deps.db));
+
+    if (path === "/api/briefings/run" && request.method === "POST") {
+      const result = await runBriefing(
+        {
+          db: deps.db,
+          events: deps.events,
+          push: async (payload) => {
+            const outcome = await sendPush(deps.db, deps.vapid, payload);
+            return { ok: outcome.sent > 0, ...(outcome.sent > 0 ? {} : { error: outcome.errors.join(",") || "no_device" }) };
+          },
+        },
+        true,
+      );
+      return json(result);
+    }
 
     if (path === "/api/runs") {
       if (request.method === "GET") return json({ runs: withApprovals(deps.db, listRuns(deps.db)) });

@@ -55,3 +55,20 @@ docker compose up -d --build
 - 되돌림: `~/caddy/Caddyfile.bak-*`를 `docker exec -i caddy_proxy sh -c 'cat > /etc/caddy/Caddyfile'`로 복원 후 `caddy reload`. (파일 bind-mount라 sed -i 금지)
 - 운영 DB는 볼륨 `deploy_harness-data`(/data). v2 데이터는 `bun scripts/migrate-v2.ts --from <v2.db> --to /data/harness.db`로 옮긴다.
 
+
+## 연동 환경변수
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | (없음) | OAuth 클라이언트. 없으면 `/api/oauth/google/start`가 409 |
+| GOOGLE_REDIRECT_URI | https://digithive.chanoil.com/api/oauth/google/callback | 동의 후 돌아올 주소 |
+| CANVAS_URL | (없음) | LMS 베이스 URL (예: https://lxp-canvas.hanyang.ac.kr) |
+| CANVAS_TOKEN | (없음) | Canvas API 토큰 |
+| VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY | (없음) | Web Push VAPID 키. 없으면 전송은 `push_unconfigured` |
+| VAPID_SUBJECT | mailto:owner@digithive.local | VAPID subject |
+
+- 연결 상태: `GET /api/connections` → { googleConnected, canvasConfigured, pushConfigured, states[] }
+- 수동 동기화: `POST /api/connections/sync` → 소스별 {ok,count,cursor,error}
+- Google 연결: `GET /api/oauth/google/start`가 돌려준 URL로 1회 동의하면 콜백이 토큰을 암호화 저장하고 즉시 1회 동기화한다.
+- 알림: 브라우저에서 구독하면 `POST /api/push/subscribe`로 저장되고, 브리핑 발행 시 전송된다. 점검은 `POST /api/push/test`.
+

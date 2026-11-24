@@ -161,4 +161,46 @@ CREATE TABLE integration_state (
 );
 `,
   },
+  {
+    version: 5,
+    sql: `
+CREATE TABLE oauth_tokens (
+  provider TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  scope TEXT,
+  expires_at TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE push_subscriptions (
+  id TEXT PRIMARY KEY,
+  endpoint TEXT NOT NULL UNIQUE,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_success_at TEXT,
+  last_error TEXT,
+  last_error_at TEXT
+);
+
+CREATE TABLE briefings (
+  id TEXT PRIMARY KEY,
+  slot TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX briefings_slot_day ON briefings(slot, substr(created_at, 1, 10));
+
+CREATE TABLE sync_items (
+  source TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  at TEXT,
+  detail TEXT,
+  url TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (source, item_id)
+);
+CREATE INDEX sync_items_at ON sync_items(at);
+`,
+  },
 ];

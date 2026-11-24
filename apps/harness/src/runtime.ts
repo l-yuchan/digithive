@@ -25,6 +25,14 @@ export type HarnessConfig = {
   readonly passphrase: string;
   readonly sessionSecret: string;
   readonly modelHeaders: string;
+  readonly googleClientId: string;
+  readonly googleClientSecret: string;
+  readonly googleRedirectUri: string;
+  readonly canvasBaseUrl: string;
+  readonly canvasToken: string;
+  readonly vapidPublicKey: string;
+  readonly vapidPrivateKey: string;
+  readonly vapidSubject: string;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): HarnessConfig {
@@ -43,6 +51,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     passphrase: env["HARNESS_PASSPHRASE"] ?? "",
     sessionSecret: env["HARNESS_SESSION_SECRET"] ?? crypto.randomUUID(),
     modelHeaders: env["HARNESS_MODEL_HEADERS"] ?? "",
+    googleClientId: env["GOOGLE_CLIENT_ID"] ?? "",
+    googleClientSecret: env["GOOGLE_CLIENT_SECRET"] ?? "",
+    googleRedirectUri: env["GOOGLE_REDIRECT_URI"] ?? "https://digithive.chanoil.com/api/oauth/google/callback",
+    canvasBaseUrl: env["CANVAS_URL"] ?? env["CANVAS_HOST"] ?? "",
+    canvasToken: env["CANVAS_TOKEN"] ?? "",
+    vapidPublicKey: env["VAPID_PUBLIC_KEY"] ?? "",
+    vapidPrivateKey: env["VAPID_PRIVATE_KEY"] ?? "",
+    vapidSubject: env["VAPID_SUBJECT"] ?? "mailto:owner@digithive.local",
   };
 }
 

@@ -48,6 +48,18 @@ export function createHarness(config: HarnessConfig): {
     events,
     conversation,
     work: runtime.work,
+    google: {
+      db,
+      events,
+      vaultSecret: config.sessionSecret,
+      config: {
+        clientId: config.googleClientId,
+        clientSecret: config.googleClientSecret,
+        redirectUri: config.googleRedirectUri,
+      },
+    },
+    canvas: { db, events, config: { baseUrl: config.canvasBaseUrl, token: config.canvasToken } },
+    vapid: { publicKey: config.vapidPublicKey, privateKey: config.vapidPrivateKey, subject: config.vapidSubject },
     webRoot: resolve(config.webRoot),
     auth: { passphrase: config.passphrase, secret: config.sessionSecret },
   };

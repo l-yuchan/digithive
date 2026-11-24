@@ -29,6 +29,9 @@ function deps(overrides: { passphrase?: string } = {}): AppDeps {
     work,
     webRoot: mkdtempSync(join(tmpdir(), "harness-web-")),
     auth: { passphrase: overrides.passphrase ?? auth.passphrase, secret: auth.secret },
+    google: { db, events, vaultSecret: auth.secret, config: { clientId: "id", clientSecret: "secret", redirectUri: "http://local/api/oauth/google/callback" } },
+    canvas: { db, events, config: { baseUrl: "", token: "" } },
+    vapid: { publicKey: "", privateKey: "", subject: "mailto:test@local" },
   };
 }
 
