@@ -6,6 +6,11 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Deploy an already published tag instead of building (rollback or pinning). Empty builds the current head."
+        required: false
+        default: ""
 
 concurrency:
   group: cd-main
@@ -19,12 +24,15 @@ env:
   DEPLOY_DIR: /home/leefam/digithive-harness/deploy
   PUBLIC_URL: https://digithive.chanoil.com
   SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  TAG: ${{ inputs.image_tag || github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   publish:
     name: build and push image
     # workflow_run fires for failed ci runs too; a red build must never deploy.
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # A pinned tag needs no build, so publish is skipped for it.
+    if: |
+      inputs.image_tag == '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -51,6 +59,8 @@ jobs:
   deploy:
     name: deploy on mini
     needs: publish
+    if: |
+      always() && !cancelled() && (needs.publish.result == 'success' || inputs.image_tag != '')
     runs-on: [self-hosted, mini]
     permissions:
       contents: read
@@ -83,7 +93,7 @@ jobs:
 
       - name: pull and restart
         env:
-          HARNESS_IMAGE: ${{ env.IMAGE }}:${{ env.SHA }}
+          HARNESS_IMAGE: ${{ env.IMAGE }}:${{ env.TAG }}
         run: |
           set -euo pipefail
           cd "$DEPLOY_DIR"

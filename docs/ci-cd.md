@@ -49,6 +49,18 @@ GitHub holds is its own `GITHUB_TOKEN`.
 
 ### Manual rollback
 
+Dispatch `cd` with `image_tag` set to the commit you want back:
+
+```bash
+gh workflow run cd -f image_tag=<sha>
+```
+
+That path skips `publish` entirely (no build) and deploys the already published
+tag. A failed deploy also rolls back on its own, because the job restores the tag
+recorded in `$DEPLOY_DIR/.harness_image`.
+
+On the server, the same thing by hand:
+
 ```bash
 cd /home/leefam/digithive-harness/deploy
 HARNESS_IMAGE=ghcr.io/l-yuchan/digithive-harness:<sha> docker compose up -d --no-build
