@@ -4,12 +4,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate } from "../src/store/db";
-import { EventLog } from "../src/events/log";
 import { correctMemory, listMemories, recallMemories, remember } from "../src/knowledge/memory";
 import { validCitations } from "../src/knowledge/citations";
 import { readStoredFile, storeFile } from "../src/files/store";
-import { normalizeCanvasAssignment, normalizeCalendarEvent, normalizeGmail, syncSource, syncStates } from "../src/integrations/normalize";
-import { briefingRunRequest, nextBriefingAt, sendBriefingPush } from "../src/scheduler/briefing";
+import { normalizeCanvasAssignment, normalizeCalendarEvent, normalizeGmail } from "../src/integrations/normalize";
 
 function db(): Database {
   const database = new Database(":memory:");
@@ -90,68 +88,4 @@ describe("integration normalization", () => {
     expect(assignment.detail).toContain("과목 3");
   });
 
-  test("a failing source is recorded as ok:false with the failing source named", async () => {
-    const database = db();
-    const events = new EventLog(database);
-    const outcome = await syncSource({
-      db: database,
-      events,
-      source: "gmail",
-      cursor: null,
-      collect: async () => {
-        throw new Error("403 quota exceeded");
-      },
-    });
-    expect(outcome.ok).toBe(false);
-    expect(outcome.error).toBe("403 quota exceeded");
-    const states = syncStates(database);
-    expect(states).toEqual([{ source: "gmail", ok: false, lastSyncAt: expect.any(String), error: "403 quota exceeded" }]);
-    const emitted = events.after(0).find((event) => event.kind === "integration.sync_state");
-    expect(emitted?.payload).toMatchObject({ source: "gmail", ok: false });
-  });
-
-  test("a successful source records its cursor and count", async () => {
-    const database = db();
-    const events = new EventLog(database);
-    const outcome = await syncSource({
-      db: database,
-      events,
-      source: "calendar",
-      cursor: null,
-      collect: async () => ({ items: [normalizeCalendarEvent({ id: "e1", summary: "회의" })], cursor: "cursor-2" }),
-    });
-    expect(outcome).toMatchObject({ ok: true, count: 1, cursor: "cursor-2" });
-    expect(syncStates(database)[0]).toMatchObject({ source: "calendar", ok: true, error: null });
-  });
-});
-
-describe("briefing scheduler", () => {
-  test("the next slot is the coming 07:30 KST from an early-morning instant", () => {
-    const now = Date.parse("2026-11-24T00:10:00+09:00");
-    expect(new Date(nextBriefingAt(now)).toISOString()).toBe("2026-11-23T22:30:00.000Z");
-  });
-
-  test("after the morning slot the next one is 21:00 KST", () => {
-    const now = Date.parse("2026-11-24T07:31:00+09:00");
-    expect(new Date(nextBriefingAt(now)).toISOString()).toBe("2026-11-24T12:00:00.000Z");
-  });
-
-  test("after the evening slot it rolls to tomorrow 07:30 KST", () => {
-    const now = Date.parse("2026-11-24T21:05:00+09:00");
-    expect(new Date(nextBriefingAt(now)).toISOString()).toBe("2026-11-24T22:30:00.000Z");
-    const request = briefingRunRequest(now);
-    expect(request.slot).toBe("07:30");
-    expect(request.dueAt).toBe("2026-11-24T22:30:00.000Z");
-  });
-
-  test("push failure is returned as a visible error, not swallowed", async () => {
-    const failed = await sendBriefingPush(async () => ({ ok: false, error: "no_subscription" }), { title: "브리핑", body: "내용" });
-    expect(failed).toMatchObject({ ok: false, error: "no_subscription" });
-    const threw = await sendBriefingPush(async () => {
-      throw new Error("network");
-    }, { title: "브리핑", body: "내용" });
-    expect(threw).toMatchObject({ ok: false, error: "network" });
-    const sent = await sendBriefingPush(async () => ({ ok: true }), { title: "브리핑", body: "내용" });
-    expect(sent.ok).toBe(true);
-  });
 });

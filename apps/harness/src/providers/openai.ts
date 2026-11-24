@@ -10,6 +10,7 @@ export type ChatMessage = {
   readonly role: "system" | "user" | "assistant" | "tool";
   readonly content: string;
   readonly toolCallId?: string;
+  readonly toolCalls?: readonly { readonly id: string; readonly name: string; readonly arguments: string }[];
 };
 
 export type ToolSpec = {
@@ -95,9 +96,10 @@ export function openAiStream(config: ProviderConfig): StreamFn {
   return async function* stream(messages, tools, options) {
     const fetchImpl = options.fetchImpl ?? fetch;
     const controller = new AbortController();
+    const firstTokenDeadline = setTimeout(() => controller.abort(new ProviderError("timeout")), options.firstTokenTimeoutMs);
     const onAbort = () => controller.abort();
     if (options.signal) {
-      if (options.signal.aborted) throw new ProviderError("aborted");
+      if (options.signal.aborted) { clearTimeout(firstTokenDeadline); throw new ProviderError("aborted"); }
       options.signal.addEventListener("abort", onAbort, { once: true });
     }
     try {
@@ -110,7 +112,14 @@ export function openAiStream(config: ProviderConfig): StreamFn {
         },
         body: JSON.stringify({
           model: config.model,
-          messages,
+          messages: messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+            ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+            ...(message.toolCalls ? { tool_calls: message.toolCalls.map((call) => ({
+              id: call.id, type: "function", function: { name: call.name, arguments: call.arguments },
+            })) } : {}),
+          })),
           stream: true,
           max_tokens: options.maxOutputTokens,
           ...(tools.length === 0
@@ -134,13 +143,13 @@ export function openAiStream(config: ProviderConfig): StreamFn {
       let buffer = "";
       let finishReason: string | null = null;
       let sawFirst = false;
-      let sawAnyText = false;
 
       while (true) {
         const next = await readWithTimeout(reader, sawFirst ? options.idleTimeoutMs : options.firstTokenTimeoutMs);
         if (next.done) break;
+        clearTimeout(firstTokenDeadline);
         sawFirst = true;
-        buffer += decoder.decode(next.value, { stream: true });
+        buffer = (buffer + decoder.decode(next.value, { stream: true })).replace(/\r\n/g, "\n");
 
         let boundary = buffer.indexOf("\n\n");
         while (boundary !== -1) {
@@ -166,7 +175,6 @@ export function openAiStream(config: ProviderConfig): StreamFn {
             const delta = choice.delta ?? {};
             const text = delta["content"];
             if (typeof text === "string" && text.length > 0) {
-              sawAnyText = true;
               yield { type: "text_delta", text };
             }
             const reasoning = delta["reasoning_content"] ?? delta["reasoning"];
@@ -199,17 +207,20 @@ export function openAiStream(config: ProviderConfig): StreamFn {
       }
 
       if (finishReason === "length") throw new ProviderError("truncated");
+      if (finishReason === null) throw new ProviderError("truncated");
       for (const call of calls.values()) {
         yield { type: "tool_call", id: call.id, name: call.name, arguments: call.arguments };
       }
-      if (finishReason === null && !sawAnyText && calls.size === 0) throw new ProviderError("malformed");
       yield { type: "done", finishReason };
     } catch (error) {
       if (error instanceof ProviderError) throw error;
+      if (controller.signal.reason instanceof ProviderError) throw controller.signal.reason;
       if (options.signal?.aborted || controller.signal.aborted) throw new ProviderError("aborted");
       if (error instanceof Error && error.name === "AbortError") throw new ProviderError("aborted");
       throw new ProviderError("malformed");
     } finally {
+      clearTimeout(firstTokenDeadline);
+      controller.abort();
       options.signal?.removeEventListener("abort", onAbort);
     }
   };

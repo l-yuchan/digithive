@@ -8,6 +8,7 @@ import { BASE_POLICY, decide, type PolicyRule } from "../../core/policy";
 import { leaseExpiry } from "../../core/run-state";
 import { ProviderError, type ChatMessage, type StreamFn } from "../../providers/openai";
 import { specs, type ToolRegistry } from "../../tools/registry";
+import { keepLease, ownsLease } from "../work/lease";
 
 export type TurnLimits = {
   readonly firstTokenMs: number;
@@ -119,8 +120,7 @@ export async function runTurn(
   });
   deps.events.append({ kind: "turn.started", runId, sessionId: input.sessionId, payload: { userEntryId }, now: startedAt });
 
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(new Error("turn_timeout")), limits.totalMs);
+  const controller = keepLease(deps.db, deps.events, { id: runId, leaseOwner: "conversation" }, 45_000, limits.totalMs, now);
   const parts: Part[] = [];
   let text = "";
 
@@ -166,6 +166,7 @@ export async function runTurn(
         idleTimeoutMs: limits.idleMs,
         signal: controller.signal,
       })) {
+        if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
         if (event.type === "text_delta") {
           text += event.text;
           const last = parts.at(-1);
@@ -203,8 +204,10 @@ export async function runTurn(
       }
 
       if (pending.length === 0) break;
+      messages.push({ role: "assistant", content: text, toolCalls: pending });
 
       for (const call of pending) {
+        if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
         const tool = deps.tools.get(call.name);
         let args: Record<string, unknown> = {};
         try {
@@ -254,9 +257,9 @@ export async function runTurn(
         }
         messages.push({ role: "tool", content: output, toolCallId: call.id });
       }
-      if (text.length > 0) messages.push({ role: "assistant", content: text });
     }
 
+    if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
     updateEntryParts(deps.db, assistantEntry.id, parts, "complete", input.sessionId);
     deps.events.append({ kind: "message.completed", runId, sessionId: input.sessionId, payload: { entryId: assistantEntry.id }, now: now() });
     deps.events.append({ kind: "turn.settled", runId, sessionId: input.sessionId, payload: { entryId: assistantEntry.id }, now: now() });
@@ -270,6 +273,7 @@ export async function runTurn(
   } catch (error) {
     const kind = reason(error);
     const interrupted = controller.signal.aborted;
+    if (!ownsLease(deps.db, runId, "conversation", now())) return { runId, entryId: assistantEntry.id, status: "aborted", text };
     if (text.length > 0) parts.push({ type: "text", text: "" });
     updateEntryParts(deps.db, assistantEntry.id, parts, interrupted ? "aborted" : "failed", input.sessionId);
     deps.events.append({
@@ -291,6 +295,6 @@ export async function runTurn(
     deps.events.append({ kind: interrupted ? "run.interrupted" : "run.failed", runId, sessionId: input.sessionId, payload: { reason: kind }, now: now() });
     return { runId, entryId: assistantEntry.id, status: interrupted ? "aborted" : "failed", text };
   } finally {
-    clearTimeout(deadline);
+    controller.close();
   }
 }

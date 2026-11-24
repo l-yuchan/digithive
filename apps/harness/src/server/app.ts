@@ -51,7 +51,7 @@ function sse(request: Request, deps: AppDeps, after: number, sessionId: string |
       controller.enqueue(encoder.encode(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`));
       for (const event of deps.events.after(after, sessionId ?? undefined)) send(event);
 
-      const unsubscribe = deps.events.subscribe(send);
+      const unsubscribe = deps.events.subscribe(send, lastWritten);
       const ping = setInterval(() => {
         try {
           controller.enqueue(encoder.encode(": ping\n\n"));
@@ -285,6 +285,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
           sessionId: run.sessionId,
           parentRunId: run.id,
           budget: fields.budget,
+          delegation: fields,
         });
         return json({ child, fields }, 201);
       }
@@ -293,7 +294,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/events" && request.method === "GET") {
-      const after = Number(url.searchParams.get("after") ?? "0");
+      const after = Number(request.headers.get("last-event-id") ?? url.searchParams.get("after") ?? "0");
       const session = url.searchParams.get("session");
       return sse(request, deps, Number.isFinite(after) ? after : 0, session);
     }

@@ -1,9 +1,10 @@
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../../events/log";
-import { decide, type PolicyRule } from "../../core/policy";
+import type { PolicyRule } from "../../core/policy";
 import { isLeaseExpired, leaseExpiry } from "../../core/run-state";
-import { specs, type ToolRegistry } from "../../tools/registry";
-import type { AdapterEvent, ChatMessage, StreamFn } from "../../providers/openai";
+import type { ToolRegistry } from "../../tools/registry";
+import type { StreamFn } from "../../providers/openai";
+export { executeRun } from "./execution";
 
 export type WorkDeps = {
   readonly db: Database;
@@ -44,10 +45,6 @@ export type RunRow = {
   settledAt: string | null;
 };
 
-type WorkState = {
-  messages: ChatMessage[];
-  pending?: { callId: string; name: string; arguments: string; approvalId: string };
-};
 
 const RunShape = (row: Record<string, unknown>): RunRow => ({
   id: String(row["id"]),
@@ -108,9 +105,9 @@ export type DelegateFields = {
 export function validateDelegation(fields: Partial<DelegateFields>): string[] {
   const missing: string[] = [];
   if (!fields.goal || fields.goal.trim().length === 0) missing.push("goal");
-  if (!fields.inputRefs || fields.inputRefs.length === 0) missing.push("inputRefs");
-  if (!fields.permissionProfile || fields.permissionProfile.trim().length === 0) missing.push("permissionProfile");
-  if (!fields.budget || typeof fields.budget.maxMicroUsd !== "number" || typeof fields.budget.maxToolCalls !== "number") missing.push("budget");
+  if (!Array.isArray(fields.inputRefs) || fields.inputRefs.length === 0 || fields.inputRefs.some((ref) => typeof ref !== "string" || ref.trim().length === 0)) missing.push("inputRefs");
+  if (fields.permissionProfile !== "read-only" && fields.permissionProfile !== "workspace-write") missing.push("permissionProfile");
+  if (!fields.budget || !Number.isSafeInteger(fields.budget.maxMicroUsd) || fields.budget.maxMicroUsd < 0 || !Number.isSafeInteger(fields.budget.maxToolCalls) || fields.budget.maxToolCalls < 0) missing.push("budget");
   if (!fields.completionCondition || fields.completionCondition.trim().length === 0) missing.push("completionCondition");
   return missing;
 }
@@ -124,6 +121,7 @@ export function enqueueRun(
     readonly sessionId?: string | null;
     readonly parentRunId?: string | null;
     readonly budget?: unknown;
+    readonly delegation?: DelegateFields;
     readonly now?: number;
   },
 ): RunRow {
@@ -132,14 +130,14 @@ export function enqueueRun(
   const iso = new Date(now).toISOString();
   db.query(
     `INSERT INTO runs (id, session_id, parent_run_id, origin, goal, status, budget_json, created_at)
-     VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`,
   ).run(
     id,
     input.sessionId ?? null,
     input.parentRunId ?? null,
     input.origin ?? "work",
     input.goal.slice(0, 4_096),
-    JSON.stringify(input.budget ?? {}),
+    JSON.stringify(input.delegation ?? input.budget ?? {}),
     iso,
   );
   events.append({
@@ -156,6 +154,7 @@ export function enqueueRun(
 
 /** Claims the oldest queued run under the concurrency cap, with a lease. */
 export function claimNext(db: Database, events: EventLog, owner: string, maxConcurrent = 2, now = Date.now(), leaseMs = 45_000): RunRow | null {
+  return db.transaction(() => {
   const running = db.query("SELECT count(*) AS n FROM runs WHERE origin IN ('work','delegation') AND status = 'running'").get() as { n: number };
   if (running.n >= maxConcurrent) return null;
   const candidate = db
@@ -168,191 +167,9 @@ export function claimNext(db: Database, events: EventLog, owner: string, maxConc
   if (changed.changes === 0) return null;
   events.append({ kind: "run.started", runId: candidate.id, payload: { owner }, now });
   return getRun(db, candidate.id);
+  }).immediate();
 }
 
-function parseState(run: RunRow): WorkState {
-  if (!run.stateJson) return { messages: [{ role: "user", content: run.goal }] };
-  try {
-    const parsed = JSON.parse(run.stateJson) as WorkState;
-    if (!Array.isArray(parsed.messages)) return { messages: [{ role: "user", content: run.goal }] };
-    return parsed;
-  } catch {
-    return { messages: [{ role: "user", content: run.goal }] };
-  }
-}
-
-function saveState(db: Database, runId: string, state: WorkState): void {
-  db.query("UPDATE runs SET state_json = ? WHERE id = ?").run(JSON.stringify(state), runId);
-}
-
-function settle(db: Database, events: EventLog, run: RunRow, status: "succeeded" | "failed" | "interrupted", payload: Record<string, unknown>, now: number): void {
-  db.query("UPDATE runs SET status = ?, lease_owner = NULL, lease_expires_at = NULL, settled_at = ?, result_json = ? WHERE id = ?").run(
-    status,
-    new Date(now).toISOString(),
-    JSON.stringify(payload),
-    run.id,
-  );
-  events.append({
-    kind: status === "succeeded" ? "run.settled" : status === "failed" ? "run.failed" : "run.interrupted",
-    runId: run.id,
-    sessionId: run.sessionId,
-    payload,
-    now,
-  });
-  if (run.parentRunId) {
-    events.append({
-      kind: "run.progress",
-      runId: run.parentRunId,
-      sessionId: run.sessionId,
-      payload: { childRunId: run.id, status, summary: String(payload["text"] ?? payload["error"] ?? "").slice(0, 200) },
-      now,
-    });
-  }
-}
-
-async function executeTool(
-  deps: WorkDeps,
-  run: RunRow,
-  call: { id: string; name: string; arguments: string },
-): Promise<{ output: string; denied?: boolean; timeout?: boolean }> {
-  const tool = deps.tools.get(call.name);
-  const limits = deps.limits ?? WORK_LIMITS;
-  if (!tool) return { output: `알 수 없는 도구입니다: ${call.name}`, denied: true };
-  let args: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(call.arguments || "{}");
-    if (parsed && typeof parsed === "object") args = parsed as Record<string, unknown>;
-  } catch {
-    args = {};
-  }
-  const started = Date.now();
-  deps.db
-    .query("INSERT OR REPLACE INTO tool_calls (id, run_id, name, arguments_json, decision, status, started_at, deadline_at) VALUES (?,?,?,?,?,?,?,?)")
-    .run(call.id, run.id, call.name, call.arguments, "allow", "running", new Date(started).toISOString(), new Date(started + limits.toolMs).toISOString());
-  let output: string;
-  let timedOut = false;
-  try {
-    output = await Promise.race([
-      tool.execute(args, { runId: run.id }),
-      new Promise<string>((resolve) => {
-        setTimeout(() => resolve("__tool_timeout__"), limits.toolMs);
-      }),
-    ]);
-    timedOut = output === "__tool_timeout__";
-  } catch (error) {
-    output = `도구 실행 실패: ${error instanceof Error ? error.message : "unknown"}`;
-  }
-  const status = timedOut ? "timeout" : "succeeded";
-  deps.db.query("UPDATE tool_calls SET status = ?, ended_at = ? WHERE id = ?").run(status, new Date().toISOString(), call.id);
-  if (timedOut) return { output: "도구 실행 시간이 초과되었습니다.", timeout: true };
-  return { output };
-}
-
-/**
- * Runs one claimed run to completion, or pauses it at the first tool call that
- * needs a human decision. The pause persists the whole conversation state, so
- * resuming after a decision never replays finished work.
- */
-export async function executeRun(deps: WorkDeps, run: RunRow): Promise<"succeeded" | "paused" | "failed" | "interrupted"> {
-  const now = () => (deps.now ?? Date.now)();
-  const limits = deps.limits ?? WORK_LIMITS;
-  const state = parseState(run);
-  let text = "";
-
-  try {
-    if (state.pending) {
-      const approval = deps.db.query("SELECT status FROM approvals WHERE id = ?").get(state.pending.approvalId) as { status: string } | null;
-      const call = { id: state.pending.callId, name: state.pending.name, arguments: state.pending.arguments };
-      if (approval?.status === "approved") {
-        const result = await executeTool(deps, run, call);
-        state.messages.push({ role: "tool", content: result.output, toolCallId: call.id });
-        deps.events.append({ kind: "tool.result", runId: run.id, payload: { id: call.id, name: call.name, output: result.output }, now: now() });
-      } else {
-        const output = approval?.status === "rejected" ? "사용자가 이 호출을 거부했습니다." : "승인이 만료되어 실행하지 않았습니다.";
-        state.messages.push({ role: "tool", content: output, toolCallId: call.id });
-        deps.events.append({ kind: "tool.denied", runId: run.id, payload: { id: call.id, name: call.name, reason: approval?.status ?? "expired" }, now: now() });
-      }
-      delete state.pending;
-      saveState(deps.db, run.id, state);
-    }
-
-    for (let round = 0; round < limits.maxToolRounds; round += 1) {
-      const pending: { id: string; name: string; arguments: string }[] = [];
-      for await (const event of deps.stream(state.messages, specs(deps.tools), {
-        maxOutputTokens: limits.maxOutputTokens,
-        firstTokenTimeoutMs: limits.firstTokenMs,
-        idleTimeoutMs: limits.idleMs,
-      })) {
-        const typed = event as AdapterEvent;
-        if (typed.type === "text_delta") {
-          text += typed.text;
-          deps.events.append({ kind: "message.delta", runId: run.id, sessionId: run.sessionId, payload: { text: typed.text }, now: now() });
-        } else if (typed.type === "tool_call") {
-          pending.push({ id: typed.id, name: typed.name, arguments: typed.arguments });
-        }
-      }
-      if (pending.length === 0) break;
-
-      let paused = false;
-      for (const call of pending) {
-        const tool = deps.tools.get(call.name);
-        const args = (() => {
-          try {
-            const parsed: unknown = JSON.parse(call.arguments || "{}");
-            return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
-          } catch {
-            return {};
-          }
-        })();
-        const decision = tool ? decide(deps.policy, { action: tool.action, resource: String(args["path"] ?? args["summary"] ?? "*") }) : "deny";
-        if (decision === "ask") {
-          const approvalId = crypto.randomUUID();
-          deps.db
-            .query(
-              "INSERT OR REPLACE INTO tool_calls (id, run_id, name, arguments_json, decision, decision_by, status, started_at) VALUES (?,?,?,?,?,?,?,?)",
-            )
-            .run(call.id, run.id, call.name, call.arguments, "ask", "policy", "pending", new Date(now()).toISOString());
-          deps.db
-            .query("INSERT INTO approvals (id, run_id, tool_call_id, status, requested_at) VALUES (?,?,?,?,?)")
-            .run(approvalId, run.id, call.id, "pending", new Date(now()).toISOString());
-          state.pending = { callId: call.id, name: call.name, arguments: call.arguments, approvalId };
-          saveState(deps.db, run.id, state);
-          deps.db.query("UPDATE runs SET status = 'awaiting_approval', lease_owner = NULL, lease_expires_at = NULL WHERE id = ?").run(run.id);
-          deps.events.append({
-            kind: "approval.requested",
-            runId: run.id,
-            sessionId: run.sessionId,
-            payload: { approvalId, callId: call.id, name: call.name, arguments: call.arguments },
-            now: now(),
-          });
-          paused = true;
-          break;
-        }
-        if (decision === "deny") {
-          const output = "정책이 이 호출을 거부했습니다.";
-          state.messages.push({ role: "tool", content: output, toolCallId: call.id });
-          deps.events.append({ kind: "tool.denied", runId: run.id, payload: { id: call.id, name: call.name }, now: now() });
-          continue;
-        }
-        const result = await executeTool(deps, run, call);
-        state.messages.push({ role: "tool", content: result.output, toolCallId: call.id });
-        if (!result.timeout) deps.events.append({ kind: "tool.result", runId: run.id, payload: { id: call.id, name: call.name, output: result.output }, now: now() });
-        else deps.events.append({ kind: "tool.timeout", runId: run.id, payload: { id: call.id, name: call.name }, now: now() });
-      }
-      if (paused) return "paused";
-      if (text.length > 0) state.messages.push({ role: "assistant", content: text });
-    }
-
-    saveState(deps.db, run.id, state);
-    settle(deps.db, deps.events, run, "succeeded", { text }, now());
-    return "succeeded";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown";
-    saveState(deps.db, run.id, state);
-    settle(deps.db, deps.events, run, "failed", { error: message }, now());
-    return "failed";
-  }
-}
 
 export type Decision = "approve" | "reject";
 
@@ -362,21 +179,26 @@ export function decideApproval(
   input: { readonly runId: string; readonly approvalId: string; readonly decision: Decision; readonly now?: number },
 ): { status: string } {
   const now = input.now ?? Date.now();
-  const approval = deps.db.query("SELECT id, run_id, status FROM approvals WHERE id = ?").get(input.approvalId) as
-    | { id: string; run_id: string; status: string }
+  return deps.db.transaction(() => {
+  const approval = deps.db.query("SELECT id, run_id, status, requested_at FROM approvals WHERE id = ?").get(input.approvalId) as
+    | { id: string; run_id: string; status: string; requested_at: string }
     | null;
   if (!approval || approval.run_id !== input.runId) throw new Error("approval_not_found");
   if (approval.status !== "pending") throw new Error("approval_already_decided");
+  if (getRun(deps.db, input.runId)?.status !== "awaiting_approval") throw new Error("run_not_awaiting_approval");
+  if (Date.parse(approval.requested_at) + 30 * 60_000 <= now) throw new Error("approval_expired");
   const status = input.decision === "approve" ? "approved" : "rejected";
   deps.db.query("UPDATE approvals SET status = ?, decided_at = ? WHERE id = ?").run(status, new Date(now).toISOString(), approval.id);
   deps.db.query("UPDATE tool_calls SET decision_by = 'user', decision = ? WHERE run_id = ? AND status = 'pending'").run(status, input.runId);
   deps.db.query("UPDATE runs SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL WHERE id = ?").run(input.runId);
   deps.events.append({ kind: "approval.decided", runId: input.runId, payload: { approvalId: approval.id, status }, now });
   return { status };
+  }).immediate();
 }
 
 /** Expires approvals nobody answered, and settles runs whose lease died. */
 export function reconcileWork(db: Database, events: EventLog, now = Date.now(), ttlMs = 30 * 60_000): { expiredApprovals: number; interrupted: number } {
+  return db.transaction(() => {
   const stale = db
     .query("SELECT id, run_id FROM approvals WHERE status = 'pending' AND requested_at <= ?")
     .all(new Date(now - ttlMs).toISOString()) as { id: string; run_id: string }[];
@@ -394,4 +216,5 @@ export function reconcileWork(db: Database, events: EventLog, now = Date.now(), 
     interrupted += 1;
   }
   return { expiredApprovals: stale.length, interrupted };
+  }).immediate();
 }

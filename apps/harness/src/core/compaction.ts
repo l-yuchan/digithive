@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { appendEntry, listEntries } from "./sessions";
+import { appendEntry } from "./sessions";
+import { pathEntries } from "./tree";
 import type { CompactionView } from "./context";
 
 export type CompactionOptions = {
@@ -19,17 +20,20 @@ export type CompactionResult = {
 };
 
 export function latestCompaction(db: Database, sessionId: string): CompactionView | null {
-  const row = db
-    .query("SELECT payload_json FROM entries WHERE session_id = ? AND kind = 'compaction' ORDER BY seq DESC LIMIT 1")
-    .get(sessionId) as { payload_json: string } | null;
-  if (!row) return null;
-  try {
-    const payload = JSON.parse(row.payload_json) as { summary?: unknown; coversSeq?: unknown };
-    if (typeof payload.summary !== "string") return null;
-    return { summary: payload.summary, coversSeq: typeof payload.coversSeq === "number" ? payload.coversSeq : Number.MAX_SAFE_INTEGER };
-  } catch {
-    return null;
+  const path = new Set(pathEntries(db, sessionId).map((entry) => entry.id));
+  const rows = db.query("SELECT payload_json FROM entries WHERE session_id = ? AND kind = 'compaction' ORDER BY seq DESC")
+    .all(sessionId) as { payload_json: string }[];
+  for (const row of rows) {
+    try {
+      const payload = JSON.parse(row.payload_json) as { summary?: unknown; coversSeq?: unknown; coversUpTo?: unknown };
+      if (typeof payload.summary === "string" && typeof payload.coversSeq === "number" && typeof payload.coversUpTo === "string" && path.has(payload.coversUpTo)) {
+        return { summary: payload.summary, coversSeq: payload.coversSeq };
+      }
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
   }
+  return null;
 }
 
 /**
@@ -43,7 +47,7 @@ export async function maybeCompact(options: CompactionOptions): Promise<Compacti
   const now = options.now ?? Date.now();
 
   const latest = latestCompaction(options.db, options.sessionId);
-  const messages = listEntries(options.db, options.sessionId).filter(
+  const messages = pathEntries(options.db, options.sessionId).filter(
     (entry) =>
       entry.kind === "message" &&
       (entry.role === "user" || entry.role === "assistant") &&

@@ -12,14 +12,14 @@ export function saveItems(db: Database, source: string, items: readonly Normaliz
   }
 }
 
-export async function recordOutcome(
+export function recordOutcome(
   input: { readonly db: Database; readonly events: EventLog; readonly now?: () => number },
   source: string,
   ok: boolean,
   count: number,
   cursor: string | null,
   error: string | null,
-): Promise<SyncOutcome> {
+): SyncOutcome {
   const now = (input.now ?? Date.now)();
   const iso = new Date(now).toISOString();
   input.db

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
-import { createSession, listEntries } from "../src/core/sessions";
+import { createSession, listEntries, softDeleteSession } from "../src/core/sessions";
 import { createRegistry } from "../src/tools/registry";
 import { ProviderError, type AdapterEvent, type StreamFn } from "../src/providers/openai";
 import { runTurn, type ConversationDeps } from "../src/surfaces/conversation/loop";
@@ -135,4 +135,21 @@ describe("conversation turn", () => {
     expect(kinds).toContain("message.aborted");
     expect(kinds).toContain("run.interrupted");
   });
+});
+
+test("deleting a session during a stream prevents tool effects and preserves cancellation", async () => {
+  const { db, events, sessionId } = setup();
+  let effects = 0;
+  const stream: StreamFn = async function* () {
+    softDeleteSession(db, sessionId);
+    yield { type: "tool_call", id: "late", name: "effect", arguments: "{}" };
+    yield { type: "done", finishReason: "tool_calls" };
+  };
+  try {
+    const tools = createRegistry([{ name: "effect", description: "effect", parameters: {}, action: "read", execute: async () => { effects++; return "late"; } }]);
+    const result = await runTurn(deps(db, events, stream, { tools }), { sessionId, text: "cancel me" });
+    expect(result.status).toBe("aborted");
+    expect(effects).toBe(0);
+    expect(db.query("SELECT status,cancel_intent FROM runs").get()).toEqual({ status: "cancelled", cancel_intent: "policy" });
+  } finally { db.close(); }
 });

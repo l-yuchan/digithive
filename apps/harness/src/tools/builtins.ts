@@ -1,5 +1,5 @@
-import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative as relativePath, resolve } from "node:path";
 import type { ToolRuntime } from "./registry";
 
 export type WorkspaceRoots = {
@@ -10,7 +10,17 @@ export type WorkspaceRoots = {
 function safePath(root: string, runId: string, relative: string): string {
   const base = resolve(root, runId);
   const target = resolve(base, relative);
-  if (!target.startsWith(base)) throw new Error("path_outside_workspace");
+  const contained = (parent: string, child: string) => {
+    const path = relativePath(parent, child);
+    return path !== ".." && !path.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(path);
+  };
+  if (!contained(base, target)) throw new Error("path_outside_workspace");
+  mkdirSync(root, { recursive: true });
+  if (existsSync(base) && !contained(realpathSync(root), realpathSync(base))) throw new Error("path_outside_workspace");
+  mkdirSync(base, { recursive: true });
+  let ancestor = target;
+  while (!existsSync(ancestor)) ancestor = dirname(ancestor);
+  if (!contained(realpathSync(base), realpathSync(ancestor))) throw new Error("path_outside_workspace");
   return target;
 }
 

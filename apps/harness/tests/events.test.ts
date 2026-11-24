@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
+import { openDatabase } from "../src/store/db";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function db(): Database {
   const database = new Database(":memory:");
@@ -12,12 +16,20 @@ function db(): Database {
 
 describe("event log", () => {
   test("seq is monotonic and survives a reopen", () => {
-    const log = new EventLog(db());
-    const a = log.append({ kind: "turn.started", payload: { turn: 1 } });
-    const b = log.append({ kind: "message.delta", payload: { text: "안" } });
-    const c = log.append({ kind: "message.delta", payload: { text: "녕" } });
-    expect([a.seq, b.seq, c.seq]).toEqual([a.seq, a.seq + 1, a.seq + 2]);
-    expect(log.lastSeq()).toBe(c.seq);
+    const root = mkdtempSync(join(tmpdir(), "event-reopen-"));
+    const path = join(root, "events.db");
+    let database = openDatabase(path);
+    try {
+      const log = new EventLog(database);
+      const a = log.append({ kind: "turn.started", payload: { turn: 1 } });
+      const b = log.append({ kind: "message.delta", payload: { text: "안" } });
+      database.close();
+      database = openDatabase(path);
+      const reopened = new EventLog(database);
+      const c = reopened.append({ kind: "message.delta", payload: { text: "녕" } });
+      expect([a.seq, b.seq, c.seq]).toEqual([1, 2, 3]);
+      expect(reopened.after(a.seq).map((event) => event.payload)).toEqual([{ text: "안" }, { text: "녕" }]);
+    } finally { database.close(); rmSync(root, { recursive: true, force: true }); }
   });
 
   test("after(seq) replays exactly the later events, in order", () => {
@@ -56,4 +68,32 @@ describe("event log", () => {
       .run();
     expect(log.after(0)[0]?.payload).toEqual({ unreadable: true });
   });
+});
+
+test("local appends do not skip earlier events written by another connection", () => {
+  const database = db();
+  try {
+    const first = new EventLog(database);
+    const second = new EventLog(database);
+    const seen: string[] = [];
+    const stop = first.subscribe((event) => seen.push(event.kind));
+    try {
+      second.append({ kind: "external", payload: null });
+      first.append({ kind: "local", payload: null });
+      expect(seen).toEqual(["external", "local"]);
+    } finally { stop(); }
+  } finally { database.close(); }
+});
+
+test("subscribing from a replay cursor delivers events written between replay and subscription", async () => {
+  const database = db();
+  const log = new EventLog(database);
+  const replayCursor = log.lastSeq();
+  log.append({ kind: "in-the-gap", payload: null });
+  let stop: () => void = () => {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const delivered = new Promise<string>((resolve) => { stop = log.subscribe((event) => resolve(event.kind), replayCursor); });
+    expect(await Promise.race([delivered, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("gap event lost")), 500); })])).toBe("in-the-gap");
+  } finally { if (timer) clearTimeout(timer); stop(); database.close(); }
 });

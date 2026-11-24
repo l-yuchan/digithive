@@ -93,3 +93,30 @@ describe("openai streaming adapter", () => {
     expect(called).toBe(false);
   });
 });
+
+test("transport EOF before a finish marker rejects partial text and unfinished tool calls", async () => {
+  for (const delta of [{ content: "partial" }, { tool_calls: [{ index: 0, id: "c", function: { name: "echo", arguments: '{"x":' } }] }]) {
+    const fetchImpl: typeof fetch = Object.assign(async () => sseResponse([chunk(delta)]), { preconnect: fetch.preconnect });
+    await expect(collect(openAiStream(config)([], [], { ...options, fetchImpl }))).rejects.toMatchObject({ kind: "truncated" });
+  }
+});
+
+test("UTF-8 and CRLF frames survive byte-by-byte network fragmentation", async () => {
+  const bytes = new TextEncoder().encode((chunk({ content: "한글" }) + chunk({}, "stop") + "data: [DONE]\n\n").replaceAll("\n", "\r\n"));
+  const fetchImpl: typeof fetch = Object.assign(async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)); controller.close(); },
+  })), { preconnect: fetch.preconnect });
+  const events = await collect(openAiStream(config)([], [], { ...options, fetchImpl }));
+  expect(events).toEqual([{ type: "text_delta", text: "한글" }, { type: "done", finishReason: "stop" }]);
+});
+
+test("first-token deadline includes time waiting for HTTP response headers", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const server = Bun.serve({ port: 0, async fetch() { await gate; return sseResponse([chunk({ content: "late" }), chunk({}, "stop")]); } });
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const request = collect(openAiStream({ ...config, baseUrl: `http://127.0.0.1:${server.port}` })([], [], { ...options, firstTokenTimeoutMs: 20 }));
+    await expect(Promise.race([request, new Promise<never>((_, reject) => { watchdog = setTimeout(() => reject(new Error("deadline not enforced")), 300); })])).rejects.toMatchObject({ kind: "timeout" });
+  } finally { if (watchdog) clearTimeout(watchdog); release(); server.stop(true); }
+}, 1000);

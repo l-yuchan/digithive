@@ -4,6 +4,7 @@ import { migrate } from "../src/store/db";
 import { appendEntry, createSession, listEntries } from "../src/core/sessions";
 import { buildContext, clockLine, systemPrompt } from "../src/core/context";
 import { latestCompaction, maybeCompact } from "../src/core/compaction";
+import { editUserMessage, setLeaf } from "../src/core/tree";
 
 function db(): Database {
   const database = new Database(":memory:");
@@ -26,8 +27,7 @@ describe("context assembly", () => {
       content: "가".repeat(100),
     }));
     const built = buildContext({ now: FIXED, history, budget: { maxChars: 3_000 } });
-    expect(built.system).toContain("현재 시각: 2026-11-24");
-    expect(built.system).toContain("외부 행동");
+    expect(built.system).toBe(buildContext({ now: FIXED, history: [] }).system);
     expect(built.dropped).toBeGreaterThan(0);
     expect(built.messages.at(-1)?.content).toBe(history.at(-1)?.content);
     expect(built.system.length + built.messages.reduce((sum, message) => sum + message.content.length, 0)).toBeLessThanOrEqual(3_000);
@@ -64,13 +64,17 @@ describe("compaction", () => {
   test("older messages collapse into one compaction entry and originals are preserved", async () => {
     const database = db();
     const session = createSession(database, "긴 대화");
+    let parentId: string | null = null;
     for (let index = 0; index < 8; index += 1) {
-      appendEntry(database, {
+      const entry = appendEntry(database, {
         sessionId: session.id,
+        parentId,
         kind: "message",
         role: index % 2 === 0 ? "user" : "assistant",
         parts: [{ type: "text", text: `메시지 ${index} `.padEnd(60, "가") }],
       });
+      parentId = entry.id;
+      setLeaf(database, session.id, entry.id);
     }
     const before = listEntries(database, session.id).length;
     const transcriptSeen: string[] = [];
@@ -101,13 +105,17 @@ describe("compaction", () => {
   test("a second compaction does not re-summarize what the first one already covered", async () => {
     const database = db();
     const session = createSession(database, "반복 압축");
+    let parentId: string | null = null;
     for (let index = 0; index < 8; index += 1) {
-      appendEntry(database, {
+      const entry = appendEntry(database, {
         sessionId: session.id,
+        parentId,
         kind: "message",
         role: index % 2 === 0 ? "user" : "assistant",
         parts: [{ type: "text", text: `반복 메시지 ${index} `.padEnd(60, "나") }],
       });
+      parentId = entry.id;
+      setLeaf(database, session.id, entry.id);
     }
     const first = await maybeCompact({ db: database, sessionId: session.id, summarize: async () => "첫 요약", maxChars: 200 });
     expect(first.compacted).toBe(true);
@@ -115,4 +123,29 @@ describe("compaction", () => {
     expect(second.compacted).toBe(false);
     expect(latestCompaction(database, session.id)?.summary).toBe("첫 요약");
   });
+});
+
+test("editing an earlier message excludes the abandoned branch and its compaction from the next context", async () => {
+  const database = db();
+  try {
+    const session = createSession(database, "branches");
+    let parentId: string | null = null;
+    let firstId = "";
+    for (let index = 0; index < 8; index++) {
+      const entry = appendEntry(database, { sessionId: session.id, parentId, kind: "message", role: index % 2 === 0 ? "user" : "assistant", parts: [{ type: "text", text: `abandoned-${index} `.repeat(10) }] });
+      firstId ||= entry.id;
+      parentId = entry.id;
+    }
+    setLeaf(database, session.id, parentId);
+    await maybeCompact({ db: database, sessionId: session.id, maxChars: 200, summarize: async () => "abandoned summary" });
+    expect(latestCompaction(database, session.id)?.summary).toBe("abandoned summary");
+    const edited = editUserMessage(database, { sessionId: session.id, entryId: firstId, text: "replacement" });
+    expect(latestCompaction(database, session.id)).toBeNull();
+    let summarized = false;
+    expect((await maybeCompact({ db: database, sessionId: session.id, maxChars: 200, summarize: async () => { summarized = true; return "bad"; } })).compacted).toBe(false);
+    expect(summarized).toBe(false);
+    setLeaf(database, session.id, parentId);
+    expect(latestCompaction(database, session.id)?.summary).toBe("abandoned summary");
+    setLeaf(database, session.id, edited.entry.id);
+  } finally { database.close(); }
 });

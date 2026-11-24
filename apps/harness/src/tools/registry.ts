@@ -3,7 +3,7 @@ import type { ToolSpec } from "../providers/openai";
 export type ToolRuntime = ToolSpec & {
   /** Policy action used for the approval decision, e.g. "shell" or "read". */
   readonly action: string;
-  readonly execute: (args: Record<string, unknown>, context: { readonly runId: string }) => Promise<string>;
+  readonly execute: (args: Record<string, unknown>, context: { readonly runId: string; readonly signal?: AbortSignal }) => Promise<string>;
 };
 
 export type ToolRegistry = {

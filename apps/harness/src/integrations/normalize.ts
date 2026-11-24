@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite";
-import type { EventLog } from "../events/log";
 
 export type NormalizedItem = {
   readonly id: string;
@@ -108,41 +107,6 @@ export type SyncOutcome = {
   readonly cursor: string | null;
   readonly error: string | null;
 };
-
-/**
- * Runs one source's collection and records the outcome. A partial failure is
- * written as `ok:false` with the failing source named — never as "synced".
- */
-export async function syncSource(input: {
-  readonly db: Database;
-  readonly events: EventLog;
-  readonly source: NormalizedItem["source"];
-  readonly cursor: string | null;
-  readonly collect: (cursor: string | null) => Promise<{ items: NormalizedItem[]; cursor: string | null }>;
-  readonly now?: number;
-}): Promise<SyncOutcome> {
-  const now = input.now ?? Date.now();
-  const iso = new Date(now).toISOString();
-  try {
-    const result = await input.collect(input.cursor);
-    input.db
-      .query(
-        "INSERT INTO integration_state (source, cursor, last_sync_at, ok, error, detail_json) VALUES (?,?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET cursor=excluded.cursor, last_sync_at=excluded.last_sync_at, ok=excluded.ok, error=NULL, detail_json=excluded.detail_json",
-      )
-      .run(input.source, result.cursor, iso, 1, null, JSON.stringify({ count: result.items.length }));
-    input.events.append({ kind: "integration.sync_state", payload: { source: input.source, ok: true, count: result.items.length }, now });
-    return { source: input.source, ok: true, count: result.items.length, cursor: result.cursor, error: null };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown";
-    input.db
-      .query(
-        "INSERT INTO integration_state (source, cursor, last_sync_at, ok, error, detail_json) VALUES (?,?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET last_sync_at=excluded.last_sync_at, ok=0, error=excluded.error",
-      )
-      .run(input.source, input.cursor, iso, 0, message, JSON.stringify({}));
-    input.events.append({ kind: "integration.sync_state", payload: { source: input.source, ok: false, error: message }, now });
-    return { source: input.source, ok: false, count: 0, cursor: input.cursor, error: message };
-  }
-}
 
 export function syncStates(db: Database): { source: string; ok: boolean; lastSyncAt: string | null; error: string | null }[] {
   return (db.query("SELECT source, ok, last_sync_at, error FROM integration_state ORDER BY source").all() as Record<string, unknown>[]).map((row) => ({

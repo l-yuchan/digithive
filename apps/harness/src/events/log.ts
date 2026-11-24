@@ -86,10 +86,8 @@ function toLogged(row: z.infer<typeof EventRow>): LoggedEvent {
 }
 
 /**
- * The canonical event log. State changes and their events are written in the
- * same transaction by the caller (`append` accepts a writer), and every event
- * carries a monotonic global seq so a client can resume with `after=<seq>`
- * without gaps.
+ * Persisted events carry a global sequence. Subscribers drain the database,
+ * including rows appended by other processes, and deduplicate local wakeups.
  */
 export class EventLog {
   readonly #db: Database;
@@ -125,10 +123,21 @@ export class EventLog {
     return row.seq;
   }
 
-  subscribe(listener: Listener): () => void {
-    this.#listeners.add(listener);
+  subscribe(listener: Listener, after = this.lastSeq()): () => void {
+    let cursor = after;
+    const drain = () => {
+      for (const event of this.after(cursor)) {
+        if (event.seq <= cursor) continue;
+        cursor = event.seq;
+        listener(event);
+      }
+    };
+    const deliver: Listener = () => drain();
+    this.#listeners.add(deliver);
+    const poll = setInterval(drain, 50);
     return () => {
-      this.#listeners.delete(listener);
+      clearInterval(poll);
+      this.#listeners.delete(deliver);
     };
   }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -18,6 +18,13 @@ import {
   validateDelegation,
   type WorkDeps,
 } from "../src/surfaces/work/runner";
+const resources: { db: Database; root: string }[] = [];
+afterEach(() => {
+  for (const resource of resources.splice(0)) {
+    resource.db.close();
+    rmSync(resource.root, { recursive: true, force: true });
+  }
+});
 
 function scripted(steps: AdapterEvent[][]): StreamFn {
   let index = 0;
@@ -31,6 +38,7 @@ function scripted(steps: AdapterEvent[][]): StreamFn {
 function setup(steps: AdapterEvent[][]) {
   const root = mkdtempSync(join(tmpdir(), "harness-work-"));
   const db = new Database(":memory:");
+  resources.push({ db, root });
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   const events = new EventLog(db);

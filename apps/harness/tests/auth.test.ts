@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +14,8 @@ import type { WorkDeps } from "../src/surfaces/work/runner";
 
 const auth = { passphrase: "correct horse", secret: "test-secret-value" };
 const idle: StreamFn = async function* () {};
+const resources: { db: Database; webRoot: string }[] = [];
+afterAll(() => { for (const resource of resources) { resource.db.close(); rmSync(resource.webRoot, { recursive: true, force: true }); } });
 
 function deps(overrides: { passphrase?: string } = {}): AppDeps {
   const db = new Database(":memory:");
@@ -22,12 +24,14 @@ function deps(overrides: { passphrase?: string } = {}): AppDeps {
   const events = new EventLog(db);
   const conversation: ConversationDeps = { db, events, stream: idle, tools: createRegistry([]) };
   const work: WorkDeps = { db, events, stream: idle, tools: createRegistry([]), policy: [] };
+  const webRoot = mkdtempSync(join(tmpdir(), "harness-web-"));
+  resources.push({ db, webRoot });
   return {
     db,
     events,
     conversation,
     work,
-    webRoot: mkdtempSync(join(tmpdir(), "harness-web-")),
+    webRoot,
     auth: { passphrase: overrides.passphrase ?? auth.passphrase, secret: auth.secret },
     google: { db, events, vaultSecret: auth.secret, config: { clientId: "id", clientSecret: "secret", redirectUri: "http://local/api/oauth/google/callback" } },
     canvas: { db, events, config: { baseUrl: "", token: "" } },
@@ -103,7 +107,27 @@ describe("auth gate on the server", () => {
   });
 
   test("the shell stays reachable so the client can render its gate", async () => {
-    const response = await app(new Request("http://local/"));
-    expect(response.status).toBe(404); // no build in the temp webRoot, but not 401
+    const fixture = deps();
+    const shell = await Bun.file(join(import.meta.dir, "../web/index.html")).text();
+    await Bun.write(join(fixture.webRoot, "index.html"), shell);
+    const response = await createApp(fixture)(new Request("http://local/"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(await response.text()).toBe(shell);
+  });
+
+  test("delegation API rejects missing and non-finite budgets instead of creating a child", async () => {
+    const fixture = deps({ passphrase: "" });
+    const app = createApp(fixture);
+    const parent = await app(new Request("http://local/api/runs", { method: "POST", body: JSON.stringify({ goal: "parent" }) }));
+    const body = await parent.json();
+    expect(parent.status).toBe(201);
+    for (const budget of [undefined, {}, { maxMicroUsd: -1, maxToolCalls: 1 }]) {
+      const result = await app(new Request(`http://local/api/runs/${body.id}/delegate`, { method: "POST", body: JSON.stringify({
+        goal: "child", inputRefs: ["mail:1"], completionCondition: "done", permissionProfile: "read-only", budget,
+      }) }));
+      expect(result.status).toBe(422);
+    }
+    expect(fixture.db.query("SELECT count(*) AS n FROM runs WHERE origin='delegation'").get()).toEqual({ n: 0 });
   });
 });
