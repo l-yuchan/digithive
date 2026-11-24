@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { getJson, postJson, sendJson, type Entry, type Part, type Session } from "./api";
 import { Composer } from "./composer/Composer";
+import { WorkPanel } from "./work/WorkPanel";
 
 type State = {
   readonly sessions: Session[];
@@ -140,6 +141,7 @@ export function App() {
   const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"chat" | "work">("chat");
   const activeRef = useRef<string | null>(null);
   activeRef.current = state.activeId;
 
@@ -396,7 +398,17 @@ export function App() {
           {state.connected ? "연결됨" : "연결 중…"}
         </p>
       </aside>
-      <main className="conversation" aria-label="대화">
+      <main className="conversation" aria-label={view === "chat" ? "대화" : "작업"}>
+        <nav className="tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={view === "chat"} data-testid="tab-chat" onClick={() => setView("chat")}>
+            대화
+          </button>
+          <button type="button" role="tab" aria-selected={view === "work"} data-testid="tab-work" onClick={() => setView("work")}>
+            작업
+          </button>
+        </nav>
+        {view === "work" ? <WorkPanel /> : (
+        <>
         <ol className="messages" data-testid="messages" aria-live="polite">
           {state.entries
             .filter((entry) => entry.kind === "message")
@@ -481,6 +493,8 @@ export function App() {
           </p>
         ) : null}
         <Composer disabled={sending} onSend={(text) => void send(text)} />
+        </>
+        )}
       </main>
     </div>
   );

@@ -118,4 +118,11 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(
 );
 `,
   },
+  {
+    version: 3,
+    sql: `
+ALTER TABLE runs ADD COLUMN state_json TEXT;
+CREATE INDEX runs_origin ON runs(origin, status);
+`,
+  },
 ];

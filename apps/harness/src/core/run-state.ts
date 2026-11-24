@@ -36,8 +36,8 @@ export function isTerminal(status: RunStatus): boolean {
 
 export const LEASE_MS = 45_000;
 
-export function leaseExpiry(now: number): string {
-  return new Date(now + LEASE_MS).toISOString();
+export function leaseExpiry(now: number, ms = LEASE_MS): string {
+  return new Date(now + ms).toISOString();
 }
 
 export function isLeaseExpired(expiresAt: string | null, now = Date.now()): boolean {
@@ -52,11 +52,11 @@ export function isLeaseExpired(expiresAt: string | null, now = Date.now()): bool
  */
 export function settleExpiredRuns(db: Database, now = Date.now(), owner?: string): string[] {
   const rows = db
-    .query("SELECT id, status, lease_expires_at FROM runs WHERE status IN ('running','awaiting_approval')")
+    .query("SELECT id, status, lease_expires_at FROM runs WHERE status = 'running'")
     .all() as { id: string; status: string; lease_expires_at: string | null }[];
   const settled: string[] = [];
   const update = db.query(
-    "UPDATE runs SET status = 'interrupted', cancel_intent = 'host_restart', settled_at = ? WHERE id = ? AND status IN ('running','awaiting_approval')",
+    "UPDATE runs SET status = 'interrupted', cancel_intent = 'host_restart', settled_at = ? WHERE id = ? AND status = 'running'",
   );
   for (const row of rows) {
     if (owner && row.lease_expires_at !== null && !isLeaseExpired(row.lease_expires_at, now)) continue;

@@ -4,11 +4,13 @@ import { createSession, getSession, listSessions, renameSession, softDeleteSessi
 import { deepestDescendant, editUserMessage, forkSession, pathEntries, regeneratePoint, searchSessions, setLeaf, siblings } from "../core/tree";
 import { runTurn } from "../surfaces/conversation/loop";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
+import { decideApproval, enqueueRun, getRun, listRuns, validateDelegation, withApprovals, type WorkDeps } from "../surfaces/work/runner";
 
 export type AppDeps = {
   readonly db: Database;
   readonly events: EventLog;
   readonly conversation: ConversationDeps;
+  readonly work: WorkDeps;
   readonly webRoot: string;
 };
 
@@ -114,6 +116,68 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     const path = url.pathname;
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
+
+    if (path === "/api/runs") {
+      if (request.method === "GET") return json({ runs: withApprovals(deps.db, listRuns(deps.db)) });
+      if (request.method === "POST") {
+        const raw = (await request.json().catch(() => null)) as { goal?: unknown; sessionId?: unknown } | null;
+        const goal = typeof raw?.goal === "string" ? raw.goal.trim() : "";
+        if (goal.length === 0 || goal.length > 4_096) return json({ error: "invalid_goal" }, 422);
+        const sessionId = typeof raw?.sessionId === "string" ? raw.sessionId : null;
+        const run = enqueueRun(deps.db, deps.events, { goal, sessionId, origin: "work" });
+        return json(run, 201);
+      }
+    }
+
+    const runMatch = /^\/api\/runs\/([^/]+)(?:\/(events|delegate))?(?:\/approvals\/([^/]+))?$/.exec(path);
+    if (runMatch) {
+      const runId = runMatch[1] ?? "";
+      const run = getRun(deps.db, runId);
+      if (!run) return json({ error: "run_not_found" }, 404);
+
+      if (runMatch[3] && request.method === "POST") {
+        const raw = (await request.json().catch(() => null)) as { decision?: unknown } | null;
+        const decision = raw?.decision === "approve" ? "approve" : raw?.decision === "reject" ? "reject" : null;
+        if (!decision) return json({ error: "invalid_decision" }, 422);
+        try {
+          return json(decideApproval({ db: deps.db, events: deps.events }, { runId, approvalId: runMatch[3], decision }));
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : "failed" }, 409);
+        }
+      }
+
+      if (runMatch[2] === "events" && request.method === "GET") {
+        const after = Number(url.searchParams.get("after") ?? "0");
+        const rows = deps.db
+          .query("SELECT seq, run_id, session_id, kind, payload_json, created_at FROM events WHERE run_id = ? AND seq > ? ORDER BY seq")
+          .all(runId, Number.isFinite(after) ? after : 0);
+        return json({ events: rows });
+      }
+
+      if (runMatch[2] === "delegate" && request.method === "POST") {
+        const raw = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+        const budget = raw["budget"] as { maxMicroUsd?: unknown; maxToolCalls?: unknown } | undefined;
+        const fields = {
+          goal: typeof raw["goal"] === "string" ? raw["goal"] : "",
+          inputRefs: Array.isArray(raw["inputRefs"]) ? (raw["inputRefs"] as string[]) : [],
+          permissionProfile: typeof raw["permissionProfile"] === "string" ? raw["permissionProfile"] : "",
+          budget: { maxMicroUsd: Number(budget?.maxMicroUsd ?? Number.NaN), maxToolCalls: Number(budget?.maxToolCalls ?? Number.NaN) },
+          completionCondition: typeof raw["completionCondition"] === "string" ? raw["completionCondition"] : "",
+        };
+        const missing = validateDelegation(fields);
+        if (missing.length > 0) return json({ error: "incomplete_delegation", missing }, 422);
+        const child = enqueueRun(deps.db, deps.events, {
+          goal: fields.goal,
+          origin: "delegation",
+          sessionId: run.sessionId,
+          parentRunId: run.id,
+          budget: fields.budget,
+        });
+        return json({ child, fields }, 201);
+      }
+
+      if (runMatch[2] === undefined && request.method === "GET") return json(withApprovals(deps.db, [run])[0]);
+    }
 
     if (path === "/api/events" && request.method === "GET") {
       const after = Number(url.searchParams.get("after") ?? "0");
