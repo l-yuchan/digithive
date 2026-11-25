@@ -65,5 +65,6 @@ export function isPublicRoute(path: string, method: string): boolean {
   if (path === "/api/login" && method === "POST") return true;
   if (path === "/api/logout" && method === "POST") return true;
   if (path === "/api/health") return true;
+  if (path === "/api/oauth/google/callback" && method === "GET") return true;
   return false;
 }

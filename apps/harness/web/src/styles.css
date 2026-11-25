@@ -6,7 +6,19 @@
   --muted: #9aa3b2;
   --accent: #4f8cff;
   --user: #2a3a5c;
+  --border: #2b3444;
+  --danger: #ff9b9b;
+  --warning: #ffd08a;
   --radius: 14px;
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-md: 15px;
 }
 
 * {
@@ -407,6 +419,7 @@ a.primary[aria-disabled="true"] {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 4px;
 }
@@ -522,7 +535,8 @@ a.primary[aria-disabled="true"] {
   margin-top: 8px;
 }
 
-button.ghost {
+button.ghost,
+a.ghost {
   background: transparent;
   border: 1px solid #2b3444;
   color: var(--text);
@@ -627,4 +641,299 @@ button.ghost {
   text-decoration: none;
   line-height: 1.4;
   text-align: center;
+}
+
+
+/* Account and schedule management use the existing dark surfaces and spacing rhythm. */
+.accounts,
+.schedules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.schedules {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-3);
+}
+
+.account-card,
+.schedule-card,
+.history-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.account-title {
+  min-width: 0;
+}
+
+.account-title h3,
+.schedule-card h3 {
+  margin: 0;
+  font-size: var(--font-md);
+}
+
+.account-sources,
+.schedule-list,
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.account-sources {
+  margin-top: var(--space-2);
+}
+
+.account-source {
+  min-width: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.source-head,
+.configuration-states {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.source-toggle,
+.enabled-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.source-toggle {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.source-toggle input,
+.enabled-toggle input {
+  width: var(--space-4);
+  height: var(--space-4);
+  margin: 0;
+}
+
+.configuration-states {
+  margin-top: var(--space-2);
+}
+
+.compact-actions {
+  margin-top: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.accounts .run-actions,
+.schedules .run-actions {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.accounts .run-actions button,
+.accounts .run-actions .button-link,
+.schedules .run-actions button {
+  max-width: 100%;
+}
+
+button.ghost.danger-button {
+  color: var(--danger);
+}
+
+.error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.empty-state .run-meta {
+  margin: 0;
+}
+
+.schedule-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.schedule-list-section,
+.schedule-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--font-md);
+}
+
+.schedule-card.selected {
+  border-color: var(--accent);
+}
+
+.schedule-instruction,
+.history-goal {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.field small {
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
+
+.form-error {
+  white-space: pre-wrap;
+}
+
+.history-item.awaiting_approval {
+  border-color: var(--warning);
+}
+
+.approval-actions {
+  align-items: center;
+}
+
+.run-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
+.result-block h4 {
+  margin: 0 0 var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.result-block.stderr h4,
+.result-block.error h4 {
+  color: var(--danger);
+}
+
+.result-output {
+  max-width: 100%;
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.result-json summary {
+  color: var(--muted);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .schedule-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .field-wide {
+    grid-column: auto;
+  }
+
+  .source-toggle {
+    margin-left: 0;
+  }
+
+  .compact-actions {
+    justify-content: flex-start;
+  }
 }

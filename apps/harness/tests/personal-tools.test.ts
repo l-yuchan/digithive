@@ -137,9 +137,10 @@ test("personal_data_search stays inside one cached source and treats the query a
   const harness = harnessAt(root, "http://127.0.0.1:1/v1");
   try {
     const insert = harness.deps.db.query(
-      "INSERT INTO sync_items (source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?)",
+      "INSERT INTO sync_items (account_id,source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?,?)",
     );
     insert.run(
+      "google-default",
       "calendar",
       "cal-1",
       "팀 회의",
@@ -149,6 +150,7 @@ test("personal_data_search stays inside one cached source and treats the query a
       "2026-11-25T00:00:00.000Z",
     );
     insert.run(
+      "google-default",
       "gmail",
       "mail-1",
       "팀 회의 안내",
@@ -158,6 +160,7 @@ test("personal_data_search stays inside one cached source and treats the query a
       "2026-11-25T00:00:00.000Z",
     );
     insert.run(
+      "canvas-default",
       "canvas",
       "canvas-1",
       "회의 과제",
@@ -168,7 +171,7 @@ test("personal_data_search stays inside one cached source and treats the query a
     );
     harness.deps.db
       .query(
-        "INSERT INTO integration_state (source, ok, last_sync_at) VALUES ('calendar',1,'2026-11-25T00:00:00.000Z')",
+        "UPDATE account_sources SET ok=1, last_sync_at='2026-11-25T00:00:00.000Z' WHERE account_id='google-default' AND source='calendar'",
       )
       .run();
 
@@ -206,9 +209,10 @@ test("a createHarness conversation runs personal_data_search from the runtime re
   const harness = harnessAt(root, model.url);
   try {
     const insert = harness.deps.db.query(
-      "INSERT INTO sync_items (source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?)",
+      "INSERT INTO sync_items (account_id,source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?,?)",
     );
     insert.run(
+      "google-default",
       "gmail",
       "mail-1",
       "팀 회의 안내",
@@ -218,6 +222,7 @@ test("a createHarness conversation runs personal_data_search from the runtime re
       "2026-11-25T00:00:00.000Z",
     );
     insert.run(
+      "google-default",
       "calendar",
       "cal-1",
       "팀 회의",

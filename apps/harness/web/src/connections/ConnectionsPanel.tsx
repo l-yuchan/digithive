@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl, getJson, postJson } from "../api";
+import { getJson, postJson } from "../api";
 import { PushPanel } from "./PushPanel";
+import { AccountsPanel } from "./AccountsPanel";
 
 const SyncStateSchema = z.object({
   source: z.string(),
@@ -47,16 +48,17 @@ export function ConnectionsPanel() {
     [],
   );
 
+  const refresh = useCallback(() => {
+    void load()
+      .then(() => setLoadError(null))
+      .catch((error: unknown) => setLoadError(String(error)));
+  }, [load]);
+
   useEffect(() => {
-    const refresh = () => {
-      void load()
-        .then(() => setLoadError(null))
-        .catch((error: unknown) => setLoadError(String(error)));
-    };
     refresh();
     const timer = setInterval(refresh, 20_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [refresh]);
 
   const sync = async () => {
     setBusy("sync");
@@ -126,46 +128,7 @@ export function ConnectionsPanel() {
           연결 상태를 불러오지 못했습니다: {loadError}
         </p>
       ) : null}
-      <div className="card">
-        <div className="card-head">
-          <h2>Google (캘린더·메일)</h2>
-          <span
-            className={`badge ${state === null ? "" : state.googleConnected ? "succeeded" : "failed"}`}
-            data-testid="google-state"
-          >
-            {state === null ? "확인 중" : state.googleConnected ? "연결됨" : "미연결"}
-          </span>
-        </div>
-        <p className="run-meta">
-          {state === null
-            ? "연결 상태를 확인 중입니다."
-            : state.googleConnected
-              ? "증분 수집이 켜져 있습니다. 캘린더는 syncToken, 메일은 historyId로 이어받습니다."
-              : "연결하면 캘린더와 메일을 읽어 일정·메일 브리핑에 넣습니다."}
-        </p>
-        <div className="run-actions">
-          <a
-            className="primary button-link"
-            href={apiUrl("/api/oauth/google/start")}
-            data-testid="google-connect"
-          >
-            {state?.googleConnected ? "다시 연결" : "Google 연결"}
-          </a>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-head">
-          <h2>한양 LMS</h2>
-          <span
-            className={`badge ${state === null ? "" : state.canvasConfigured ? "succeeded" : "failed"}`}
-            data-testid="canvas-state"
-          >
-            {state === null ? "확인 중" : state.canvasConfigured ? "설정됨" : "미설정"}
-          </span>
-        </div>
-        <p className="run-meta">과제·퀴즈 마감을 가져와 브리핑에 넣습니다.</p>
-      </div>
+      <AccountsPanel onChanged={refresh} />
 
       <div className="card">
         <div className="card-head">

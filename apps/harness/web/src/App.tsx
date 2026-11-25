@@ -15,6 +15,8 @@ import { Composer } from "./composer/Composer";
 import { ConversationSidebar, type RenameTarget } from "./sidebar/ConversationSidebar";
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
+import { SchedulesPanel } from "./schedules/SchedulesPanel";
+import { hasOAuthResult } from "./connections/oauth";
 import { Login } from "./auth/Login";
 import { MessageParts } from "./MessageParts";
 
@@ -144,7 +146,9 @@ export function App() {
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"chat" | "work" | "connections">("chat");
+  const [view, setView] = useState<"chat" | "work" | "connections" | "schedules">(() =>
+    hasOAuthResult(window.location.search) ? "connections" : "chat",
+  );
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -414,7 +418,7 @@ export function App() {
         onDelete={(id) => void removeSession(id)}
         onDeleteCancel={() => setConfirmDelete(null)}
       />
-      <main className="conversation" aria-label={view === "chat" ? "대화" : "작업"}>
+      <main className="conversation" aria-label={view === "chat" ? "대화" : view === "work" ? "작업" : view === "schedules" ? "스케줄" : "연결"}>
         <nav className="tabs" role="tablist">
           <button
             type="button"
@@ -437,6 +441,15 @@ export function App() {
           <button
             type="button"
             role="tab"
+            aria-selected={view === "schedules"}
+            data-testid="tab-schedules"
+            onClick={() => setView("schedules")}
+          >
+            스케줄
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={view === "connections"}
             data-testid="tab-connections"
             onClick={() => setView("connections")}
@@ -446,6 +459,8 @@ export function App() {
         </nav>
         {view === "work" ? (
           <WorkPanel />
+        ) : view === "schedules" ? (
+          <SchedulesPanel />
         ) : view === "connections" ? (
           <ConnectionsPanel />
         ) : (

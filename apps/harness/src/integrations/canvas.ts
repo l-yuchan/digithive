@@ -1,7 +1,8 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../events/log";
+import { DEFAULT_CANVAS_ACCOUNT_ID, isSourceEnabled } from "./accounts";
 import type { NormalizedItem, SyncOutcome } from "./normalize";
-import { recordOutcome, saveItems } from "./sync-store";
+import { recordOutcome, saveItems, skippedOutcome } from "./sync-store";
 import { z } from "zod";
 
 export type CanvasConfig = {
@@ -64,18 +65,28 @@ export type CanvasDeps = {
   readonly config: CanvasConfig;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
+  readonly accountId?: string;
 };
 
 /**
  * Collects the LMS todo list (assignments and quizzes with due dates) and
  * orders it by due time. A missing token or a failing response is a visible
- * failure, never an empty success.
+ * failure, never an empty success. The single LMS identity is canvas-default.
  */
 export async function syncCanvas(deps: CanvasDeps): Promise<SyncOutcome> {
+  const accountId = deps.accountId ?? DEFAULT_CANVAS_ACCOUNT_ID;
+  if (!isSourceEnabled(deps.db, accountId, "canvas")) return skippedOutcome(accountId, "canvas");
   const now = (deps.now ?? Date.now)();
   const fetchImpl = deps.fetchImpl ?? fetch;
   if (deps.config.baseUrl.trim().length === 0 || deps.config.token.trim().length === 0) {
-    return recordOutcome(deps, "canvas", false, 0, null, "canvas_not_configured");
+    return recordOutcome(deps, {
+      accountId,
+      source: "canvas",
+      ok: false,
+      count: 0,
+      cursor: null,
+      error: "canvas_not_configured",
+    });
   }
   try {
     const url = new URL("/api/v1/users/self/todo", deps.config.baseUrl.replace(/\/+$/, ""));
@@ -89,17 +100,24 @@ export async function syncCanvas(deps: CanvasDeps): Promise<SyncOutcome> {
       .map(normalizeCanvasTodo)
       .filter((item) => item.id.length > 0)
       .toSorted((a, b) => (a.at ?? "9999").localeCompare(b.at ?? "9999"));
-    saveItems(deps.db, "canvas", items, now);
-    return recordOutcome(deps, "canvas", true, items.length, null, null);
+    saveItems(deps.db, accountId, "canvas", items, now);
+    return recordOutcome(deps, {
+      accountId,
+      source: "canvas",
+      ok: true,
+      count: items.length,
+      cursor: null,
+      error: null,
+    });
   } catch (error) {
-    return recordOutcome(
-      deps,
-      "canvas",
-      false,
-      0,
-      null,
-      error instanceof Error ? error.message : "unknown",
-    );
+    return recordOutcome(deps, {
+      accountId,
+      source: "canvas",
+      ok: false,
+      count: 0,
+      cursor: null,
+      error: error instanceof Error ? error.message : "unknown",
+    });
   }
 }
 

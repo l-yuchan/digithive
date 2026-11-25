@@ -15,6 +15,8 @@ const RunSchema = z.object({
 });
 export type Run = z.infer<typeof RunSchema>;
 
+const CANCELLABLE = new Set(["queued", "running", "awaiting_approval"]);
+
 const LABELS: Record<string, string> = {
   queued: "대기",
   running: "진행 중",
@@ -76,6 +78,15 @@ export function WorkPanel() {
     }
   };
 
+  const cancel = async (run: Run) => {
+    try {
+      await postJson(`/api/runs/${run.id}/cancel`, {}, z.unknown());
+      await load();
+    } catch (failure) {
+      setError(String(failure));
+    }
+  };
+
   return (
     <section className="work" aria-label="작업">
       <form
@@ -129,6 +140,18 @@ export function WorkPanel() {
                   onClick={() => void decide(run, "reject")}
                 >
                   거부
+                </button>
+              </div>
+            ) : null}
+            {CANCELLABLE.has(run.status) ? (
+              <div className="run-actions">
+                <button
+                  className="ghost"
+                  type="button"
+                  data-testid="run-cancel"
+                  onClick={() => void cancel(run)}
+                >
+                  취소
                 </button>
               </div>
             ) : null}

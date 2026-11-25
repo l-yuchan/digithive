@@ -36,6 +36,10 @@ export const EVENT_KINDS = [
   "provider.retry",
   "provider.fallback",
   "integration.sync_state",
+  "schedule.created",
+  "schedule.updated",
+  "schedule.deleted",
+  "schedule.run",
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];

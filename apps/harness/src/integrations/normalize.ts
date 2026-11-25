@@ -116,25 +116,50 @@ export function normalizeCanvasAssignment(raw: unknown): NormalizedItem {
 
 export type SyncOutcome = {
   readonly source: NormalizedItem["source"];
+  readonly accountId: string;
   readonly ok: boolean;
   readonly count: number;
   readonly cursor: string | null;
   readonly error: string | null;
+  /** True when a disabled source or a credential-less account was not attempted. */
+  readonly skipped?: boolean;
 };
 
-export function syncStates(
-  db: Database,
-): { source: string; ok: boolean; lastSyncAt: string | null; error: string | null }[] {
+export type SyncState = {
+  readonly accountId: string;
+  readonly source: string;
+  readonly enabled: boolean;
+  readonly ok: boolean;
+  readonly lastSyncAt: string | null;
+  readonly lastAttemptAt: string | null;
+  readonly error: string | null;
+};
+
+/** Aggregate connection view: one row per account and source, never one per source. */
+export function syncStates(db: Database): SyncState[] {
   return db
     .query<
-      { source: string; ok: number; last_sync_at: string | null; error: string | null },
+      {
+        account_id: string;
+        source: string;
+        enabled: number;
+        ok: number;
+        last_sync_at: string | null;
+        last_attempt_at: string | null;
+        error: string | null;
+      },
       SQLQueryBindings[]
-    >("SELECT source, ok, last_sync_at, error FROM integration_state ORDER BY source")
+    >(
+      "SELECT account_id,source,enabled,ok,last_sync_at,last_attempt_at,error FROM account_sources ORDER BY account_id, source",
+    )
     .all()
     .map((row) => ({
+      accountId: row["account_id"],
       source: row["source"],
+      enabled: row["enabled"] === 1,
       ok: row["ok"] === 1,
       lastSyncAt: row["last_sync_at"] === null ? null : row["last_sync_at"],
+      lastAttemptAt: row["last_attempt_at"] === null ? null : row["last_attempt_at"],
       error: row["error"] === null ? null : row["error"],
     }));
 }

@@ -3,28 +3,25 @@ import type { EventLog } from "../events/log";
 import { BRIEFING_SLOTS, TIMEZONE } from "./briefing";
 import { z } from "zod";
 
-export type BriefingContent = {
-  readonly slot: string;
-  readonly generatedAt: string;
-  readonly events: readonly { id: string; title: string; at: string | null; detail: string }[];
-  readonly assignments: readonly { id: string; title: string; at: string | null; detail: string }[];
-  readonly mail: readonly { id: string; title: string; at: string | null; detail: string }[];
-  readonly text: string;
-};
 const BriefingItemSchema = z.object({
   id: z.string(),
   title: z.string(),
   at: z.string().nullable(),
   detail: z.string(),
+  accountId: z.string().optional(),
+  accountLabel: z.string().optional(),
 });
 const BriefingContentSchema = z.object({
+  runId: z.string().optional(),
   slot: z.string(),
   generatedAt: z.string(),
-  events: z.array(BriefingItemSchema),
-  assignments: z.array(BriefingItemSchema),
-  mail: z.array(BriefingItemSchema),
+  events: z.array(BriefingItemSchema).readonly(),
+  assignments: z.array(BriefingItemSchema).readonly(),
+  mail: z.array(BriefingItemSchema).readonly(),
   text: z.string(),
 });
+type BriefingItem = Readonly<z.infer<typeof BriefingItemSchema>>;
+export type BriefingContent = Readonly<z.infer<typeof BriefingContentSchema>>;
 
 function kstDay(now: number): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -80,24 +77,34 @@ function rows(
   from: number,
   until: number,
   limit: number,
-): { id: string; title: string; at: string | null; detail: string }[] {
+  accountId?: string,
+): BriefingItem[] {
   return db
     .query<
-      { item_id: string; title: string; at: string | null; detail: string | null },
+      {
+        account_id: string;
+        label: string;
+        item_id: string;
+        title: string;
+        at: string | null;
+        detail: string | null;
+      },
       SQLQueryBindings[]
     >(
-      "SELECT item_id, title, at, detail FROM sync_items WHERE source = ? AND (at IS NULL OR (at >= ? AND at <= ?)) ORDER BY at LIMIT ?",
+      "SELECT i.account_id,a.label,i.item_id,i.title,i.at,i.detail FROM sync_items i JOIN account_sources s ON s.account_id=i.account_id AND s.source=i.source JOIN integration_accounts a ON a.id=i.account_id WHERE i.source=? AND s.enabled=1 AND (? IS NULL OR i.account_id=?) AND (i.at IS NULL OR (i.at>=? AND i.at<=?)) ORDER BY i.at LIMIT ?",
     )
-    .all(source, new Date(from).toISOString(), new Date(until).toISOString(), limit)
+    .all(source, accountId ?? null, accountId ?? null, new Date(from).toISOString(), new Date(until).toISOString(), limit)
     .map((row) => ({
       id: row["item_id"],
       title: row["title"],
       at: row["at"] === null ? null : row["at"],
       detail: row["detail"] ?? "",
+      accountId: row.account_id,
+      accountLabel: row.label,
     }));
 }
 
-function line(prefix: string, item: { id: string; title: string; at: string | null }): string {
+function line(prefix: string, item: BriefingItem): string {
   const when = item.at
     ? new Date(item.at).toLocaleString("ko-KR", {
         timeZone: TIMEZONE,
@@ -107,19 +114,20 @@ function line(prefix: string, item: { id: string; title: string; at: string | nu
         minute: "2-digit",
       })
     : "시간 미정";
-  return `- [${prefix}:${item.id}] ${when} · ${item.title}`;
+  const reference = item.accountId ? `${item.accountId}:${item.id}` : item.id;
+  return `- [${prefix}:${reference}] ${when} · ${item.title}${item.accountLabel ? ` (${item.accountLabel})` : ""}`;
 }
 
 export function composeBriefing(
   db: Database,
   now: number,
-  horizonHours = 36,
-  slot = "manual",
+  options: { readonly horizonHours?: number; readonly slot?: string; readonly accountId?: string } = {},
 ): BriefingContent {
+  const { horizonHours = 36, slot = "manual", accountId } = options;
   const until = now + horizonHours * 60 * 60 * 1_000;
-  const events = rows(db, "calendar", now - 12 * 60 * 60 * 1_000, until, 20);
-  const assignments = rows(db, "canvas", now - 60 * 60 * 1_000, until, 20);
-  const mail = rows(db, "gmail", now - 24 * 60 * 60 * 1_000, until, 12);
+  const events = rows(db, "calendar", now - 12 * 60 * 60 * 1_000, until, 20, accountId);
+  const assignments = rows(db, "canvas", now - 60 * 60 * 1_000, until, 20, accountId);
+  const mail = rows(db, "gmail", now - 24 * 60 * 60 * 1_000, until, 12, accountId);
   const parts: string[] = [];
   parts.push(
     events.length > 0
@@ -153,8 +161,16 @@ export function storeBriefing(
 ): { id: string; duplicate: boolean } {
   const id = crypto.randomUUID();
   const result = db
-    .query("INSERT OR IGNORE INTO briefings (id, slot, content_json, created_at) VALUES (?,?,?,?)")
-    .run(id, content.slot, JSON.stringify(content), new Date(now).toISOString());
+    .query(
+      "INSERT OR IGNORE INTO briefings (id, slot, content_json, created_at,run_id) VALUES (?,?,?,?,?)",
+    )
+    .run(
+      id,
+      content.slot,
+      JSON.stringify(content),
+      new Date(now).toISOString(),
+      content.runId ?? null,
+    );
   return { id, duplicate: result.changes === 0 };
 }
 
@@ -179,6 +195,8 @@ export function latestBriefing(
 }
 
 export type BriefingDeps = {
+  readonly runId?: string;
+  readonly accountId?: string;
   readonly db: Database;
   readonly events: EventLog;
   readonly push?: (payload: {
@@ -194,10 +212,24 @@ export async function runBriefing(
   force = false,
 ): Promise<{ slot: string; stored: boolean; pushed: boolean; error: string | null }> {
   const now = (deps.now ?? Date.now)();
-  const due = force ? { slot: "manual", day: kstDay(now) } : dueSlot(now);
+  const local = kstParts(now);
+  const due = force
+    ? {
+        slot: deps.runId
+          ? `${String(local.hour).padStart(2, "0")}:${String(local.minute).padStart(2, "0")}`
+          : "manual",
+        day: kstDay(now),
+      }
+    : dueSlot(now);
   if (!due) return { slot: "none", stored: false, pushed: false, error: null };
 
-  const content = composeBriefing(deps.db, now, 36, due.slot);
+  const content = {
+    ...composeBriefing(deps.db, now, {
+      slot: due.slot,
+      ...(deps.accountId ? { accountId: deps.accountId } : {}),
+    }),
+    ...(deps.runId ? { runId: deps.runId } : {}),
+  };
   const stored = storeBriefing(deps.db, content, now);
   if (stored.duplicate) return { slot: due.slot, stored: false, pushed: false, error: null };
 

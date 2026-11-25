@@ -36,9 +36,11 @@ function setup(respond: (url: URL, init?: Parameters<typeof fetch>[1]) => Respon
   };
 }
 function seed(db: Database, source: string, cursor: string) {
-  db.query("INSERT INTO integration_state(source,cursor,ok) VALUES (?,?,1)").run(source, cursor);
   db.query(
-    "INSERT INTO sync_items(source,item_id,title,detail,updated_at) VALUES (?,'old','old','','x')",
+    "INSERT INTO account_sources(account_id,source,cursor,ok) VALUES ('google-default',?,?,1) ON CONFLICT(account_id,source) DO UPDATE SET cursor=excluded.cursor, ok=excluded.ok",
+  ).run(source, cursor);
+  db.query(
+    "INSERT INTO sync_items(account_id,source,item_id,title,detail,updated_at) VALUES ('google-default',?,'old','old','','x')",
   ).run(source);
 }
 
@@ -69,17 +71,34 @@ test("a failing later calendar page preserves the previous snapshot and cursor",
       : json({ items: [{ id: "new", summary: "partial" }], nextPageToken: "p2" }),
   );
   seed(deps.db, "calendar", "previous");
-  deps.db.query("UPDATE integration_state SET last_sync_at='2026-11-24T00:00:00.000Z'").run();
+  deps.db
+    .query(
+      "UPDATE account_sources SET last_sync_at='2026-11-24T00:00:00.000Z' WHERE account_id='google-default' AND source='calendar'",
+    )
+    .run();
   expect((await syncGoogleCalendar(deps)).ok).toBe(false);
-  expect(deps.db.query("SELECT cursor,ok FROM integration_state").get()).toEqual({
+  expect(
+    deps.db
+      .query(
+        "SELECT cursor,ok FROM account_sources WHERE account_id='google-default' AND source='calendar'",
+      )
+      .get(),
+  ).toEqual({
     cursor: "previous",
     ok: 0,
   });
   expect(deps.db.query("SELECT item_id FROM sync_items").all()).toEqual([{ item_id: "old" }]);
-  expect(deps.db.query("SELECT last_sync_at FROM integration_state").get()).toEqual({
+  expect(
+    deps.db
+      .query(
+        "SELECT last_sync_at FROM account_sources WHERE account_id='google-default' AND source='calendar'",
+      )
+      .get(),
+  ).toEqual({
     last_sync_at: "2026-11-24T00:00:00.000Z",
   });
   expect(deps.events.after(0).at(-1)?.payload).toMatchObject({
+    accountId: "google-default",
     source: "calendar",
     ok: false,
     error: "calendar_http_403",
@@ -139,7 +158,13 @@ test("gmail consumes more than 25 additions across every history page", async ()
   });
   seed(deps.db, "gmail", "previous");
   expect(await syncGoogleGmail(deps)).toMatchObject({ ok: true, cursor: "next", count: 27 });
-  expect(deps.db.query("SELECT count(*) AS n FROM sync_items WHERE source='gmail'").get()).toEqual({
+  expect(
+    deps.db
+      .query(
+        "SELECT count(*) AS n FROM sync_items WHERE account_id='google-default' AND source='gmail'",
+      )
+      .get(),
+  ).toEqual({
     n: 28,
   });
 });
@@ -155,7 +180,13 @@ test("a failed gmail detail does not advance history or partially commit message
   });
   seed(deps.db, "gmail", "previous");
   expect((await syncGoogleGmail(deps)).ok).toBe(false);
-  expect(deps.db.query("SELECT cursor,ok FROM integration_state").get()).toEqual({
+  expect(
+    deps.db
+      .query(
+        "SELECT cursor,ok FROM account_sources WHERE account_id='google-default' AND source='gmail'",
+      )
+      .get(),
+  ).toEqual({
     cursor: "previous",
     ok: 0,
   });

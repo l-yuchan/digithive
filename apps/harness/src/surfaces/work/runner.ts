@@ -1,11 +1,15 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../../events/log";
 import type { PolicyRule } from "../../core/policy";
-import { isLeaseExpired, leaseExpiry } from "../../core/run-state";
+import { RunExecutorSchema, type RunExecutor } from "../../core/executor";
+import { leaseExpiry } from "../../core/run-state";
 import type { ToolRegistry } from "../../tools/registry";
 import type { StreamFn } from "../../providers/openai";
 import { ok } from "node:assert/strict";
+import { getRun, type RunRow } from "./record";
 export { executeRun } from "./execution";
+export { getRun, listRuns, withApprovals, type RunRow, type RunView } from "./record";
+export { reconcileWork } from "./reconcile";
 
 export type WorkDeps = {
   readonly db: Database;
@@ -24,6 +28,14 @@ export type WorkDeps = {
   };
   readonly maxConcurrent?: number;
   readonly leaseMs?: number;
+  /** Injected by main for builtin executors; scripts run locally via scriptsRoot. */
+  readonly scriptExecutor?: (
+    executor: Extract<RunExecutor, { kind: "builtin" }>,
+    context: { readonly runId: string; readonly signal: AbortSignal },
+  ) => Promise<string>;
+  readonly scriptsRoot?: string;
+  /** Worker SIGTERM/SIGINT: aborts in-flight executors as host_restart. */
+  readonly shutdownSignal?: AbortSignal;
 };
 
 export const WORK_LIMITS = {
@@ -34,91 +46,6 @@ export const WORK_LIMITS = {
   maxToolRounds: 6,
   totalMs: 30 * 60_000,
 };
-
-export type RunRow = {
-  id: string;
-  sessionId: string | null;
-  parentRunId: string | null;
-  origin: string;
-  goal: string;
-  status: string;
-  cancelIntent: string | null;
-  leaseOwner: string | null;
-  leaseExpiresAt: string | null;
-  attempt: number;
-  budgetJson: string;
-  resultJson: string | null;
-  stateJson: string | null;
-  createdAt: string;
-  settledAt: string | null;
-};
-
-type StoredRun = {
-  id: string;
-  session_id: string | null;
-  parent_run_id: string | null;
-  origin: string;
-  goal: string;
-  status: string;
-  cancel_intent: string | null;
-  lease_owner: string | null;
-  lease_expires_at: string | null;
-  attempt: number;
-  budget_json: string;
-  result_json: string | null;
-  state_json: string | null;
-  created_at: string;
-  settled_at: string | null;
-};
-const RunShape = (row: StoredRun): RunRow => ({
-  id: row["id"],
-  sessionId: row["session_id"] === null ? null : row["session_id"],
-  parentRunId: row["parent_run_id"] === null ? null : row["parent_run_id"],
-  origin: row["origin"],
-  goal: row["goal"],
-  status: row["status"],
-  cancelIntent: row["cancel_intent"] === null ? null : row["cancel_intent"],
-  leaseOwner: row["lease_owner"] === null ? null : row["lease_owner"],
-  leaseExpiresAt: row["lease_expires_at"] === null ? null : row["lease_expires_at"],
-  attempt: row["attempt"],
-  budgetJson: row["budget_json"],
-  resultJson: row["result_json"] === null ? null : row["result_json"],
-  stateJson: row["state_json"] === null ? null : row["state_json"],
-  createdAt: row["created_at"],
-  settledAt: row["settled_at"] === null ? null : row["settled_at"],
-});
-
-const SELECT =
-  "SELECT id, session_id, parent_run_id, origin, goal, status, cancel_intent, lease_owner, lease_expires_at, attempt, budget_json, result_json, state_json, created_at, settled_at FROM runs";
-
-export function getRun(db: Database, id: string): RunRow | null {
-  const row = db.query<StoredRun, SQLQueryBindings[]>(`${SELECT} WHERE id = ?`).get(id);
-  return row ? RunShape(row) : null;
-}
-
-export function listRuns(db: Database, limit = 30): RunRow[] {
-  return db
-    .query<StoredRun, SQLQueryBindings[]>(`${SELECT} ORDER BY created_at DESC LIMIT ?`)
-    .all(limit)
-    .map(RunShape);
-}
-
-export type RunView = RunRow & {
-  readonly pendingApprovalId: string | null;
-  readonly pendingTool: string | null;
-};
-
-/** Run rows plus the pending approval the UI must render, if any. */
-export function withApprovals(db: Database, runs: readonly RunRow[]): RunView[] {
-  return runs.map((run) => {
-    const row = db
-      .query<{ id: string; name: string | null }, SQLQueryBindings[]>(
-        "SELECT a.id AS id, t.name AS name FROM approvals a LEFT JOIN tool_calls t ON t.id = a.tool_call_id WHERE a.run_id = ? AND a.status = 'pending' ORDER BY a.requested_at DESC LIMIT 1",
-      )
-      .get(run.id);
-    return { ...run, pendingApprovalId: row?.id ?? null, pendingTool: row?.name ?? null };
-  });
-}
 
 export type DelegateFields = {
   readonly goal: string;
@@ -166,15 +93,21 @@ export function enqueueRun(
     readonly parentRunId?: string | null;
     readonly budget?: unknown;
     readonly delegation?: DelegateFields;
+    readonly executor?: RunExecutor;
+    readonly timeoutSeconds?: number;
     readonly now?: number;
   },
 ): RunRow {
   const now = input.now ?? Date.now();
   const id = crypto.randomUUID();
   const iso = new Date(now).toISOString();
+  const executor = RunExecutorSchema.parse(input.executor ?? { kind: "agent" });
+  const timeoutSeconds = input.timeoutSeconds ?? 1_800;
+  if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 86_400)
+    throw new Error("invalid_timeout");
   db.query(
-    `INSERT INTO runs (id, session_id, parent_run_id, origin, goal, status, budget_json, created_at)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`,
+    `INSERT INTO runs (id, session_id, parent_run_id, origin, goal, status, budget_json, executor_json, timeout_seconds, created_at)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
   ).run(
     id,
     input.sessionId ?? null,
@@ -182,6 +115,8 @@ export function enqueueRun(
     input.origin ?? "work",
     input.goal.slice(0, 4_096),
     JSON.stringify(input.delegation ?? input.budget ?? {}),
+    JSON.stringify(executor),
+    timeoutSeconds,
     iso,
   );
   events.append({
@@ -288,55 +223,3 @@ export function decideApproval(
     .immediate();
 }
 
-/** Expires approvals nobody answered, and settles runs whose lease died. */
-export function reconcileWork(
-  db: Database,
-  events: EventLog,
-  now = Date.now(),
-  ttlMs = 30 * 60_000,
-): { expiredApprovals: number; interrupted: number } {
-  return db
-    .transaction(() => {
-      const stale = db
-        .query<{ id: string; run_id: string }, SQLQueryBindings[]>(
-          "SELECT id, run_id FROM approvals WHERE status = 'pending' AND requested_at <= ?",
-        )
-        .all(new Date(now - ttlMs).toISOString());
-      for (const approval of stale) {
-        db.query("UPDATE approvals SET status = 'expired', decided_at = ? WHERE id = ?").run(
-          new Date(now).toISOString(),
-          approval.id,
-        );
-        db.query(
-          "UPDATE runs SET status = 'queued' WHERE id = ? AND status = 'awaiting_approval'",
-        ).run(approval.run_id);
-        events.append({
-          kind: "approval.expired",
-          runId: approval.run_id,
-          payload: { approvalId: approval.id },
-          now,
-        });
-      }
-      const live = db
-        .query<{ id: string; lease_expires_at: string | null }, SQLQueryBindings[]>(
-          "SELECT id, lease_expires_at FROM runs WHERE status = 'running'",
-        )
-        .all();
-      let interrupted = 0;
-      for (const run of live) {
-        if (!isLeaseExpired(run.lease_expires_at, now)) continue;
-        db.query(
-          "UPDATE runs SET status = 'interrupted', cancel_intent = 'host_restart', settled_at = ? WHERE id = ?",
-        ).run(new Date(now).toISOString(), run.id);
-        events.append({
-          kind: "run.interrupted",
-          runId: run.id,
-          payload: { reason: "lease_expired" },
-          now,
-        });
-        interrupted += 1;
-      }
-      return { expiredApprovals: stale.length, interrupted };
-    })
-    .immediate();
-}

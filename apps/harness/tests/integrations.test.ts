@@ -103,14 +103,14 @@ describe("google oauth + sync", () => {
     expect(outcome).toMatchObject({ ok: true, count: 1, cursor: "st-1" });
     const item = deps.db
       .query<{ title: string; at: string }, SQLQueryBindings[]>(
-        "SELECT title, at FROM sync_items WHERE source = 'calendar'",
+        "SELECT title, at FROM sync_items WHERE account_id = 'google-default' AND source = 'calendar'",
       )
       .get();
     ok(item, "fixture row exists");
     expect(item).toEqual({ title: "회의", at: "2026-11-24T10:00:00+09:00" });
     const state = deps.db
       .query<{ cursor: string; ok: number }, SQLQueryBindings[]>(
-        "SELECT cursor, ok FROM integration_state WHERE source = 'calendar'",
+        "SELECT cursor, ok FROM account_sources WHERE account_id = 'google-default' AND source = 'calendar'",
       )
       .get();
     ok(state, "fixture row exists");
@@ -133,7 +133,9 @@ describe("google oauth + sync", () => {
       ),
     );
     deps.db
-      .query("INSERT INTO integration_state (source, cursor, ok) VALUES ('calendar','st-old',1)")
+      .query(
+        "UPDATE account_sources SET cursor='st-old', ok=1 WHERE account_id='google-default' AND source='calendar'",
+      )
       .run();
     const outcome = await syncGoogleCalendar(deps);
     expect(outcome.ok).toBe(true);
@@ -156,7 +158,9 @@ describe("google oauth + sync", () => {
       ),
     );
     deps.db
-      .query("INSERT INTO integration_state (source, cursor, ok) VALUES ('calendar','st-bad',1)")
+      .query(
+        "UPDATE account_sources SET cursor='st-bad', ok=1 WHERE account_id='google-default' AND source='calendar'",
+      )
       .run();
     const outcome = await syncGoogleCalendar(deps);
     expect(outcome).toMatchObject({ ok: true, error: "full_resync_after_400", cursor: "st-fresh" });
@@ -178,7 +182,11 @@ describe("google oauth + sync", () => {
     const first = await syncGoogleCalendar(deps);
     expect(first.ok).toBe(true);
     // seed a cursor, then force the 410 path
-    deps.db.query("UPDATE integration_state SET cursor = 'old' WHERE source = 'calendar'").run();
+    deps.db
+      .query(
+        "UPDATE account_sources SET cursor = 'old' WHERE account_id = 'google-default' AND source = 'calendar'",
+      )
+      .run();
     const second = await syncGoogleCalendar(deps);
     expect(second).toMatchObject({ ok: true, error: "full_resync_after_410", cursor: "st-2" });
   });
@@ -202,7 +210,7 @@ describe("google oauth + sync", () => {
     );
     deps.db
       .query(
-        "INSERT INTO integration_state (source, cursor, ok) VALUES ('gmail', 'old-history', 1)",
+        "UPDATE account_sources SET cursor='old-history', ok=1 WHERE account_id='google-default' AND source='gmail'",
       )
       .run();
     const outcome = await syncGoogleGmail(deps);
@@ -223,13 +231,15 @@ describe("google oauth + sync", () => {
       ),
     );
     deps.db
-      .query("INSERT INTO integration_state (source, cursor, ok) VALUES ('gmail','mail-0',1)")
+      .query(
+        "UPDATE account_sources SET cursor='mail-0', ok=1 WHERE account_id='google-default' AND source='gmail'",
+      )
       .run();
     await syncGoogleCalendar(deps);
     await syncGoogleGmail(deps);
     const rows = deps.db
       .query<{ source: string; cursor: string }, SQLQueryBindings[]>(
-        "SELECT source, cursor FROM integration_state ORDER BY source",
+        "SELECT source, cursor FROM account_sources WHERE account_id = 'google-default' ORDER BY source",
       )
       .all();
     expect(rows).toEqual([
@@ -265,7 +275,7 @@ describe("canvas", () => {
     expect(outcome).toMatchObject({ ok: true, count: 2 });
     const ids = database
       .query<{ item_id: string }, SQLQueryBindings[]>(
-        "SELECT item_id FROM sync_items WHERE source = 'canvas' ORDER BY at",
+        "SELECT item_id FROM sync_items WHERE account_id = 'canvas-default' AND source = 'canvas' ORDER BY at",
       )
       .all();
     expect(ids.map((row) => row.item_id)).toEqual(["1", "2"]);
@@ -307,18 +317,18 @@ describe("briefing schedule and composition", () => {
     const events = new EventLog(database);
     database
       .query(
-        "INSERT INTO sync_items (source,item_id,title,at,detail,url,updated_at) VALUES ('calendar','e1','팀 회의','2026-11-24T11:00:00Z','',NULL,'x')",
+        "INSERT INTO sync_items (account_id,source,item_id,title,at,detail,url,updated_at) VALUES ('google-default','calendar','e1','팀 회의','2026-11-24T11:00:00Z','',NULL,'x')",
       )
       .run();
     database
       .query(
-        "INSERT INTO sync_items (source,item_id,title,at,detail,url,updated_at) VALUES ('canvas','a1','보고서','2026-11-25T00:00:00Z','과목 A',NULL,'x')",
+        "INSERT INTO sync_items (account_id,source,item_id,title,at,detail,url,updated_at) VALUES ('canvas-default','canvas','a1','보고서','2026-11-25T00:00:00Z','과목 A',NULL,'x')",
       )
       .run();
 
-    const content = composeBriefing(database, now, 36, "07:30");
-    expect(content.text).toContain("[calendar:e1]");
-    expect(content.text).toContain("[lms:a1]");
+    const content = composeBriefing(database, now, { horizonHours: 36, slot: "07:30" });
+    expect(content.text).toContain("[calendar:google-default:e1]");
+    expect(content.text).toContain("[lms:canvas-default:a1]");
 
     const first = storeBriefing(database, content, now);
     const second = storeBriefing(database, content, now);

@@ -5,6 +5,8 @@ import { EventLog } from "./events/log";
 import { createRegistry } from "./tools/registry";
 import { builtinTools, WORK_POLICY } from "./tools/builtins";
 import { personalTools } from "./tools/personal";
+import { scheduleTools } from "./tools/schedules";
+import { createBuiltinExecutor } from "./scheduler/builtins";
 import { openAiStream } from "./providers/openai";
 import { settleExpiredRuns } from "./core/run-state";
 import {
@@ -24,6 +26,7 @@ export type HarnessConfig = {
   readonly dbPath: string;
   readonly webRoot: string;
   readonly workspaceRoot: string;
+  readonly scriptsRoot: string;
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;
@@ -50,11 +53,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     );
   }
   const dataDir = resolve(appRoot, "data");
+  const workspaceRoot = resolve(env["HARNESS_WORKSPACE"] ?? join(dataDir, "workspace"));
   return {
     port: Number(env["PORT"] ?? "8799"),
     dbPath: resolve(env["HARNESS_DB"] ?? join(dataDir, "harness.db")),
     webRoot: resolve(appRoot, "web/dist"),
-    workspaceRoot: resolve(env["HARNESS_WORKSPACE"] ?? join(dataDir, "workspace")),
+    workspaceRoot,
+    scriptsRoot: resolve(env["HARNESS_SCRIPTS_ROOT"] ?? join(workspaceRoot, "..", "scripts")),
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
     model: env["MODEL_NAME"] ?? "mock-model",
@@ -80,6 +85,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: () => void } {
   if (config.dbPath !== ":memory:") mkdirSync(resolve(config.dbPath, ".."), { recursive: true });
   mkdirSync(config.workspaceRoot, { recursive: true });
+  mkdirSync(config.scriptsRoot, { recursive: true });
   const db = openDatabase(config.dbPath);
   const events = new EventLog(db);
   const stream = openAiStream({
@@ -100,6 +106,7 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
         redirectUri: config.googleRedirectUri,
       },
     }),
+    ...scheduleTools({ db, events }),
   ]);
   const work: WorkDeps = {
     db,
@@ -110,6 +117,25 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     limits: WORK_LIMITS,
     maxConcurrent: config.maxConcurrent,
     leaseMs: config.leaseMs,
+    scriptsRoot: config.scriptsRoot,
+    scriptExecutor: createBuiltinExecutor({
+      google: {
+        db,
+        events,
+        vaultSecret: config.sessionSecret,
+        config: {
+          clientId: config.googleClientId,
+          clientSecret: config.googleClientSecret,
+          redirectUri: config.googleRedirectUri,
+        },
+      },
+      canvas: { db, events, config: { baseUrl: config.canvasBaseUrl, token: config.canvasToken } },
+      push: {
+        publicKey: config.vapidPublicKey,
+        privateKey: config.vapidPrivateKey,
+        subject: config.vapidSubject,
+      },
+    }),
   };
   return { work, close: () => db.close() };
 }

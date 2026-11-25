@@ -38,17 +38,12 @@ import {
   verifyCookie,
   type AuthConfig,
 } from "./auth";
-import {
-  authUrl,
-  exchangeCode,
-  loadTokens,
-  saveTokens,
-  syncGoogleCalendar,
-  syncGoogleGmail,
-  type GoogleConfig,
-  type GoogleDeps,
-} from "../integrations/google";
-import { syncCanvas, type CanvasConfig } from "../integrations/canvas";
+import type { GoogleDeps } from "../integrations/google";
+import type { CanvasConfig } from "../integrations/canvas";
+import { listAccounts } from "../integrations/accounts";
+import { syncEnabledSources } from "../integrations/sync";
+import { handleAccountRequest } from "./account-routes";
+import { handleScheduleRequest } from "./schedule-routes";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
 import { latestBriefing, runBriefing } from "../scheduler/compose";
 import { syncStates } from "../integrations/normalize";
@@ -58,9 +53,7 @@ export type AppDeps = {
   readonly events: EventLog;
   readonly conversation: ConversationDeps;
   readonly work: WorkDeps;
-  readonly google: Pick<GoogleDeps, "db" | "events" | "vaultSecret"> & {
-    readonly config: GoogleConfig;
-  };
+  readonly google: GoogleDeps;
   readonly canvas: {
     readonly db: Database;
     readonly events: EventLog;
@@ -231,9 +224,17 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
 
+    const accountResponse = await handleAccountRequest(request, deps);
+    if (accountResponse) return accountResponse;
+    const scheduleResponse = await handleScheduleRequest(request, deps);
+    if (scheduleResponse) return scheduleResponse;
+
     if (path === "/api/connections" && request.method === "GET") {
       return json({
-        googleConnected: loadTokens(deps.db, deps.google.vaultSecret) !== null,
+        googleConnected: listAccounts(deps.db, {
+          canvasConfigured:
+            deps.canvas.config.baseUrl.length > 0 && deps.canvas.config.token.length > 0,
+        }).some((account) => account.provider === "google" && account.connected),
         canvasConfigured:
           deps.canvas.config.baseUrl.length > 0 && deps.canvas.config.token.length > 0,
         pushConfigured: pushConfigured(deps.vapid),
@@ -242,47 +243,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/connections/sync" && request.method === "POST") {
-      const calendar = await syncGoogleCalendar(deps.google);
-      const gmail = await syncGoogleGmail(deps.google);
-      const canvas = await syncCanvas(deps.canvas);
-      return json({ results: [calendar, gmail, canvas] });
-    }
-
-    if (path === "/api/oauth/google/start" && request.method === "GET") {
-      if (deps.google.config.clientId.length === 0)
-        return json({ error: "google_not_configured" }, 409);
-      return new Response(null, {
-        status: 302,
-        headers: { location: authUrl(deps.google.config, issueCookie(deps.auth)) },
-      });
-    }
-
-    if (path === "/api/oauth/google/callback" && request.method === "GET") {
-      const code = url.searchParams.get("code");
-      const state = url.searchParams.get("state");
-      if (!code || !verifyCookie(deps.auth, state))
-        return Response.redirect(`${url.origin}/?oauth=error`, 302);
-      try {
-        const tokens = await exchangeCode(deps.google.config, code);
-        saveTokens(deps.db, deps.google.vaultSecret, tokens);
-        deps.events.append({
-          kind: "integration.connected",
-          payload: { provider: "google", scope: tokens.scope },
-        });
-        await syncGoogleCalendar(deps.google);
-        await syncGoogleGmail(deps.google);
-        return Response.redirect(`${url.origin}/?oauth=ok`, 302);
-      } catch (error) {
-        deps.events.append({
-          kind: "integration.sync_state",
-          payload: {
-            source: "google",
-            ok: false,
-            error: error instanceof Error ? error.message : "oauth_failed",
-          },
-        });
-        return Response.redirect(`${url.origin}/?oauth=error`, 302);
-      }
+      return json({ results: await syncEnabledSources(deps) });
     }
 
     if (path === "/api/push/key" && request.method === "GET")

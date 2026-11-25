@@ -1,3 +1,6 @@
+import { ACCOUNT_MIGRATION } from "./account-migration";
+import { SCHEDULE_MIGRATION } from "./schedule-migration";
+
 export type Migration = {
   readonly version: number;
   readonly sql: string;
@@ -203,4 +206,6 @@ CREATE TABLE sync_items (
 CREATE INDEX sync_items_at ON sync_items(at);
 `,
   },
+  { version: 6, sql: ACCOUNT_MIGRATION },
+  { version: 7, sql: SCHEDULE_MIGRATION },
 ];

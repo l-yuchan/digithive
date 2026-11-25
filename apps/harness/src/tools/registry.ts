@@ -1,6 +1,8 @@
 import type { ToolSpec } from "../providers/openai";
 
 export type ToolRuntime = ToolSpec & {
+  /** Explicitly exposed to the conversation surface as well as work runs. */
+  readonly conversation?: boolean;
   /** Policy action used for the approval decision, e.g. "shell" or "read". */
   readonly action: string;
   readonly execute: (
