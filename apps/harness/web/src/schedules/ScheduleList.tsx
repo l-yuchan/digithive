@@ -20,7 +20,9 @@ function executorLabel(schedule: Schedule): string {
     case "agent":
       return "에이전트";
     case "builtin":
-      return schedule.executor.name === "sync_sources" ? "내장 · 연결 자료 수집" : "내장 · 브리핑 생성";
+      return schedule.executor.name === "sync_sources"
+        ? "내장 · 연결 자료 수집"
+        : "내장 · 브리핑 생성";
     case "script":
       return `스크립트 · ${schedule.executor.path}`;
     default:
@@ -53,40 +55,108 @@ export function ScheduleList({
   return (
     <ul className="schedule-list" data-testid="schedule-list">
       {schedules.map((schedule) => (
-        <li className={`card schedule-card${selectedId === schedule.id ? " selected" : ""}`} key={schedule.id} data-testid="schedule-item" data-schedule-id={schedule.id}>
+        <li
+          className={`card schedule-card${selectedId === schedule.id ? " selected" : ""}`}
+          key={schedule.id}
+          data-testid="schedule-item"
+          data-schedule-id={schedule.id}
+        >
           <div className="card-head">
             <h3>{schedule.title}</h3>
-            <span className={`badge ${schedule.enabled ? "succeeded" : ""}`}>{schedule.enabled ? "사용 중" : "일시정지됨"}</span>
+            <span className={`badge ${schedule.enabled ? "succeeded" : ""}`}>
+              {schedule.enabled ? "사용 중" : "일시정지됨"}
+            </span>
           </div>
           <p className="schedule-instruction">{schedule.instruction}</p>
           <p className="run-meta">{triggerLabel(schedule.trigger)}</p>
-          <p className="run-meta">{executorLabel(schedule)} · 제한 {schedule.timeoutSeconds}초</p>
           <p className="run-meta">
-            다음 실행: {schedule.enabled ? (schedule.nextRunAt ? formatDateTime(schedule.nextRunAt) : "없음") : "자동 실행 일시정지"}
+            {executorLabel(schedule)} · 제한 {schedule.timeoutSeconds}초
+          </p>
+          <p className="run-meta">
+            다음 실행:{" "}
+            {schedule.enabled
+              ? schedule.nextRunAt
+                ? formatDateTime(schedule.nextRunAt)
+                : "없음"
+              : "자동 실행 일시정지"}
           </p>
           <p className="run-meta">
             마지막 실행: {schedule.lastRun ? runStatusLabel(schedule.lastRun.status) : "기록 없음"}
             {schedule.lastRun?.settledAt ? ` · ${formatDateTime(schedule.lastRun.settledAt)}` : ""}
           </p>
           <div className="run-actions">
-            <button className="ghost" type="button" disabled={busy} onClick={() => onEdit(schedule)}>수정</button>
-            <button className="ghost" type="button" disabled={busy} aria-pressed={selectedId === schedule.id} onClick={() => onHistory(schedule.id)}>실행 기록</button>
-            <button className="primary" type="button" disabled={busy} onClick={() => onRun(schedule)} data-testid="schedule-run-now">
+            <button
+              className="ghost"
+              type="button"
+              disabled={busy}
+              onClick={() => onEdit(schedule)}
+            >
+              수정
+            </button>
+            <button
+              className="ghost"
+              type="button"
+              disabled={busy}
+              aria-pressed={selectedId === schedule.id}
+              onClick={() => onHistory(schedule.id)}
+            >
+              실행 기록
+            </button>
+            <button
+              className="primary"
+              type="button"
+              disabled={busy}
+              onClick={() => onRun(schedule)}
+              data-testid="schedule-run-now"
+            >
               {busyKey === `run:${schedule.id}` ? "실행 요청 중…" : "지금 실행"}
             </button>
-            <button className="ghost" type="button" disabled={busy} onClick={() => onToggle(schedule)}>
+            <button
+              className="ghost"
+              type="button"
+              disabled={busy}
+              onClick={() => onToggle(schedule)}
+            >
               {schedule.enabled ? "일시정지" : "다시 사용"}
             </button>
             {confirmDelete === schedule.id ? (
               <>
-                <button className="ghost danger-button" type="button" disabled={busy} onClick={() => { setConfirmDelete(null); onDelete(schedule); }} data-testid="schedule-delete-confirm">삭제 확인</button>
-                <button className="ghost" type="button" disabled={busy} onClick={() => setConfirmDelete(null)}>삭제 취소</button>
+                <button
+                  className="ghost danger-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmDelete(null);
+                    onDelete(schedule);
+                  }}
+                  data-testid="schedule-delete-confirm"
+                >
+                  삭제 확인
+                </button>
+                <button
+                  className="ghost"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(null)}
+                >
+                  삭제 취소
+                </button>
               </>
             ) : (
-              <button className="ghost danger-button" type="button" disabled={busy} onClick={() => setConfirmDelete(schedule.id)} data-testid="schedule-delete">삭제</button>
+              <button
+                className="ghost danger-button"
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirmDelete(schedule.id)}
+                data-testid="schedule-delete"
+              >
+                삭제
+              </button>
             )}
           </div>
-          {confirmDelete === schedule.id ? <p className="run-meta">스케줄 정의만 삭제하며 기존 실행 기록은 보존합니다.</p> : null}
+          {confirmDelete === schedule.id ? (
+            <p className="run-meta">스케줄 정의만 삭제하며 기존 실행 기록은 보존합니다.</p>
+          ) : null}
         </li>
       ))}
     </ul>

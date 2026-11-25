@@ -104,9 +104,7 @@ export function updateSchedule(
     parsed.trigger !== undefined &&
     JSON.stringify(parsed.trigger) !== JSON.stringify(current.trigger);
   const shouldRecompute =
-    triggerChanged ||
-    (merged.enabled && !current.enabled) ||
-    (!merged.enabled && current.enabled);
+    triggerChanged || (merged.enabled && !current.enabled) || (!merged.enabled && current.enabled);
   const nextRunAt = shouldRecompute
     ? nextFor(merged.trigger, merged.enabled, now)
     : merged.enabled
@@ -130,7 +128,12 @@ export function updateSchedule(
 }
 
 /** Deletes the definition; occurrences and their runs survive with a null link. */
-export function deleteSchedule(db: Database, id: string, events?: EventLog, now = Date.now()): boolean {
+export function deleteSchedule(
+  db: Database,
+  id: string,
+  events?: EventLog,
+  now = Date.now(),
+): boolean {
   return db
     .transaction(() => {
       const existing = readSchedule(db, id);

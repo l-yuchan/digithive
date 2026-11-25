@@ -11,11 +11,14 @@ import {
 import { AccountCard } from "./AccountCard";
 import { readOAuthError } from "./oauth";
 
-function configuredLabel(state: AccountsResponse | null, failed: boolean, configured: boolean): string {
+function configuredLabel(
+  state: AccountsResponse | null,
+  failed: boolean,
+  configured: boolean,
+): string {
   if (state === null) return failed ? "확인 불가" : "확인 중";
   return configured ? "설정됨" : "미설정";
 }
-
 
 export function AccountsPanel({ onChanged }: { readonly onChanged: () => void }) {
   const [state, setState] = useState<AccountsResponse | null>(null);
@@ -72,7 +75,12 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
   const toggleSource = (account: Account, source: AccountSource["source"], enabled: boolean) => {
     reportAsync(
       runAction(`source:${account.id}:${source}`, () =>
-        sendJson("PATCH", `/api/accounts/${encodeURIComponent(account.id)}/sources/${source}`, { enabled }, z.unknown()),
+        sendJson(
+          "PATCH",
+          `/api/accounts/${encodeURIComponent(account.id)}/sources/${source}`,
+          { enabled },
+          z.unknown(),
+        ),
       ),
       (error) => setActionError(String(error)),
     );
@@ -81,19 +89,30 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
   const remove = (account: Account) => {
     reportAsync(
       runAction(`delete:${account.id}`, async () => {
-        await sendJson("DELETE", `/api/accounts/${encodeURIComponent(account.id)}`, undefined, z.unknown());
+        await sendJson(
+          "DELETE",
+          `/api/accounts/${encodeURIComponent(account.id)}`,
+          undefined,
+          z.unknown(),
+        );
         setConfirmDelete(null);
       }),
       (error) => setActionError(String(error)),
     );
   };
 
-  const visibleAccounts = state?.accounts.filter(
-    (account) => account.id !== "google-default" || account.provider !== "google" || account.connected,
-  ) ?? [];
+  const visibleAccounts =
+    state?.accounts.filter(
+      (account) =>
+        account.id !== "google-default" || account.provider !== "google" || account.connected,
+    ) ?? [];
 
   const addGoogle = (
-    <a className="primary button-link" href={apiUrl("/api/oauth/google/start")} data-testid="google-connect">
+    <a
+      className="primary button-link"
+      href={apiUrl("/api/oauth/google/start")}
+      data-testid="google-connect"
+    >
       Google 계정 추가
     </a>
   );
@@ -105,14 +124,21 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
           <h2>계정</h2>
           <div className="run-actions compact-actions">
             {state && visibleAccounts.length > 0 && state.googleConfigured ? addGoogle : null}
-            <button className="ghost" type="button" disabled={refreshing || busyKey !== null} onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))} data-testid="accounts-refresh">
+            <button
+              className="ghost"
+              type="button"
+              disabled={refreshing || busyKey !== null}
+              onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))}
+              data-testid="accounts-refresh"
+            >
               {refreshing ? "새로고침 중…" : "새로고침"}
             </button>
           </div>
         </div>
         <div className="configuration-states">
           <span className={`badge ${state?.googleConfigured === false ? "failed" : ""}`}>
-            Google OAuth · {configuredLabel(state, loadError !== null, state?.googleConfigured ?? false)}
+            Google OAuth ·{" "}
+            {configuredLabel(state, loadError !== null, state?.googleConfigured ?? false)}
           </span>
           <span className={`badge ${state?.canvasConfigured === false ? "failed" : ""}`}>
             Canvas · {configuredLabel(state, loadError !== null, state?.canvasConfigured ?? false)}
@@ -128,21 +154,38 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
       {loadError ? (
         <div className="error-card" role="alert" data-testid="accounts-load-error">
           <p className="error">계정 상태를 불러오지 못했습니다: {loadError}</p>
-          <button className="ghost" type="button" disabled={refreshing} onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))}>
+          <button
+            className="ghost"
+            type="button"
+            disabled={refreshing}
+            onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))}
+          >
             다시 시도
           </button>
         </div>
       ) : null}
-      {actionError ? <p className="error" role="alert">{actionError}</p> : null}
+      {actionError ? (
+        <p className="error" role="alert">
+          {actionError}
+        </p>
+      ) : null}
 
       {state === null ? (
         <div className="card empty-state">
-          <p className="run-meta">{loadError ? "계정 상태를 확인할 수 없습니다. 위의 다시 시도를 눌러주세요." : "계정 상태를 불러오는 중입니다."}</p>
+          <p className="run-meta">
+            {loadError
+              ? "계정 상태를 확인할 수 없습니다. 위의 다시 시도를 눌러주세요."
+              : "계정 상태를 불러오는 중입니다."}
+          </p>
         </div>
       ) : visibleAccounts.length === 0 ? (
         <div className="card empty-state" data-testid="accounts-empty">
           <p className="run-meta">연결된 계정이 없습니다.</p>
-          {state.googleConfigured ? addGoogle : <p className="run-meta">Google OAuth가 설정되지 않아 계정을 추가할 수 없습니다.</p>}
+          {state.googleConfigured ? (
+            addGoogle
+          ) : (
+            <p className="run-meta">Google OAuth가 설정되지 않아 계정을 추가할 수 없습니다.</p>
+          )}
         </div>
       ) : (
         visibleAccounts.map((account) => (
@@ -152,7 +195,14 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
             googleConfigured={state.googleConfigured}
             busyKey={busyKey}
             confirmDelete={confirmDelete === account.id}
-            onSync={() => reportAsync(runAction(`sync:${account.id}`, () => postJson(`/api/accounts/${encodeURIComponent(account.id)}/sync`, {}, z.unknown())), (error) => setActionError(String(error)))}
+            onSync={() =>
+              reportAsync(
+                runAction(`sync:${account.id}`, () =>
+                  postJson(`/api/accounts/${encodeURIComponent(account.id)}/sync`, {}, z.unknown()),
+                ),
+                (error) => setActionError(String(error)),
+              )
+            }
             onToggleSource={(source, enabled) => toggleSource(account, source, enabled)}
             onDeleteStart={() => setConfirmDelete(account.id)}
             onDeleteCancel={() => setConfirmDelete(null)}

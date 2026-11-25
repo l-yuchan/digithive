@@ -2,7 +2,10 @@ import type { Account, AccountSource } from "./accounts";
 import { SOURCE_LABELS } from "./accounts";
 import { formatDateTime } from "../format";
 
-function sourceState(source: AccountSource, connected: boolean): { label: string; className: string } {
+function sourceState(
+  source: AccountSource,
+  connected: boolean,
+): { label: string; className: string } {
   if (!source.enabled) return { label: "일시정지됨", className: "" };
   if (!connected) return { label: "연결 필요", className: "failed" };
   if (!source.lastAttemptAt && !source.lastSyncAt && !source.error)
@@ -51,7 +54,8 @@ export function AccountSources({
             <p className="run-meta">
               마지막 성공: {source.lastSyncAt ? formatDateTime(source.lastSyncAt) : "기록 없음"}
               <br />
-              마지막 시도: {source.lastAttemptAt ? formatDateTime(source.lastAttemptAt) : "기록 없음"}
+              마지막 시도:{" "}
+              {source.lastAttemptAt ? formatDateTime(source.lastAttemptAt) : "기록 없음"}
             </p>
             {source.error ? <p className="error">최근 오류: {source.error}</p> : null}
           </li>

@@ -78,9 +78,7 @@ async function writeScript(root: string, name: string, source: string): Promise<
 }
 
 function resultOf(db: Database, runId: string): Record<string, unknown> {
-  return z.record(z.string(), z.unknown()).parse(
-    JSON.parse(getRun(db, runId)?.resultJson ?? "{}"),
-  );
+  return z.record(z.string(), z.unknown()).parse(JSON.parse(getRun(db, runId)?.resultJson ?? "{}"));
 }
 
 function runState(db: Database, runId: string): { role: string; content: string | null }[] {
@@ -220,7 +218,7 @@ describe("local script execution", () => {
 
   test("a short deps.limits totalMs still bounds a run whose persisted timeout is hours", async () => {
     const { db, deps, root } = setup();
-    await writeScript(root, "sleep.ts", 'await Bun.sleep(60_000);\n');
+    await writeScript(root, "sleep.ts", "await Bun.sleep(60_000);\n");
     const run = enqueueRun(db, deps.events, {
       goal: "bounded",
       executor: { kind: "script", path: "sleep.ts", args: [] },
@@ -240,11 +238,7 @@ describe("local script execution", () => {
 
   test("script output is bounded and marked truncated", async () => {
     const { db, deps, root } = setup();
-    await writeScript(
-      root,
-      "loud.ts",
-      'process.stdout.write("x".repeat(200_000));\n',
-    );
+    await writeScript(root, "loud.ts", 'process.stdout.write("x".repeat(200_000));\n');
     const run = enqueueRun(db, deps.events, {
       goal: "loud",
       executor: { kind: "script", path: "loud.ts", args: [] },
@@ -378,7 +372,9 @@ describe("builtin and agent executors", () => {
     let round = 0;
     const requests: { role: string; content: string }[][] = [];
     const stream: StreamFn = async function* (messages) {
-      requests.push(messages.map((message) => ({ role: message.role, content: message.content ?? "" })));
+      requests.push(
+        messages.map((message) => ({ role: message.role, content: message.content ?? "" })),
+      );
       if (++round === 1) {
         yield {
           type: "tool_call",
@@ -412,15 +408,16 @@ describe("builtin and agent executors", () => {
     decideApproval(deps, { runId: run.id, approvalId: approval.id, decision: "approve" });
     expect(await executeRun(deps, requiredClaim(db, deps.events, "w2"))).toBe("succeeded");
     expect(runState(db, run.id).filter((message) => message.role === "system")).toHaveLength(1);
-    expect(
-      (requests.at(-1) ?? []).filter((message) => message.role === "system"),
-    ).toHaveLength(1);
+    expect((requests.at(-1) ?? []).filter((message) => message.role === "system")).toHaveLength(1);
   });
 
   test("delegation completion and permission context survive the shared rebuild", async () => {
     let captured: { role: string; content: string }[] = [];
     const stream: StreamFn = async function* (messages) {
-      captured = messages.map((message) => ({ role: message.role, content: message.content ?? "" }));
+      captured = messages.map((message) => ({
+        role: message.role,
+        content: message.content ?? "",
+      }));
       yield { type: "done", finishReason: "stop" };
     };
     const { db, deps } = setup(stream);

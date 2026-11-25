@@ -80,7 +80,9 @@ export function rowToSchedule(row: ScheduleRow): Schedule {
 }
 
 export function readSchedule(db: Database, id: string): ScheduleRow | null {
-  return db.query<ScheduleRow, SQLQueryBindings[]>(`${SCHEDULE_SELECT} WHERE id = ?`).get(id) ?? null;
+  return (
+    db.query<ScheduleRow, SQLQueryBindings[]>(`${SCHEDULE_SELECT} WHERE id = ?`).get(id) ?? null
+  );
 }
 
 export function nextFor(trigger: ScheduleTrigger, enabled: boolean, now: number): string | null {

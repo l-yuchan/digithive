@@ -141,9 +141,14 @@ describe("schedule definitions", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.scheduled_for).toBe(new Date(BASE + 300_000).toISOString());
     expect(rows[0]?.manual).toBe(0);
-    const run = getRun(db, db.query<{ run_id: string }, SQLQueryBindings[]>(
-      "SELECT run_id FROM schedule_occurrences WHERE schedule_id = ?",
-    ).get(schedule.id)?.run_id ?? "");
+    const run = getRun(
+      db,
+      db
+        .query<{ run_id: string }, SQLQueryBindings[]>(
+          "SELECT run_id FROM schedule_occurrences WHERE schedule_id = ?",
+        )
+        .get(schedule.id)?.run_id ?? "",
+    );
     expect(run?.origin).toBe("work");
     expect(run?.goal).toBe("자료를 수집한다");
     expect(run?.executorJson).toBe('{"kind":"builtin","name":"sync_sources"}');
@@ -201,7 +206,13 @@ describe("schedule definitions", () => {
     expect(dispatchDueSchedules(deps, at + 1).enqueued).toBe(1);
     expect(getSchedule(db, schedule.id)?.nextRunAt).toBeNull();
     expect(dispatchDueSchedules(deps, at + 86_400_000).enqueued).toBe(0);
-    expect(count(db, "SELECT count(*) AS n FROM schedule_occurrences WHERE schedule_id = ?", schedule.id)).toBe(1);
+    expect(
+      count(
+        db,
+        "SELECT count(*) AS n FROM schedule_occurrences WHERE schedule_id = ?",
+        schedule.id,
+      ),
+    ).toBe(1);
   });
 
   test("daily DST fall-back fires once for the repeated local time", () => {
@@ -236,10 +247,9 @@ describe("schedule definitions", () => {
     expect(slots).toEqual(["2026-11-01T01:30:00"]);
     expect(getSchedule(db, schedule.id)?.nextRunAt).toBe("2026-11-02T06:30:00.000Z");
 
-    db.query("UPDATE runs SET status='succeeded', settled_at=? WHERE id IN (SELECT run_id FROM schedule_occurrences WHERE schedule_id=?)").run(
-      new Date(Date.parse("2026-11-01T07:00:00.000Z")).toISOString(),
-      schedule.id,
-    );
+    db.query(
+      "UPDATE runs SET status='succeeded', settled_at=? WHERE id IN (SELECT run_id FROM schedule_occurrences WHERE schedule_id=?)",
+    ).run(new Date(Date.parse("2026-11-01T07:00:00.000Z")).toISOString(), schedule.id);
     expect(dispatchDueSchedules(deps, Date.parse("2026-11-02T06:30:01.000Z")).enqueued).toBe(1);
     expect(
       db
@@ -356,9 +366,7 @@ describe("schedule definitions", () => {
   test("invalid triggers, time zones, deadlines and executors are rejected", () => {
     const { db } = setup();
     const base = intervalInput();
-    expect(() =>
-      createSchedule(db, { ...base, timeoutSeconds: 0 }),
-    ).toThrow();
+    expect(() => createSchedule(db, { ...base, timeoutSeconds: 0 })).toThrow();
     expect(() =>
       createSchedule(db, {
         ...base,
@@ -468,12 +476,7 @@ describe("schedule management routes", () => {
     const unrelated = await handleScheduleRequest(request("GET", "/api/runs"), deps);
     expect(unrelated).toBeNull();
     const kinds = deps.events.after(0).map((event) => event.kind);
-    for (const kind of [
-      "schedule.created",
-      "schedule.updated",
-      "schedule.run",
-      "schedule.deleted",
-    ])
+    for (const kind of ["schedule.created", "schedule.updated", "schedule.run", "schedule.deleted"])
       expect(kinds).toContain(kind);
   });
 
@@ -494,7 +497,8 @@ describe("schedule management routes", () => {
     expect(getRun(db, run.id)?.status).toBe("cancelled");
     expect(getRun(db, run.id)?.cancelIntent).toBe("user");
     expect(
-      db.query<{ status: string }, []>("SELECT status FROM approvals WHERE id='ap-1'").get()?.status,
+      db.query<{ status: string }, []>("SELECT status FROM approvals WHERE id='ap-1'").get()
+        ?.status,
     ).toBe("expired");
     expect(
       db.query<{ status: string }, []>("SELECT status FROM tool_calls WHERE id='tc-1'").get()
@@ -547,12 +551,7 @@ describe("schedule tools", () => {
     ).toBe(true);
     expect(count(db, "SELECT count(*) AS n FROM schedules")).toBe(0);
     const kinds = deps.events.after(0).map((event) => event.kind);
-    for (const kind of [
-      "schedule.created",
-      "schedule.updated",
-      "schedule.run",
-      "schedule.deleted",
-    ])
+    for (const kind of ["schedule.created", "schedule.updated", "schedule.run", "schedule.deleted"])
       expect(kinds).toContain(kind);
   });
 

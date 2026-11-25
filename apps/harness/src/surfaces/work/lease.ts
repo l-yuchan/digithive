@@ -19,7 +19,11 @@ export function keepLease(
   leaseMs: number,
   totalMs: number,
   now: () => number,
-): { readonly signal: AbortSignal; readonly close: () => void; readonly abort: (reason: Error) => void } {
+): {
+  readonly signal: AbortSignal;
+  readonly close: () => void;
+  readonly abort: (reason: Error) => void;
+} {
   const controller = new AbortController();
   const deadline = setTimeout(() => controller.abort(new Error("work_timeout")), totalMs);
   const heartbeat = setInterval(

@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-const RESULT_LABELS = { text: "결과", stdout: "표준 출력", stderr: "표준 오류", error: "오류" } as const;
+const RESULT_LABELS = {
+  text: "결과",
+  stdout: "표준 출력",
+  stderr: "표준 오류",
+  error: "오류",
+} as const;
 const RESULT_KEYS = ["text", "stdout", "stderr", "error"] as const;
 
 function displayValue(value: unknown): string {
@@ -20,9 +25,10 @@ export function RunResult({ resultJson }: { readonly resultJson: string | null }
 
   const record = z.record(z.string(), z.unknown()).safeParse(parsed);
   const entries = record.success
-    ? RESULT_KEYS
-        .filter((key) => Object.hasOwn(record.data, key) && record.data[key] !== null && record.data[key] !== "")
-        .map((key) => ({ key, value: record.data[key] }))
+    ? RESULT_KEYS.filter(
+        (key) =>
+          Object.hasOwn(record.data, key) && record.data[key] !== null && record.data[key] !== "",
+      ).map((key) => ({ key, value: record.data[key] }))
     : [];
 
   return (

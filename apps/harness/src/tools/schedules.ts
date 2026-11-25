@@ -30,8 +30,7 @@ export function scheduleTools(deps: ScheduleToolDeps): ToolRuntime[] {
   return [
     {
       name: "schedules_list",
-      description:
-        "저장된 일정 정의와 마지막 실행 상태를 나열합니다. 실행을 시작하지 않습니다.",
+      description: "저장된 일정 정의와 마지막 실행 상태를 나열합니다. 실행을 시작하지 않습니다.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
       action: "read",
       conversation: true,
@@ -39,8 +38,7 @@ export function scheduleTools(deps: ScheduleToolDeps): ToolRuntime[] {
     },
     {
       name: "schedules_edit",
-      description:
-        `일정 정의를 만들기·수정하기·삭제하거나 지금 실행을 큐에 넣습니다. trigger: ${TriggerDescription}. executor: ${ExecutorDescription}. create/update/delete는 실행하지 않습니다.`,
+      description: `일정 정의를 만들기·수정하기·삭제하거나 지금 실행을 큐에 넣습니다. trigger: ${TriggerDescription}. executor: ${ExecutorDescription}. create/update/delete는 실행하지 않습니다.`,
       parameters: {
         type: "object",
         properties: {

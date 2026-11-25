@@ -418,7 +418,18 @@ export function App() {
         onDelete={(id) => void removeSession(id)}
         onDeleteCancel={() => setConfirmDelete(null)}
       />
-      <main className="conversation" aria-label={view === "chat" ? "대화" : view === "work" ? "작업" : view === "schedules" ? "스케줄" : "연결"}>
+      <main
+        className="conversation"
+        aria-label={
+          view === "chat"
+            ? "대화"
+            : view === "work"
+              ? "작업"
+              : view === "schedules"
+                ? "스케줄"
+                : "연결"
+        }
+      >
         <nav className="tabs" role="tablist">
           <button
             type="button"

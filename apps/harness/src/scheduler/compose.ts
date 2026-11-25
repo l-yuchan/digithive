@@ -93,7 +93,14 @@ function rows(
     >(
       "SELECT i.account_id,a.label,i.item_id,i.title,i.at,i.detail FROM sync_items i JOIN account_sources s ON s.account_id=i.account_id AND s.source=i.source JOIN integration_accounts a ON a.id=i.account_id WHERE i.source=? AND s.enabled=1 AND (? IS NULL OR i.account_id=?) AND (i.at IS NULL OR (i.at>=? AND i.at<=?)) ORDER BY i.at LIMIT ?",
     )
-    .all(source, accountId ?? null, accountId ?? null, new Date(from).toISOString(), new Date(until).toISOString(), limit)
+    .all(
+      source,
+      accountId ?? null,
+      accountId ?? null,
+      new Date(from).toISOString(),
+      new Date(until).toISOString(),
+      limit,
+    )
     .map((row) => ({
       id: row["item_id"],
       title: row["title"],
@@ -121,7 +128,11 @@ function line(prefix: string, item: BriefingItem): string {
 export function composeBriefing(
   db: Database,
   now: number,
-  options: { readonly horizonHours?: number; readonly slot?: string; readonly accountId?: string } = {},
+  options: {
+    readonly horizonHours?: number;
+    readonly slot?: string;
+    readonly accountId?: string;
+  } = {},
 ): BriefingContent {
   const { horizonHours = 36, slot = "manual", accountId } = options;
   const until = now + horizonHours * 60 * 60 * 1_000;

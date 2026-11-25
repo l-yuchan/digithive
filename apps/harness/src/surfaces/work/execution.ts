@@ -27,8 +27,7 @@ export async function executeRun(deps: WorkDeps, run: RunRow): Promise<RunOutcom
     else deps.shutdownSignal.addEventListener("abort", onShutdown, { once: true });
   }
   try {
-    if (executor.kind !== "agent")
-      return await executeNonAgent(deps, run, executor, lease, now());
+    if (executor.kind !== "agent") return await executeNonAgent(deps, run, executor, lease, now());
     return await executeAgent(deps, run, lease, now, limits);
   } finally {
     deps.shutdownSignal?.removeEventListener("abort", onShutdown);

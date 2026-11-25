@@ -1,4 +1,10 @@
-import { ScheduleInputSchema, type Executor, type Schedule, type ScheduleInput, type Trigger } from "./scheduleTypes";
+import {
+  ScheduleInputSchema,
+  type Executor,
+  type Schedule,
+  type ScheduleInput,
+  type Trigger,
+} from "./scheduleTypes";
 
 export type ScheduleDraft = {
   readonly title: string;
@@ -25,17 +31,25 @@ function toDateTimeInput(value: string): string {
   return local.toISOString().slice(0, 16);
 }
 
-function fromTrigger(trigger: Trigger): Pick<ScheduleDraft, "onceAt" | "everySeconds" | "anchorAt" | "dailyTime" | "timeZone"> {
+function fromTrigger(
+  trigger: Trigger,
+): Pick<ScheduleDraft, "onceAt" | "everySeconds" | "anchorAt" | "dailyTime" | "timeZone"> {
   return {
-    onceAt: toDateTimeInput(trigger.kind === "once" ? trigger.at : new Date(Date.now() + 3_600_000).toISOString()),
+    onceAt: toDateTimeInput(
+      trigger.kind === "once" ? trigger.at : new Date(Date.now() + 3_600_000).toISOString(),
+    ),
     everySeconds: trigger.kind === "interval" ? String(trigger.everySeconds) : "900",
-    anchorAt: toDateTimeInput(trigger.kind === "interval" ? trigger.anchorAt : new Date().toISOString()),
+    anchorAt: toDateTimeInput(
+      trigger.kind === "interval" ? trigger.anchorAt : new Date().toISOString(),
+    ),
     dailyTime: trigger.kind === "daily" ? trigger.time : "07:30",
     timeZone: trigger.kind === "daily" ? trigger.timeZone : "Asia/Seoul",
   };
 }
 
-function fromExecutor(executor: Executor): Pick<ScheduleDraft, "builtinName" | "accountId" | "scriptPath" | "scriptArgs"> {
+function fromExecutor(
+  executor: Executor,
+): Pick<ScheduleDraft, "builtinName" | "accountId" | "scriptPath" | "scriptArgs"> {
   return {
     builtinName: executor.kind === "builtin" ? executor.name : "sync_sources",
     accountId: executor.kind === "builtin" ? (executor.accountId ?? "") : "",
@@ -51,20 +65,24 @@ export function createDraft(schedule: Schedule | null): ScheduleDraft {
     instruction: schedule?.instruction ?? "",
     enabled: schedule?.enabled ?? true,
     triggerKind: schedule?.trigger.kind ?? "daily",
-    ...(schedule ? fromTrigger(schedule.trigger) : {
-      onceAt: toDateTimeInput(new Date(now.getTime() + 3_600_000).toISOString()),
-      everySeconds: "900",
-      anchorAt: toDateTimeInput(now.toISOString()),
-      dailyTime: "07:30",
-      timeZone: "Asia/Seoul",
-    }),
+    ...(schedule
+      ? fromTrigger(schedule.trigger)
+      : {
+          onceAt: toDateTimeInput(new Date(now.getTime() + 3_600_000).toISOString()),
+          everySeconds: "900",
+          anchorAt: toDateTimeInput(now.toISOString()),
+          dailyTime: "07:30",
+          timeZone: "Asia/Seoul",
+        }),
     executorKind: schedule?.executor.kind ?? "agent",
-    ...(schedule ? fromExecutor(schedule.executor) : {
-      builtinName: "sync_sources" as const,
-      accountId: "",
-      scriptPath: "",
-      scriptArgs: "",
-    }),
+    ...(schedule
+      ? fromExecutor(schedule.executor)
+      : {
+          builtinName: "sync_sources" as const,
+          accountId: "",
+          scriptPath: "",
+          scriptArgs: "",
+        }),
     timeoutSeconds: String(schedule?.timeoutSeconds ?? 1800),
   };
 }
@@ -91,7 +109,10 @@ function positiveInteger(value: string, label: string, maximum: number): number 
 function scriptPath(value: string): string {
   const path = required(value, "스크립트 경로");
   if (path.length > 500) throw new Error("스크립트 경로는 500자 이하여야 합니다.");
-  if (/\s/.test(path)) throw new Error("경로에 공백이나 셸 명령어를 넣을 수 없습니다. 인자는 아래 칸에 줄당 하나씩 입력하세요.");
+  if (/\s/.test(path))
+    throw new Error(
+      "경로에 공백이나 셸 명령어를 넣을 수 없습니다. 인자는 아래 칸에 줄당 하나씩 입력하세요.",
+    );
   if (/[;&|$<>`'"\\]/.test(path) || path.includes(":") || path.startsWith("/"))
     throw new Error("서버 scripts 디렉터리 기준의 상대 파일 경로만 입력하세요.");
   if (path.split("/").some((part) => part.length === 0 || part === ".."))

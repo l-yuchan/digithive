@@ -44,7 +44,13 @@ export function AccountCard({
       <AccountSources account={account} disabled={busy} onToggle={onToggleSource} />
 
       <div className="run-actions">
-        <button className="ghost" type="button" disabled={busy} onClick={onSync} data-testid="account-sync">
+        <button
+          className="ghost"
+          type="button"
+          disabled={busy}
+          onClick={onSync}
+          data-testid="account-sync"
+        >
           {busyKey === `sync:${account.id}` ? "동기화 중…" : "이 계정 동기화"}
         </button>
         {account.provider === "google" && googleConfigured ? (
@@ -58,7 +64,13 @@ export function AccountCard({
         ) : null}
         {confirmDelete ? (
           <>
-            <button className="primary" type="button" disabled={busy} onClick={onDelete} data-testid="account-delete-confirm">
+            <button
+              className="primary"
+              type="button"
+              disabled={busy}
+              onClick={onDelete}
+              data-testid="account-delete-confirm"
+            >
               계정과 데이터 삭제
             </button>
             <button className="ghost" type="button" disabled={busy} onClick={onDeleteCancel}>
@@ -66,7 +78,13 @@ export function AccountCard({
             </button>
           </>
         ) : (
-          <button className="ghost danger-button" type="button" disabled={busy} onClick={onDeleteStart} data-testid="account-delete">
+          <button
+            className="ghost danger-button"
+            type="button"
+            disabled={busy}
+            onClick={onDeleteStart}
+            data-testid="account-delete"
+          >
             계정 삭제
           </button>
         )}

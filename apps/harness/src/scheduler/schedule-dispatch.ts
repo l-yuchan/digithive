@@ -87,7 +87,9 @@ export function dispatchDueSchedules(
   let enqueued = 0;
   let skipped = 0;
   const rows = deps.db
-    .query<ScheduleRow, SQLQueryBindings[]>(`${SCHEDULE_SELECT} WHERE enabled = 1 ORDER BY created_at`)
+    .query<ScheduleRow, SQLQueryBindings[]>(
+      `${SCHEDULE_SELECT} WHERE enabled = 1 ORDER BY created_at`,
+    )
     .all();
   for (const row of rows) {
     const schedule = rowToSchedule(row);

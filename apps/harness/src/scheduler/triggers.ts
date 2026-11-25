@@ -139,21 +139,17 @@ function dateKey(parts: { year: number; month: number; day: number }): string {
   ).padStart(2, "0")}`;
 }
 
-function dailySlotFor(trigger: Extract<ScheduleTrigger, { kind: "daily" }>, date: {
-  year: number;
-  month: number;
-  day: number;
-}): DueSlot | null {
+function dailySlotFor(
+  trigger: Extract<ScheduleTrigger, { kind: "daily" }>,
+  date: {
+    year: number;
+    month: number;
+    day: number;
+  },
+): DueSlot | null {
   const [hour, minute] = trigger.time.split(":").map(Number);
   if (hour === undefined || minute === undefined) return null;
-  const instant = wallToInstant(
-    date.year,
-    date.month,
-    date.day,
-    hour,
-    minute,
-    trigger.timeZone,
-  );
+  const instant = wallToInstant(date.year, date.month, date.day, hour, minute, trigger.timeZone);
   if (instant === null) return null;
   return { instant, scheduledFor: `${dateKey(date)}T${trigger.time}:00` };
 }

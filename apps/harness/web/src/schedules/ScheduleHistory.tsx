@@ -79,7 +79,10 @@ export function ScheduleHistory({
   const active = runs?.some((run) => ACTIVE_STATUSES.has(run.status)) ?? false;
   useEffect(() => {
     if (!active) return undefined;
-    const timer = window.setInterval(() => reportAsync(load(), (error) => setLoadError(String(error))), 2_000);
+    const timer = window.setInterval(
+      () => reportAsync(load(), (error) => setLoadError(String(error))),
+      2_000,
+    );
     return () => window.clearInterval(timer);
   }, [active, load]);
 
@@ -101,7 +104,11 @@ export function ScheduleHistory({
     if (!run.pendingApprovalId) return;
     reportAsync(
       runAction(`${decision}:${run.id}`, () =>
-        postJson(`/api/runs/${encodeURIComponent(run.id)}/approvals/${encodeURIComponent(run.pendingApprovalId ?? "")}`, { decision }, z.unknown()),
+        postJson(
+          `/api/runs/${encodeURIComponent(run.id)}/approvals/${encodeURIComponent(run.pendingApprovalId ?? "")}`,
+          { decision },
+          z.unknown(),
+        ),
       ),
       (error) => setActionError(String(error)),
     );
@@ -112,7 +119,13 @@ export function ScheduleHistory({
       <div className="card">
         <div className="card-head">
           <h2>실행 기록 · {schedule.title}</h2>
-          <button className="ghost" type="button" disabled={refreshing} onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))} data-testid="schedule-history-refresh">
+          <button
+            className="ghost"
+            type="button"
+            disabled={refreshing}
+            onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))}
+            data-testid="schedule-history-refresh"
+          >
             {refreshing ? "새로고침 중…" : "새로고침"}
           </button>
         </div>
@@ -121,30 +134,76 @@ export function ScheduleHistory({
       {loadError ? (
         <div className="error-card" role="alert">
           <p className="error">실행 기록을 불러오지 못했습니다: {loadError}</p>
-          <button className="ghost" type="button" disabled={refreshing} onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))}>다시 시도</button>
+          <button
+            className="ghost"
+            type="button"
+            disabled={refreshing}
+            onClick={() => reportAsync(refresh(), (error) => setLoadError(String(error)))}
+          >
+            다시 시도
+          </button>
         </div>
       ) : null}
-      {actionError ? <p className="error" role="alert">{actionError}</p> : null}
+      {actionError ? (
+        <p className="error" role="alert">
+          {actionError}
+        </p>
+      ) : null}
       {runs === null ? (
-        <div className="card empty-state"><p className="run-meta">{loadError ? "실행 기록을 확인할 수 없습니다." : "실행 기록을 불러오는 중입니다."}</p></div>
+        <div className="card empty-state">
+          <p className="run-meta">
+            {loadError ? "실행 기록을 확인할 수 없습니다." : "실행 기록을 불러오는 중입니다."}
+          </p>
+        </div>
       ) : runs.length === 0 ? (
-        <div className="card empty-state"><p className="run-meta">아직 실행 기록이 없습니다.</p></div>
+        <div className="card empty-state">
+          <p className="run-meta">아직 실행 기록이 없습니다.</p>
+        </div>
       ) : (
         <ol className="history-list" data-testid="schedule-run-history">
           {runs.map((run) => (
             <li className={`card history-item ${run.status}`} key={run.id} data-run-id={run.id}>
               <div className="card-head">
                 <span className={`badge ${run.status}`}>{runStatusLabel(run.status)}</span>
-                <span className="run-meta">{run.manual === undefined ? "실행 구분 기록 없음" : run.manual ? "수동 실행" : "예약 실행"}</span>
+                <span className="run-meta">
+                  {run.manual === undefined
+                    ? "실행 구분 기록 없음"
+                    : run.manual
+                      ? "수동 실행"
+                      : "예약 실행"}
+                </span>
               </div>
               <p className="history-goal">{run.goal}</p>
               <p className="run-meta">실행 ID: {run.id}</p>
-              {run.scheduledFor ? <p className="run-meta">예정 시각: {scheduledLabel(run.scheduledFor, schedule)}</p> : null}
-              {run.createdAt ? <p className="run-meta">생성 시각: {formatDateTime(run.createdAt)}</p> : null}
-              <p className="run-meta">종료 시각: {run.settledAt ? formatDateTime(run.settledAt) : "아직 종료되지 않음"}</p>
+              {run.scheduledFor ? (
+                <p className="run-meta">예정 시각: {scheduledLabel(run.scheduledFor, schedule)}</p>
+              ) : null}
+              {run.createdAt ? (
+                <p className="run-meta">생성 시각: {formatDateTime(run.createdAt)}</p>
+              ) : null}
+              <p className="run-meta">
+                종료 시각: {run.settledAt ? formatDateTime(run.settledAt) : "아직 종료되지 않음"}
+              </p>
               {ACTIVE_STATUSES.has(run.status) ? (
                 <div className="run-actions">
-                  <button className="ghost danger-button" type="button" disabled={busyKey !== null} onClick={() => reportAsync(runAction(`cancel:${run.id}`, () => postJson(`/api/runs/${encodeURIComponent(run.id)}/cancel`, {}, z.unknown())), (error) => setActionError(String(error)))} data-testid="schedule-run-cancel">
+                  <button
+                    className="ghost danger-button"
+                    type="button"
+                    disabled={busyKey !== null}
+                    onClick={() =>
+                      reportAsync(
+                        runAction(`cancel:${run.id}`, () =>
+                          postJson(
+                            `/api/runs/${encodeURIComponent(run.id)}/cancel`,
+                            {},
+                            z.unknown(),
+                          ),
+                        ),
+                        (error) => setActionError(String(error)),
+                      )
+                    }
+                    data-testid="schedule-run-cancel"
+                  >
                     {busyKey === `cancel:${run.id}` ? "취소 요청 중…" : "실행 취소"}
                   </button>
                 </div>
@@ -152,8 +211,24 @@ export function ScheduleHistory({
               {run.status === "awaiting_approval" && run.pendingApprovalId ? (
                 <div className="run-actions approval-actions">
                   <span className="run-meta">승인 필요 · {run.pendingTool ?? "도구 호출"}</span>
-                  <button className="primary" type="button" disabled={busyKey !== null} onClick={() => decide(run, "approve")} data-testid="schedule-approve">승인</button>
-                  <button className="ghost" type="button" disabled={busyKey !== null} onClick={() => decide(run, "reject")} data-testid="schedule-reject">거부</button>
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={busyKey !== null}
+                    onClick={() => decide(run, "approve")}
+                    data-testid="schedule-approve"
+                  >
+                    승인
+                  </button>
+                  <button
+                    className="ghost"
+                    type="button"
+                    disabled={busyKey !== null}
+                    onClick={() => decide(run, "reject")}
+                    data-testid="schedule-reject"
+                  >
+                    거부
+                  </button>
                 </div>
               ) : null}
               <RunResult resultJson={run.resultJson} />
