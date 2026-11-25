@@ -3,7 +3,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { migrate, openDatabase } from "../src/store/db";
+import { migrate, openDatabase, OLDEST_OPENABLE } from "../src/store/db";
 import { LATEST, RESET_VERSION, V12 } from "../src/store/migrations";
 
 function memoryDb(): Database {
@@ -80,13 +80,13 @@ describe("store migrations", () => {
     const path = join(mkdtempSync(join(tmpdir(), "harness-refuse-")), "old.db");
     const old = new Database(path, { create: true });
     old.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY)");
-    old.exec(`PRAGMA user_version = ${RESET_VERSION - 1}`);
+    old.exec(`PRAGMA user_version = ${OLDEST_OPENABLE - 1}`);
     old.close();
     try {
       // Refused at open, before anything writes to the file.
       expect(() => openDatabase(path)).toThrow("older than this build supports");
       const after = new Database(path, { readonly: true });
-      expect(version(after)).toBe(RESET_VERSION - 1);
+      expect(version(after)).toBe(OLDEST_OPENABLE - 1);
       after.close();
     } finally {
       rmSync(join(path, ".."), { recursive: true, force: true });

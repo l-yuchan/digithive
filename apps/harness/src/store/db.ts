@@ -2,6 +2,13 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { RESET_SCHEMA, RESET_VERSION, TRANSITIONS } from "./migrations";
 
 /**
+ * The oldest recorded version this build opens: the last version of the retired
+ * chain (v10), whose schema the reset reproduces. Anything older would need steps
+ * the two-transition rule no longer keeps.
+ */
+export const OLDEST_OPENABLE = RESET_VERSION - 1;
+
+/**
  * Opens the SQLite database and applies every pending transition.
  * WAL + foreign keys are set once per connection; busy_timeout keeps a
  * concurrent worker from failing instantly on a short write conflict.
@@ -12,10 +19,10 @@ export function openDatabase(path: string): Database {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 5000");
   const current = userVersion(db);
-  if (current > 0 && current < RESET_VERSION) {
+  if (current > 0 && current < OLDEST_OPENABLE) {
     db.close();
     throw new Error(
-      `database schema v${current} is older than this build supports (v${RESET_VERSION}); upgrade it with the build that shipped it`,
+      `database schema v${current} is older than this build supports (v${OLDEST_OPENABLE}); upgrade it with the build that shipped it`,
     );
   }
   migrate(db);
@@ -35,6 +42,10 @@ function userVersion(db: Database): number {
  * inside the transaction: the server and the worker open the same file and can both
  * decide to migrate at startup, and only the one that still sees the old version
  * may run the step. A database ahead of this build applies nothing.
+ *
+ * A database between the old chain's last version (v10) and the reset (v11) is the
+ * live server of the build that shipped v10: it carries that schema already and only
+ * needs the kept transitions.
  */
 export function migrate(db: Database): number {
   let applied = 0;

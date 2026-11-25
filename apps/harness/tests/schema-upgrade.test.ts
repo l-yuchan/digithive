@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { migrate } from "../src/store/db";
-import { RESET_VERSION } from "../src/store/migrations";
+import { OLDEST_OPENABLE } from "../src/store/db";
 
 /**
  * A database as the v10 build left it. Built by taking a fresh schema back to v10
@@ -32,7 +32,7 @@ function v10Database(): Database {
         ],
       }),
     );
-    db.exec(`PRAGMA user_version = ${RESET_VERSION - 1}`);
+    db.exec(`PRAGMA user_version = ${OLDEST_OPENABLE}`);
   })();
   return db;
 }
@@ -49,7 +49,7 @@ function shape(db: Database): string[] {
 test("a legacy database upgrades to exactly the schema a fresh database starts with", () => {
   const legacy = v10Database();
   expect(legacy.query<{ user_version: number }, []>("PRAGMA user_version").get()).toEqual({
-    user_version: RESET_VERSION - 1,
+    user_version: OLDEST_OPENABLE,
   });
   migrate(legacy);
   const upgraded = shape(legacy);
