@@ -19,7 +19,9 @@ export function openDatabase(path: string): Database {
 
 /**
  * Applies migrations above the recorded `user_version`, in one transaction
- * each, so a re-run is a no-op (idempotent by version, not by luck).
+ * each. The version is read again inside the transaction: the server and the
+ * worker open the same file and can both decide to migrate at startup, and only
+ * the one that still sees the old version may run the statements.
  */
 export function migrate(db: Database): number {
   const row = db.query<{ user_version: number }, SQLQueryBindings[]>("PRAGMA user_version").get();
@@ -27,12 +29,16 @@ export function migrate(db: Database): number {
   let applied = 0;
   for (const migration of MIGRATIONS) {
     if (migration.version <= current) continue;
-    const run = db.transaction(() => {
+    const run = db.transaction((): boolean => {
+      const inside = db
+        .query<{ user_version: number }, SQLQueryBindings[]>("PRAGMA user_version")
+        .get();
+      if ((inside?.user_version ?? 0) >= migration.version) return false;
       db.exec(migration.sql);
       db.exec(`PRAGMA user_version = ${migration.version}`);
+      return true;
     });
-    run();
-    applied += 1;
+    if (run()) applied += 1;
   }
   return applied;
 }
