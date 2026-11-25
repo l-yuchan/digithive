@@ -32,7 +32,7 @@
     "typescript/no-namespace": "off",
     "programming/require-suppression-reason": "error"
   },
-  "ignorePatterns": ["node_modules/**", "web/dist/**", "data/**", "coverage/**"],
+  "ignorePatterns": ["node_modules/**", "web/dist/**", "data/**", "coverage/**", "scripts/.digithive/**"],
   "overrides": [
     {
       "files": ["src/**", "web/src/**"],

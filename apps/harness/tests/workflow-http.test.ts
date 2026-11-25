@@ -73,6 +73,13 @@ describe("workflow API", () => {
     );
     expect(conflict?.status).toBe(422);
 
+    for (const query of ["bm25=편", "regex=("]) {
+      const misuse = await handleWorkflowRequest(request("GET", `/api/workflows?${query}`), deps);
+      expect(misuse?.status).toBe(422);
+      const body = z.object({ error: z.string(), detail: z.unknown() }).parse(await misuse?.json());
+      expect(body.error.startsWith("search_")).toBe(true);
+    }
+
     const patched = await handleWorkflowRequest(
       request("PATCH", `/api/workflows/${workflow.id}`, { title: "저녁 정리" }),
       deps,
@@ -151,6 +158,13 @@ describe("workflow API", () => {
       deps,
     );
     expect(queued?.status).toBe(201);
+
+    const inline = await handleWorkflowRequest(
+      request("POST", `/api/workflows/${workflow.id}/run`, { args: {}, async: false }),
+      deps,
+    );
+    expect(inline?.status).toBe(422);
+    expect(await inline?.json()).toMatchObject({ error: "run_not_inline" });
     const queuedBody = z
       .object({
         run: z.object({ id: z.string(), status: z.string() }),

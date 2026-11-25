@@ -39,6 +39,9 @@ const STATUS: Record<string, number> = {
   schedule_args_invalid: 409,
   schedules_present: 409,
   workflow_depth_exceeded: 409,
+  search_query_too_short: 422,
+  search_invalid_regex: 422,
+  search_invalid_bm25: 422,
 };
 
 function fail(error: unknown): Response {
@@ -145,6 +148,20 @@ export async function handleWorkflowRequest(
 
   if (sub === "run" && request.method === "POST") {
     const body = await readJson(request);
+    // The management endpoint queues by design (the screen shows the run's
+    // progress); only the agent tool runs inline. Refuse instead of silently
+    // queueing when a caller asks for an immediate run.
+    if (body["async"] === false) {
+      return json(
+        {
+          error: "run_not_inline",
+          detail: {
+            message: "이 HTTP 표면은 실행을 큐에 넣습니다. 즉시 실행은 workflow_run 도구를 쓰세요.",
+          },
+        },
+        422,
+      );
+    }
     try {
       const prepared = enqueueWorkflowRun(deps, id, {
         args: z.record(z.string(), z.unknown()).catch({}).parse(body["args"]),

@@ -198,8 +198,8 @@ describe("workflow store", () => {
     const bm25 = searchWorkflowIds(db, { bm25: "브리핑" });
     expect(bm25).toHaveLength(1);
     expect(bm25[0]?.score).toBeLessThan(0);
-    expect(() => searchWorkflowIds(db, { bm25: "브리" })).toThrow("bm25_query_too_short");
-    expect(() => searchWorkflowIds(db, { regex: "(" })).toThrow("invalid_regex");
+    expect(() => searchWorkflowIds(db, { bm25: "브리" })).toThrow("search_query_too_short");
+    expect(() => searchWorkflowIds(db, { regex: "(" })).toThrow("search_invalid_regex");
     expect(() => searchWorkflowIds(db, { keyword: "a", bm25: "abc" })).toThrow();
   });
 });

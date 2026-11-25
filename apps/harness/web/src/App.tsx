@@ -15,7 +15,7 @@ import { Composer } from "./composer/Composer";
 import { ConversationSidebar, type RenameTarget } from "./sidebar/ConversationSidebar";
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
-import { SchedulesPanel } from "./schedules/SchedulesPanel";
+import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { hasOAuthResult } from "./connections/oauth";
 import { Login } from "./auth/Login";
@@ -181,7 +181,7 @@ export function App() {
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"chat" | "work" | "connections" | "schedules" | "knowledge">(
+  const [view, setView] = useState<"chat" | "work" | "connections" | "workflows" | "knowledge">(
     () => (hasOAuthResult(window.location.search) ? "connections" : "chat"),
   );
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -468,8 +468,8 @@ export function App() {
             ? "대화"
             : view === "work"
               ? "작업"
-              : view === "schedules"
-                ? "스케줄"
+              : view === "workflows"
+                ? "워크플로"
                 : view === "knowledge"
                   ? "기억과 파일"
                   : "연결"
@@ -497,11 +497,11 @@ export function App() {
           <button
             type="button"
             role="tab"
-            aria-selected={view === "schedules"}
-            data-testid="tab-schedules"
-            onClick={() => setView("schedules")}
+            aria-selected={view === "workflows"}
+            data-testid="tab-workflows"
+            onClick={() => setView("workflows")}
           >
-            스케줄
+            워크플로
           </button>
           <button
             type="button"
@@ -524,8 +524,8 @@ export function App() {
         </nav>
         {view === "work" ? (
           <WorkPanel />
-        ) : view === "schedules" ? (
-          <SchedulesPanel />
+        ) : view === "workflows" ? (
+          <WorkflowsPanel />
         ) : view === "connections" ? (
           <ConnectionsPanel />
         ) : view === "knowledge" ? (

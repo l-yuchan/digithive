@@ -1,4 +1,5 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { WorkflowError } from "./workflow-store";
 import { WorkflowSearchSchema, type WorkflowSearchInput } from "./workflow-types";
 
 export type WorkflowHit = { readonly id: string; readonly score: number | null };
@@ -34,8 +35,8 @@ function regexHits(db: Database, pattern: string, limit: number): WorkflowHit[] 
   try {
     matcher = new RegExp(pattern, "i");
   } catch (error) {
-    throw new Error(`invalid_regex:${error instanceof Error ? error.message : "parse_failed"}`, {
-      cause: error,
+    throw new WorkflowError("search_invalid_regex", {
+      message: error instanceof Error ? error.message : "parse_failed",
     });
   }
   const rows = db
@@ -53,7 +54,7 @@ function regexHits(db: Database, pattern: string, limit: number): WorkflowHit[] 
 
 function bm25Hits(db: Database, query: string, limit: number): WorkflowHit[] {
   if (query.trim().length < MIN_TRIGRAM) {
-    throw new Error(`bm25_query_too_short:${MIN_TRIGRAM}`);
+    throw new WorkflowError("search_query_too_short", { mode: "bm25", minLength: MIN_TRIGRAM });
   }
   try {
     return db
@@ -64,8 +65,8 @@ function bm25Hits(db: Database, query: string, limit: number): WorkflowHit[] {
       .all(query, limit)
       .map((row) => ({ id: row.workflow_id, score: row.score }));
   } catch (error) {
-    throw new Error(`invalid_bm25:${error instanceof Error ? error.message : "query_failed"}`, {
-      cause: error,
+    throw new WorkflowError("search_invalid_bm25", {
+      message: error instanceof Error ? error.message : "query_failed",
     });
   }
 }

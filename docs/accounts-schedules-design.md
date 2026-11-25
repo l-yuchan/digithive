@@ -139,3 +139,15 @@ local script는 TypeScript/JavaScript 파일이며 자동 발화의 중첩은 �
 기존 동시 실행 상한 2를 유지한다. 추가 Google 계정의 실제 OAuth 동의는 소유자만
 할 수 있으므로 코드/와이어 검증과 운영 기존 계정 이전 검증을 구분해 보고한다.
 이 기본값으로 승인된 구현을 진행하며, 이미 승인한 구조를 다시 승인받지 않는다.
+
+---
+
+## 2026-11-25 개정: 워크플로와 스케줄의 분리
+
+이 문서가 정의한 "스케줄 = 정의 + 트리거" 구조는 워크플로 개편에서 대체되었다.
+정의는 `workflows`(제목·지시·실행기·파라미터·제한 시간)로, 자동 실행은 `schedules`
+(workflow_id·trigger·enabled·args·next_run_at)로 나뉘고, 실행 행은
+workflow_id·workflow_title·schedule_id·trigger_kind·params 스냅샷을 함께 가진다
+(마이그레이션 v10). 계정·소스·OAuth·occurrence·실행 상태에 대한 이 문서의 나머지 설계는
+그대로 유효하다. 구현과 검증 기록: `docs/qa/2026-11-25-workflows.md`,
+계획: `.omo/plans/digithive-workflows.md`.
