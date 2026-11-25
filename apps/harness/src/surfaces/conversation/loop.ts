@@ -7,7 +7,8 @@ import { recallMemories } from "../../knowledge/memory";
 import { latestCompaction, maybeCompact } from "../../core/compaction";
 import { BASE_POLICY, decide, type PolicyRule } from "../../core/policy";
 import { leaseExpiry } from "../../core/run-state";
-import { ProviderError, type ChatMessage, type StreamFn } from "../../providers/openai";
+import type { ChatMessage, StreamFn } from "../../providers/openai";
+import type { ProviderDiagnostic } from "../../providers/router";
 import { specs, type ToolRegistry } from "../../tools/registry";
 import { keepLease, ownsLease } from "../work/lease";
 import { z } from "zod";
@@ -51,9 +52,32 @@ export type TurnResult = {
 };
 
 function reason(error: unknown): string {
-  if (error instanceof ProviderError) return error.kind;
   if (error instanceof Error) return error.message;
-  return "unknown";
+  return String(error);
+}
+
+/** One readable line per routing decision, e.g. a provider suspended by quota. */
+function describeRouting(diagnostic: ProviderDiagnostic): string {
+  const target = `${diagnostic.provider}/${diagnostic.model}`;
+  switch (diagnostic.kind) {
+    case "provider.retry":
+      return `모델 경로 ${target} 응답 실패(${diagnostic.reason ?? "unknown"}), 같은 경로로 다시 시도합니다.`;
+    case "provider.fallback": {
+      const cooldown =
+        diagnostic.retryInMs && diagnostic.retryInMs > 0
+          ? ` ${Math.ceil(diagnostic.retryInMs / 60_000)}분 동안 사용하지 않습니다.`
+          : " 이번 호출만 대체 경로를 사용합니다.";
+      return `모델 경로 ${diagnostic.failedProvider ?? "?"} 실패(${diagnostic.reason ?? "unknown"}): ${diagnostic.error ?? ""} → ${target}로 전환.${cooldown}`;
+    }
+    case "provider.exhausted":
+      return `사용 가능한 모델 경로가 없습니다. ${diagnostic.retryInMs ? `${Math.ceil(diagnostic.retryInMs / 60_000)}분 후 다시 시도할 수 있습니다.` : ""}`.trim();
+    case "provider.recovered":
+      return `대체 모델 경로 ${target}에서 응답했습니다.`;
+    default: {
+      const unexpected: never = diagnostic.kind;
+      return String(unexpected);
+    }
+  }
 }
 
 /**
@@ -160,7 +184,17 @@ export async function runTurn(
         summarize: deps.summarize,
         maxChars: deps.maxChars ?? 24_000,
         now: startedAt,
-      }).catch(() => ({ compacted: false }));
+      }).catch((error: unknown) => {
+        const message = `대화 요약 실패: ${reason(error)}`;
+        parts.push({ type: "error", message });
+        deps.events.append({
+          kind: "context.compaction_failed",
+          runId,
+          sessionId: input.sessionId,
+          payload: { error: message },
+          now: now(),
+        });
+      });
     }
     const compaction = latestCompaction(deps.db, input.sessionId);
     const history = pathEntries(deps.db, input.sessionId, userEntryId)
@@ -200,11 +234,24 @@ export async function runTurn(
     while (round < limits.maxToolRounds) {
       round += 1;
       const pending: { id: string; name: string; arguments: string }[] = [];
+      const routing = (diagnostic: ProviderDiagnostic) => {
+        const message = describeRouting(diagnostic);
+        parts.push({ type: "error", message });
+        deps.events.append({
+          kind: diagnostic.kind,
+          runId,
+          sessionId: input.sessionId,
+          payload: { ...diagnostic, message },
+          now: now(),
+        });
+      };
       for await (const event of deps.stream(messages, specs(deps.tools), {
         maxOutputTokens: limits.maxOutputTokens,
         firstTokenTimeoutMs: limits.firstTokenMs,
         idleTimeoutMs: limits.idleMs,
         signal: controller.signal,
+        contextKey: `session:${input.sessionId}`,
+        onDiagnostic: routing,
       })) {
         if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
         if (event.type === "text_delta") {
@@ -292,16 +339,19 @@ export async function runTurn(
 
         let output: string;
         let timedOut = false;
+        let toolTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           output = await Promise.race([
             tool.execute(args, { runId }),
             new Promise<string>((resolve) => {
-              setTimeout(() => resolve("__tool_timeout__"), limits.toolMs);
+              toolTimer = setTimeout(() => resolve("__tool_timeout__"), limits.toolMs);
             }),
           ]);
           timedOut = output === "__tool_timeout__";
         } catch (error) {
           output = `도구 실행 실패: ${reason(error)}`;
+        } finally {
+          clearTimeout(toolTimer);
         }
         if (timedOut) {
           output = "도구 실행 시간이 초과되었습니다.";
@@ -359,7 +409,10 @@ export async function runTurn(
     const interrupted = controller.signal.aborted;
     if (!ownsLease(deps.db, runId, "conversation", now()))
       return { runId, entryId: assistantEntry.id, status: "aborted", text };
-    if (text.length > 0) parts.push({ type: "text", text: "" });
+    parts.push({
+      type: "error",
+      message: interrupted ? `실행 중단: ${reason(controller.signal.reason)}` : kind,
+    });
     updateEntryParts(
       deps.db,
       assistantEntry.id,

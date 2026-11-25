@@ -14,6 +14,32 @@ PORT=8799 MODEL_BASE_URL=http://127.0.0.1:8798/v1 MODEL_NAME=mock-model bun run 
 
 환경 변수: `PORT`(기본 8799), `HARNESS_DB`(기본 `apps/harness/data/harness.db`), `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME`.
 
+## 모델 공급자 라우팅
+
+한 대화(또는 한 실행)는 가능한 한 하나의 공급자에 머문다. 한 공급자가 실패하면
+사유에 따라 다르게 처리한다.
+
+| 실패                                                             | 처리                                                                  |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 일시 오류(429 rate limit, 5xx, 시간 초과, 연결 끊김)             | 같은 공급자에서 `MODEL_RETRIES`회 재시도 후 이번 호출만 다음 공급자   |
+| 사용량/쿼터 소진(402, `usage limit reached`), 인증 만료(401/403) | 즉시 다음 공급자로 넘기고 그 공급자를 `MODEL_COOLDOWN_MS` 동안 제외   |
+| 이미 응답이 스트리밍된 뒤 실패                                   | 재시도·전환 없이 실패로 기록(부분 응답을 다른 공급자로 반복하지 않음) |
+| 모든 공급자 실패/대기                                            | 빈 문자열이 아니라 사유가 담긴 오류                                   |
+
+대체 공급자는 `MODEL_FALLBACKS_JSON`(우선순위 순 배열)으로 지정한다. 잘못된
+JSON은 시작 시 오류로 멈춘다(조용히 버리지 않음).
+
+```bash
+MODEL_FALLBACKS_JSON='[{"name":"backup","baseUrl":"https://api.example/v1","apiKey":"...","model":"..."}]' \
+MODEL_COOLDOWN_MS=900000 MODEL_RETRIES=1 bun run start
+```
+
+라우팅 결정(재시도·전환·전체 소진)은 대화의 응답 근처와 실행 로그(`provider.retry`,
+`provider.fallback`, `provider.exhausted` 이벤트)에 공급자명, 사유, 업스트림 응답 본문과
+함께 남는다. HTTP 200으로 오는 오류 봉투와 내용 없는 스트림도 실패로 처리한다.
+`bun scripts/qa-providers.ts`는 quota 공급자와 정상 공급자를 로컬에 띄워 이 경로를
+무료로 재현한다.
+
 ## 검증
 
 ```bash

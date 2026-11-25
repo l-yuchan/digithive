@@ -5,6 +5,7 @@ import { RunExecutorSchema, type RunExecutor } from "../../core/executor";
 import { leaseExpiry } from "../../core/run-state";
 import type { ToolRegistry } from "../../tools/registry";
 import type { StreamFn } from "../../providers/openai";
+import type { ProviderDiagnostic } from "../../providers/router";
 import { ok } from "node:assert/strict";
 import { getRun, type RunRow } from "./record";
 export { executeRun } from "./execution";
@@ -34,6 +35,8 @@ export type WorkDeps = {
     context: { readonly runId: string; readonly signal: AbortSignal },
   ) => Promise<string>;
   readonly scriptsRoot?: string;
+  /** Provider routing decisions (retry, fallback, exhausted) for the execution log. */
+  readonly streamDiagnostics?: (diagnostics: readonly ProviderDiagnostic[]) => void;
   /** Worker SIGTERM/SIGINT: aborts in-flight executors as host_restart. */
   readonly shutdownSignal?: AbortSignal;
 };

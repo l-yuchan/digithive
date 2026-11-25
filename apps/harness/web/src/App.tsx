@@ -36,7 +36,7 @@ type Action =
   | { type: "active"; id: string }
   | { type: "entries"; entries: Entry[] }
   | { type: "started"; entryId: string }
-  | { type: "delta"; entryId: string; text: string }
+  | { type: "delta"; entryId: string; text: string; reasoning?: boolean }
   | { type: "status"; entryId: string; status: string }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
@@ -51,11 +51,11 @@ const initial: State = {
   error: null,
 };
 
-function appendText(parts: Part[], text: string): Part[] {
+function appendText(parts: Part[], text: string, reasoning = false): Part[] {
+  const type = reasoning ? "reasoning" : "text";
   const last = parts.at(-1);
-  if (last && last.type === "text")
-    return [...parts.slice(0, -1), { type: "text", text: last.text + text }];
-  return [...parts, { type: "text", text }];
+  if (last && last.type === type) return [...parts.slice(0, -1), { type, text: last.text + text }];
+  return [...parts, { type, text }];
 }
 
 function reducer(state: State, action: Action): State {
@@ -104,7 +104,7 @@ function reducer(state: State, action: Action): State {
               kind: "message",
               role: "assistant",
               status: "streaming",
-              parts: [{ type: "text", text: action.text }],
+              parts: [{ type: action.reasoning ? "reasoning" : "text", text: action.text }],
               createdAt: new Date().toISOString(),
               seq: Number.MAX_SAFE_INTEGER,
             },
@@ -115,7 +115,7 @@ function reducer(state: State, action: Action): State {
         ...state,
         entries: state.entries.map((entry) =>
           entry.id === action.entryId
-            ? { ...entry, parts: appendText(entry.parts, action.text) }
+            ? { ...entry, parts: appendText(entry.parts, action.text, action.reasoning) }
             : entry,
         ),
       };
@@ -256,14 +256,16 @@ export function App() {
           type: "delta",
           entryId: payload.entryId,
           text: payload.text ?? payload.reasoning ?? "",
+          reasoning: payload.reasoning !== undefined,
         }),
     );
     on("message.completed", entryPayload, (payload) => {
       dispatch({ type: "status", entryId: payload.entryId, status: "complete" });
       if (!cancelled) reloadEntries(id).catch(reportError);
     });
-    on("message.aborted", entryPayload, (payload) => {
+    on("message.aborted", entryPayload.extend({ reason: z.string().optional() }), (payload) => {
       dispatch({ type: "status", entryId: payload.entryId, status: "aborted" });
+      dispatch({ type: "error", message: payload.reason ?? "응답 생성이 중단되었습니다." });
       if (!cancelled) reloadEntries(id).catch(reportError);
     });
     on("session.renamed", z.unknown(), () => {
@@ -450,7 +452,7 @@ export function App() {
             data-testid="tab-work"
             onClick={() => setView("work")}
           >
-            작업
+            실행 로그
           </button>
           <button
             type="button"

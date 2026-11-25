@@ -1,3 +1,10 @@
+import { z } from "zod";
+import type { ChatMessageSchema } from "../core/contracts";
+import { decodeBody, ProviderError, responseError } from "./errors";
+import type { ProviderDiagnostic } from "./router";
+
+export { ProviderError, type ProviderErrorKind } from "./errors";
+
 export type ProviderConfig = {
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -26,32 +33,16 @@ export type AdapterEvent =
   | { readonly type: "usage"; readonly promptTokens: number; readonly completionTokens: number }
   | { readonly type: "done"; readonly finishReason: string | null };
 
-export type ProviderErrorKind =
-  | "http_4xx"
-  | "http_5xx"
-  | "rate_limited"
-  | "auth_expired"
-  | "timeout"
-  | "malformed"
-  | "truncated"
-  | "aborted";
-
-export class ProviderError extends Error {
-  constructor(
-    readonly kind: ProviderErrorKind,
-    readonly status?: number,
-  ) {
-    super(kind);
-    this.name = "ProviderError";
-  }
-}
-
 export type StreamOptions = {
   readonly maxOutputTokens: number;
   readonly firstTokenTimeoutMs: number;
   readonly idleTimeoutMs: number;
+  /** Local routing affinity only; never sent to the upstream provider. */
+  readonly contextKey?: string;
   readonly signal?: AbortSignal;
   readonly fetchImpl?: typeof fetch;
+  /** Receives routing decisions; only the router sets it, adapters ignore it. */
+  readonly onDiagnostic?: (diagnostic: ProviderDiagnostic) => void;
 };
 
 export type StreamFn = (
@@ -59,13 +50,6 @@ export type StreamFn = (
   tools: readonly ToolSpec[],
   options: StreamOptions,
 ) => AsyncIterable<AdapterEvent>;
-
-function classifyStatus(status: number): ProviderErrorKind {
-  if (status === 401 || status === 403) return "auth_expired";
-  if (status === 429) return "rate_limited";
-  if (status >= 500) return "http_5xx";
-  return "http_4xx";
-}
 
 type ReadResult = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]>>;
 
@@ -178,7 +162,15 @@ export function openAiStream(config: ProviderConfig): StreamFn {
         }),
         signal: controller.signal,
       });
-      if (!response.ok) throw new ProviderError(classifyStatus(response.status), response.status);
+      // A JSON body on a 2xx is an error envelope, never a stream: keep it rather
+      // than parsing an empty stream into a silent success.
+      if (
+        !response.ok ||
+        (response.headers.get("content-type") ?? "").includes("application/json")
+      ) {
+        const body = await response.text();
+        throw responseError(response.status, body, decodeBody(body));
+      }
       if (!response.body) throw new ProviderError("malformed");
 
       const reader = response.body.getReader();
@@ -187,6 +179,7 @@ export function openAiStream(config: ProviderConfig): StreamFn {
       let buffer = "";
       let finishReason: string | null = null;
       let sawFirst = false;
+      let hasAnswer = false;
 
       while (true) {
         const next = await readWithTimeout(
@@ -209,20 +202,27 @@ export function openAiStream(config: ProviderConfig): StreamFn {
               finishReason = finishReason ?? "stop";
               continue;
             }
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(data);
-            } catch (error) {
-              if (!(error instanceof SyntaxError)) throw error;
-              throw new ProviderError("malformed");
+            const parsed = decodeBody(data);
+            if (typeof parsed === "object" && parsed !== null && "error" in parsed) {
+              throw responseError(response.status, data, parsed);
             }
-            const envelope = StreamFrameSchema.parse(parsed);
+            const frameResult = StreamFrameSchema.safeParse(parsed);
+            if (!frameResult.success) {
+              throw new ProviderError(
+                "malformed",
+                response.status,
+                "unrecognised stream frame",
+                data,
+              );
+            }
+            const envelope = frameResult.data;
             const choice = envelope.choices?.[0];
             if (!choice) continue;
             if (choice.finish_reason) finishReason = choice.finish_reason;
             const delta = choice.delta ?? {};
             const text = delta["content"];
             if (typeof text === "string" && text.length > 0) {
+              if (text.trim()) hasAnswer = true;
               yield { type: "text_delta", text };
             }
             const reasoning = delta["reasoning_content"] ?? delta["reasoning"];
@@ -264,16 +264,22 @@ export function openAiStream(config: ProviderConfig): StreamFn {
 
       if (finishReason === "length") throw new ProviderError("truncated");
       if (finishReason === null) throw new ProviderError("truncated");
+      if (!hasAnswer && calls.size === 0) throw new ProviderError("empty_output", response.status);
+      if ([...calls.values()].some((call) => !call.name.trim())) {
+        throw new ProviderError("malformed", response.status, "tool call without a name");
+      }
       for (const call of calls.values()) {
         yield { type: "tool_call", id: call.id, name: call.name, arguments: call.arguments };
       }
       yield { type: "done", finishReason };
     } catch (error) {
+      if (options.signal?.aborted) throw new ProviderError("aborted");
       if (error instanceof ProviderError) throw error;
       if (controller.signal.reason instanceof ProviderError) throw controller.signal.reason;
-      if (options.signal?.aborted || controller.signal.aborted) throw new ProviderError("aborted");
+      if (controller.signal.aborted) throw new ProviderError("aborted");
       if (error instanceof Error && error.name === "AbortError") throw new ProviderError("aborted");
-      throw new ProviderError("malformed");
+      if (error instanceof Error) throw new ProviderError("transport", undefined, error.message);
+      throw error;
     } finally {
       clearTimeout(firstTokenDeadline);
       controller.abort();
@@ -281,5 +287,3 @@ export function openAiStream(config: ProviderConfig): StreamFn {
     }
   };
 }
-import { z } from "zod";
-import type { ChatMessageSchema } from "../core/contracts";

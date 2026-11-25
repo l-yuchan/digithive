@@ -7,6 +7,8 @@ import type { keepLease } from "./lease";
 import { ownsLease } from "./lease";
 import { executeTool, toolDecision } from "./tool";
 import { parseState, saveState } from "./run-state-json";
+import { runStream } from "./stream-diagnostics";
+import { ProviderError } from "../../providers/errors";
 import { abortMessage, dbCancelled, settle, type RunOutcome } from "./settle";
 import { z } from "zod";
 
@@ -117,13 +119,20 @@ export async function executeAgent(
       if (pending.length === 0) {
         if ((state.roundsUsed ?? 0) >= limits.maxToolRounds) throw new Error("tool_round_limit");
         state.roundsUsed = (state.roundsUsed ?? 0) + 1;
-        for await (const event of deps.stream(state.messages, specs(deps.tools), {
-          maxOutputTokens: limits.maxOutputTokens,
-          firstTokenTimeoutMs: limits.firstTokenMs,
-          idleTimeoutMs: limits.idleMs,
-          signal: lease.signal,
-        })) {
-          const typed = event;
+        for await (const typed of runStream(
+          deps,
+          run,
+          state.messages,
+          specs(deps.tools),
+          {
+            maxOutputTokens: limits.maxOutputTokens,
+            firstTokenTimeoutMs: limits.firstTokenMs,
+            idleTimeoutMs: limits.idleMs,
+            signal: lease.signal,
+            contextKey: `run:${run.id}`,
+          },
+          now,
+        )) {
           if (typed.type === "text_delta") {
             text += typed.text;
             deps.events.append({
@@ -234,7 +243,9 @@ export async function executeAgent(
     settle(deps.db, deps.events, run, "succeeded", { text }, now());
     return "succeeded";
   } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown";
+    // The provider's own words (status, upstream message) are the owner's diagnostic.
+    const message = error instanceof Error ? error.message : String(error);
+    const detail = error instanceof ProviderError ? error.body : undefined;
     saveState(deps.db, run, state);
     const cancelled = cancelledOutcome(deps, run, lease, now());
     if (cancelled) return cancelled;
@@ -252,6 +263,7 @@ export async function executeAgent(
       interrupted ? "interrupted" : "failed",
       { error: message },
       now(),
+      detail,
     );
     return interrupted ? "interrupted" : "failed";
   }

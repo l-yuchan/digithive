@@ -33,6 +33,27 @@ function textStream(chunks: string[]): StreamFn {
 }
 
 describe("conversation turn", () => {
+  test("provider failure persists a visible error part and run diagnostics", async () => {
+    const { db, events, sessionId } = setup();
+    const stream: StreamFn = async function* () {
+      yield { type: "text_delta", text: "부분 응답" };
+      throw new Error("HTTP 429: quota exhausted; reset in 31m");
+    };
+    const result = await runTurn(deps(db, events, stream), { sessionId, text: "실패 재현" });
+    expect(result.status).toBe("failed");
+    const assistant = listEntries(db, sessionId).find((entry) => entry.role === "assistant");
+    expect(assistant?.parts).toContainEqual({
+      type: "error",
+      message: "HTTP 429: quota exhausted; reset in 31m",
+    });
+    expect(assistant?.parts).toContainEqual({ type: "text", text: "부분 응답" });
+    const row = db
+      .query<{ result_json: string }, [string]>("SELECT result_json FROM runs WHERE id = ?")
+      .get(result.runId);
+    expect(row?.result_json).toContain("reset in 31m");
+    db.close();
+  });
+
   test("streams deltas into one assistant entry and settles the run", async () => {
     const { db, events, sessionId } = setup();
     const result = await runTurn(deps(db, events, textStream(["안", "녕", "하세요"])), {

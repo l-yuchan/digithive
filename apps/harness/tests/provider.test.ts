@@ -85,6 +85,7 @@ describe("openai streaming adapter", () => {
 
   for (const [status, kind] of [
     [429, "rate_limited"],
+    [402, "quota_exhausted"],
     [401, "auth_expired"],
     [503, "http_5xx"],
     [400, "http_4xx"],

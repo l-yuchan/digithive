@@ -26,6 +26,7 @@ export function settle(
   status: Exclude<RunOutcome, "paused">,
   payload: Record<string, unknown>,
   now: number,
+  detail?: string,
 ): void {
   if (status === "cancelled") {
     const changed = db
@@ -55,7 +56,7 @@ export function settle(
             : "run.interrupted",
     runId: run.id,
     sessionId: run.sessionId,
-    payload,
+    payload: detail === undefined ? payload : { ...payload, detail },
     now,
   });
   if (run.parentRunId) {

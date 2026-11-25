@@ -9,7 +9,7 @@ import { scheduleTools } from "./tools/schedules";
 import { memoryTools } from "./tools/memory";
 import { fileTools } from "./tools/files";
 import { createBuiltinExecutor } from "./scheduler/builtins";
-import { openAiStream } from "./providers/openai";
+import { createRoutingStream, type ProviderRouteConfig } from "./providers/router";
 import { settleExpiredRuns } from "./core/run-state";
 import {
   claimNext,
@@ -34,6 +34,10 @@ export type HarnessConfig = {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;
+  /** Optional fallback routes in order; MODEL_PROVIDERS_JSON wins over them. */
+  readonly fallbackProviders: readonly ProviderRouteConfig[];
+  readonly providerCooldownMs: number;
+  readonly providerRetries: number;
   readonly maxChars: number;
   readonly maxConcurrent: number;
   readonly leaseMs: number;
@@ -75,6 +79,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
     model: env["MODEL_NAME"] ?? "mock-model",
+    fallbackProviders: parseFallbackProviders(env["MODEL_FALLBACKS_JSON"] ?? ""),
+    providerCooldownMs: Number(env["MODEL_COOLDOWN_MS"] ?? "900000"),
+    providerRetries: Number(env["MODEL_RETRIES"] ?? "1"),
     maxChars: Number(env["HARNESS_MAX_CHARS"] ?? "24000"),
     maxConcurrent: Number(env["HARNESS_MAX_CONCURRENT"] ?? "2"),
     leaseMs: Number(env["HARNESS_LEASE_MS"] ?? "45000"),
@@ -100,12 +107,17 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   mkdirSync(config.scriptsRoot, { recursive: true });
   const db = openDatabase(config.dbPath);
   const events = new EventLog(db);
-  const stream = openAiStream({
+  const primary: ProviderRouteConfig = {
+    name: "primary",
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: config.model,
     headers: parseHeaders(config.modelHeaders),
-  });
+  };
+  const stream = createRoutingStream(
+    { primary, fallbacks: config.fallbackProviders },
+    { cooldownMs: config.providerCooldownMs, retries: config.providerRetries },
+  );
   const tools = createRegistry([
     ...builtinTools({ root: config.workspaceRoot }),
     ...personalTools({
@@ -129,6 +141,11 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     tools,
     policy: WORK_POLICY,
     limits: WORK_LIMITS,
+    streamDiagnostics: (diagnostics) => {
+      for (const diagnostic of diagnostics) {
+        console.log(`provider ${diagnostic.kind}: ${JSON.stringify(diagnostic)}`);
+      }
+    },
     maxConcurrent: config.maxConcurrent,
     leaseMs: config.leaseMs,
     scriptsRoot: config.scriptsRoot,
@@ -155,6 +172,33 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
 }
 
 export { claimNext, executeRun, reconcileWork, settleExpiredRuns };
+
+/**
+ * MODEL_FALLBACKS_JSON: `[{name, baseUrl, apiKey, model, headers?}]`, tried in
+ * order after MODEL_BASE_URL. An invalid entry fails loudly at startup: a
+ * silently dropped fallback would only surface when the primary runs out of quota.
+ */
+function parseFallbackProviders(raw: string): ProviderRouteConfig[] {
+  if (raw.trim().length === 0) return [];
+  const parsed: unknown = JSON.parse(raw);
+  const routes = z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        baseUrl: z.string().min(1),
+        apiKey: z.string().min(1),
+        model: z.string().min(1),
+        headers: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .safeParse(parsed);
+  if (!routes.success) {
+    throw new Error(`MODEL_FALLBACKS_JSON is invalid: ${routes.error.message}`);
+  }
+  return routes.data.map(({ headers, ...route }) =>
+    headers === undefined ? route : { ...route, headers },
+  );
+}
 
 function parseHeaders(raw: string): Record<string, string> {
   if (raw.trim().length === 0) return {};
