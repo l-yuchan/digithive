@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatDateTime, runStatusLabel } from "../format";
+import type { Account } from "../connections/accounts";
 import type { Schedule, Trigger } from "./scheduleTypes";
 
 function triggerLabel(trigger: Trigger): string {
@@ -25,7 +26,10 @@ const SOURCE_TEXT: Record<string, string> = {
  * What this schedule runs, step by step: the agent instruction, the builtin steps
  * with the exact account and sources, or the script path with each argument.
  */
-function workflow(schedule: Schedule): { title: string; steps: string[] } {
+function workflow(
+  schedule: Schedule,
+  accounts: readonly Account[],
+): { title: string; steps: string[] } {
   switch (schedule.executor.kind) {
     case "agent":
       return {
@@ -50,7 +54,11 @@ function workflow(schedule: Schedule): { title: string; steps: string[] } {
       };
     case "builtin": {
       if (schedule.executor.name === "sync_sources") {
-        const account = schedule.executor.accountId ?? "(지정 안 됨)";
+        const id = schedule.executor.accountId;
+        // An internal id means nothing to the reader; the account label does.
+        const account = id
+          ? (accounts.find((candidate) => candidate.id === id)?.label ?? `${id} (계정 목록에 없음)`)
+          : "(지정 안 됨, 실행하면 계정 오류)";
         const sources = (schedule.executor.sources ?? []).map(
           (source) => SOURCE_TEXT[source] ?? source,
         );
@@ -63,10 +71,14 @@ function workflow(schedule: Schedule): { title: string; steps: string[] } {
           ],
         };
       }
+      const scopeId = schedule.executor.accountId;
+      const scopeName = scopeId
+        ? (accounts.find((candidate) => candidate.id === scopeId)?.label ?? scopeId)
+        : null;
       return {
         title: "브리핑 생성",
         steps: [
-          `1. ${schedule.executor.accountId ? `계정 ${schedule.executor.accountId} 의` : "수집된"} 일정·메일·과제를 읽습니다.`,
+          `1. ${scopeName ? `${scopeName} 의` : "수집된"} 일정·메일·과제를 읽습니다.`,
           "2. 오늘의 브리핑 문장을 만듭니다.",
           "3. 등록된 기기로 알림을 보냅니다.",
         ],
@@ -79,6 +91,7 @@ function workflow(schedule: Schedule): { title: string; steps: string[] } {
 
 export function ScheduleList({
   schedules,
+  accounts,
   selectedId,
   busyKey,
   onEdit,
@@ -88,6 +101,7 @@ export function ScheduleList({
   onDelete,
 }: {
   readonly schedules: readonly Schedule[];
+  readonly accounts: readonly Account[];
   readonly selectedId: string | null;
   readonly busyKey: string | null;
   readonly onEdit: (schedule: Schedule) => void;
@@ -117,9 +131,9 @@ export function ScheduleList({
           <p className="schedule-instruction">{schedule.instruction}</p>
           <p className="run-meta">{triggerLabel(schedule.trigger)}</p>
           <div className="schedule-workflow" data-testid="schedule-workflow">
-            <strong>{workflow(schedule).title}</strong>
+            <strong>{workflow(schedule, accounts).title}</strong>
             <ul className="workflow-steps">
-              {workflow(schedule).steps.map((step) => (
+              {workflow(schedule, accounts).steps.map((step) => (
                 <li key={step}>{step}</li>
               ))}
             </ul>

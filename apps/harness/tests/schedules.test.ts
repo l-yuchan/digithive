@@ -108,11 +108,12 @@ describe("schedule definitions", () => {
   test("seeded system schedules exist and dispatch initializes daily deadlines without firing", () => {
     const { db, deps } = setup({ seeds: true });
     const before = listSchedules(db);
-    // Only briefings ship: collection names its account, so it is never a seed.
-    expect(before.map((row) => row.id).toSorted()).toEqual([
-      "system-briefing-evening",
-      "system-briefing-morning",
-    ]);
+    expect(before).toHaveLength(3);
+    // The former global collector is retired: it names no account, so it must
+    // not keep reading every account after the upgrade.
+    const retired = before.find((row) => row.id === "system-sync");
+    expect(retired?.enabled).toBe(false);
+    expect(retired?.nextRunAt).toBeNull();
     const morning = before.find((row) => row.id === "system-briefing-morning");
     expect(morning?.nextRunAt).toBeNull();
 

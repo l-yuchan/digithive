@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { MIGRATIONS } from "../src/store/migrations";
 import { migrate } from "../src/store/db";
 import { open, seal } from "../src/core/vault";
+import { upsertGoogleAccount } from "../src/integrations/accounts";
 
 function oldDatabase(): Database {
   const db = new Database(":memory:");
@@ -13,6 +14,65 @@ function oldDatabase(): Database {
   db.exec("PRAGMA user_version=5");
   return db;
 }
+
+test("the seeded Google row upgrades into an ordinary account without losing anything", () => {
+  const db = oldDatabase();
+  const encrypted = seal("migration-secret", '{"accessToken":"retained","refreshToken":"rt"}');
+  db.query(
+    "INSERT INTO oauth_tokens(provider,payload,scope,expires_at,updated_at) VALUES ('google',?,'read','expiry','updated')",
+  ).run(encrypted);
+  db.query(
+    "INSERT INTO integration_state(source,cursor,last_sync_at,ok) VALUES ('gmail','mail-history','success',1)",
+  ).run();
+  db.query(
+    "INSERT INTO sync_items(source,item_id,title,detail,updated_at) VALUES ('gmail','m1','제목','본문','updated')",
+  ).run();
+
+  migrate(db);
+
+  const seeded = db
+    .query<{ id: string; label: string; subject: string | null; email: string | null }, []>(
+      "SELECT id,label,subject,email FROM integration_accounts ORDER BY provider,id",
+    )
+    .all();
+  // google-default is a normal row (the fallback owner of pre-account data); its
+  // label is not the legacy "기존 Google" marker any more.
+  expect(seeded).toEqual([
+    { id: "canvas-default", label: "한양 LMS", subject: null, email: null },
+    { id: "google-default", label: "Google 계정", subject: null, email: null },
+  ]);
+  expect(
+    db
+      .query<{ account_id: string; payload: string }, []>(
+        "SELECT account_id,payload FROM oauth_tokens",
+      )
+      .get(),
+  ).toEqual({ account_id: "google-default", payload: encrypted });
+  expect(
+    db
+      .query<{ account_id: string; source: string; cursor: string }, []>(
+        "SELECT account_id,source,cursor FROM account_sources WHERE source='gmail'",
+      )
+      .get(),
+  ).toEqual({ account_id: "google-default", source: "gmail", cursor: "mail-history" });
+  expect(
+    db
+      .query<{ account_id: string; item_id: string }, []>(
+        "SELECT account_id,item_id FROM sync_items WHERE source='gmail'",
+      )
+      .get(),
+  ).toEqual({ account_id: "google-default", item_id: "m1" });
+
+  // Added and migrated Google accounts are the same kind of row.
+  const { id } = upsertGoogleAccount(db, { subject: "sub-new", email: "new@example.com" });
+  const added = db
+    .query<{ subject: string; label: string }, [string]>(
+      "SELECT subject,label FROM integration_accounts WHERE id=?",
+    )
+    .get(id);
+  expect(added).toEqual({ subject: "sub-new", label: "new@example.com" });
+  db.close();
+});
 
 test("v5 credentials, source cursors and items retain their explicit account identity after migration", () => {
   const db = oldDatabase();

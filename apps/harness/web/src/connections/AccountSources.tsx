@@ -1,5 +1,5 @@
 import type { Account, AccountSource } from "./accounts";
-import { SOURCE_LABELS } from "./accounts";
+import { SOURCE_LABELS, type Collector } from "./accounts";
 import { formatDateTime } from "../format";
 
 /**
@@ -7,6 +7,19 @@ import { formatDateTime } from "../format";
  * may be used at all, by conversations, briefings and collection schedules. It is
  * not a collection switch; collection is an ordinary schedule.
  */
+/** Why the last attempt ran, from the source's own detail field. */
+const REASON_LABELS: Record<string, string> = {
+  full_resync: "전체 재수집(커서 재설정)",
+  full_resync_after_400: "전체 재수집(증분 요청 거부)",
+  full_resync_after_410: "전체 재수집(커서 만료)",
+};
+
+function attemptNote(source: AccountSource): string {
+  const reason = source.error;
+  if (!reason) return "";
+  return REASON_LABELS[reason] ?? `수집 참고: ${reason}`;
+}
+
 function sourceState(
   source: AccountSource,
   connected: boolean,
@@ -33,6 +46,8 @@ export function AccountSources({
     return <p className="run-meta">이 계정에 등록된 기능이 없습니다.</p>;
 
   const collectors = account.collectors ?? [];
+  const scheduleNames = (using: readonly Collector[]) =>
+    using.map((schedule) => schedule.title).join(", ");
   return (
     <ul className="account-sources" data-testid="account-sources">
       {account.sources.map((source) => {
@@ -61,7 +76,7 @@ export function AccountSources({
             </p>
             <p className="run-meta">
               {using.length > 0
-                ? `이 정보를 읽는 스케줄: ${using.map((schedule) => schedule.title).join(", ")}`
+                ? `이 정보를 읽는 스케줄: ${scheduleNames(using)}`
                 : "이 정보를 읽는 활성 스케줄이 없습니다. 수집하려면 스케줄 탭에서 수집 스케줄을 만드세요."}
             </p>
             <p className="run-meta">
@@ -71,7 +86,12 @@ export function AccountSources({
               마지막 수집 시도:{" "}
               {source.lastAttemptAt ? formatDateTime(source.lastAttemptAt) : "기록 없음"}
             </p>
-            {source.error ? <p className="error">최근 수집 오류: {source.error}</p> : null}
+            {source.error ? (
+              <p className={source.ok ? "run-meta" : "error"}>
+                {source.ok ? "" : "실패 원인: "}
+                {source.ok ? attemptNote(source) : source.error}
+              </p>
+            ) : null}
           </li>
         );
       })}

@@ -205,6 +205,7 @@ export function SchedulesPanel() {
             ) : (
               <ScheduleList
                 schedules={schedules}
+                accounts={accounts}
                 selectedId={selectedId}
                 busyKey={busyKey}
                 onEdit={(schedule) => setForm({ schedule })}
