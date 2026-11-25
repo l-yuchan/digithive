@@ -36,10 +36,17 @@ export const EVENT_KINDS = [
   "provider.retry",
   "provider.fallback",
   "integration.sync_state",
+  "workflow.created",
+  "workflow.updated",
+  "workflow.deleted",
+  "workflow.run",
+  "sdk.capability",
+  // Legacy kinds written before v10; kept readable, never emitted again.
   "schedule.created",
   "schedule.updated",
   "schedule.deleted",
   "schedule.run",
+  "schedule.enabled",
 ] as const;
 
 export type EventKind = (typeof EVENT_KINDS)[number];

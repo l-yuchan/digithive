@@ -2,20 +2,22 @@ import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import type { EventLog } from "../events/log";
 import {
-  CreateScheduleSchema,
-  UpdateScheduleSchema,
-  createSchedule,
-  deleteSchedule,
-  getSchedule,
-  listSchedules,
-  runScheduleNow,
-  scheduleRuns,
-  updateSchedule,
-} from "../scheduler/schedules";
+  CreateScheduleBindingSchema,
+  UpdateScheduleBindingSchema,
+} from "../workflows/workflow-types";
+import { WorkflowError, getWorkflow } from "../workflows/workflow-store";
+import {
+  bindingRuns,
+  createBinding,
+  deleteBinding,
+  getBinding,
+  listBindingViews,
+  runBindingNow,
+  updateBinding,
+} from "../scheduler/schedule-store";
 import { cancelRun } from "../surfaces/work/cancel";
 import { getRun } from "../surfaces/work/runner";
-import type { RunExecutor } from "../core/executor";
-import { getAccount, isSourceEnabled } from "../integrations/accounts";
+import { collectionRefusal } from "./workflow-routes";
 
 export type ScheduleRouteDeps = {
   readonly db: Database;
@@ -33,24 +35,27 @@ function invalid(error: { readonly issues: unknown }): Response {
   return json({ error: "invalid_schedule", issues: error.issues }, 422);
 }
 
-const RequestBody = z.record(z.string(), z.unknown());
+const STATUS: Record<string, number> = {
+  workflow_not_found: 404,
+  schedule_not_found: 404,
+  invalid_params: 422,
+  workflow_depth_exceeded: 409,
+};
 
-/**
- * Saving a collection schedule is where the owner grants use of that account's
- * information, so a schedule that reads a disabled feature is refused here with
- * the reason instead of silently collecting nothing on every run.
- */
-function collectionProblem(db: Database, executor: RunExecutor | undefined): string | null {
-  if (!executor || executor.kind !== "builtin" || executor.name !== "sync_sources") return null;
-  if (!executor.accountId) return "수집 스케줄은 계정을 골라야 합니다.";
-  const account = getAccount(db, executor.accountId);
-  if (!account) return `계정 ${executor.accountId} 이(가) 없습니다.`;
-  for (const source of executor.sources ?? []) {
-    if (!isSourceEnabled(db, account.id, source))
-      return `${account.label} 의 ${source} 정보 사용이 꺼져 있습니다. 연결 탭에서 켜거나 이 정보를 수집에서 제외하세요.`;
+function fail(error: unknown): Response {
+  if (error instanceof WorkflowError) {
+    return json({ error: error.code, detail: error.detail }, STATUS[error.code] ?? 500);
   }
-  return null;
+  return json(
+    {
+      error: "schedule_request_failed",
+      detail: error instanceof Error ? error.message : "unknown",
+    },
+    500,
+  );
 }
+
+const RequestBody = z.record(z.string(), z.unknown());
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
   const parsed: unknown = await request.json().catch(() => null);
@@ -58,8 +63,8 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
 }
 
 /**
- * Management API for persisted schedules. Returns null for any path it does not
- * own, so the main app can keep its existing routing and auth in front.
+ * Management API for schedule bindings. Returns null for any path it does not
+ * own so the main app keeps its routing and auth in front.
  */
 export async function handleScheduleRequest(
   request: Request,
@@ -69,13 +74,22 @@ export async function handleScheduleRequest(
   const path = url.pathname;
 
   if (path === "/api/schedules") {
-    if (request.method === "GET") return json({ schedules: listSchedules(deps.db) });
+    if (request.method === "GET") {
+      const workflowId = url.searchParams.get("workflowId") ?? undefined;
+      return json({ schedules: listBindingViews(deps.db, workflowId) });
+    }
     if (request.method === "POST") {
-      const parsed = CreateScheduleSchema.safeParse(await readJson(request));
+      const parsed = CreateScheduleBindingSchema.safeParse(await readJson(request));
       if (!parsed.success) return invalid(parsed.error);
-      const problem = collectionProblem(deps.db, parsed.data.executor);
-      if (problem) return json({ error: "collection_not_permitted", detail: problem }, 422);
-      return json(createSchedule(deps.db, parsed.data, Date.now(), deps.events), 201);
+      const workflow = getWorkflow(deps.db, parsed.data.workflowId);
+      if (!workflow) return json({ error: "workflow_not_found" }, 404);
+      const refusal = collectionRefusal(deps.db, workflow.executor);
+      if (refusal) return refusal;
+      try {
+        return json(createBinding(deps.db, parsed.data, Date.now(), deps.events), 201);
+      } catch (error) {
+        return fail(error);
+      }
     }
     return null;
   }
@@ -94,36 +108,47 @@ export async function handleScheduleRequest(
   const sub = scheduleMatch[2];
 
   if (sub === "run" && request.method === "POST") {
-    const queued = runScheduleNow(deps, id);
-    if (!queued) return json({ error: "schedule_not_found" }, 404);
-    return json(
-      {
-        run: queued.run,
-        occurrence: { scheduledFor: queued.scheduledFor, manual: true },
-      },
-      201,
-    );
+    const body = await readJson(request);
+    const args = z.record(z.string(), z.unknown()).optional().catch(undefined).parse(body["args"]);
+    if (!getBinding(deps.db, id)) return json({ error: "schedule_not_found" }, 404);
+    try {
+      const queued = runBindingNow(deps, id, args === undefined ? {} : { args });
+      if (!queued) return json({ error: "schedule_not_found" }, 404);
+      return json(
+        { run: queued.run, occurrence: { scheduledFor: queued.scheduledFor, manual: true } },
+        201,
+      );
+    } catch (error) {
+      return fail(error);
+    }
   }
 
   if (sub === "runs" && request.method === "GET") {
-    const runs = scheduleRuns(deps.db, id);
+    const runs = bindingRuns(deps.db, id);
     if (!runs) return json({ error: "schedule_not_found" }, 404);
     return json({ runs });
   }
 
+  if (sub === undefined && request.method === "GET") {
+    const binding = getBinding(deps.db, id);
+    if (!binding) return json({ error: "schedule_not_found" }, 404);
+    return json({ schedule: binding });
+  }
+
   if (sub === undefined && request.method === "PATCH") {
-    const parsed = UpdateScheduleSchema.safeParse(await readJson(request));
+    const parsed = UpdateScheduleBindingSchema.safeParse(await readJson(request));
     if (!parsed.success) return invalid(parsed.error);
-    const problem = collectionProblem(deps.db, parsed.data.executor);
-    if (problem) return json({ error: "collection_not_permitted", detail: problem }, 422);
-    const updated = updateSchedule(deps.db, id, parsed.data, Date.now(), deps.events);
-    if (!updated) return json({ error: "schedule_not_found" }, 404);
-    return json(updated);
+    try {
+      const updated = updateBinding(deps.db, id, parsed.data, Date.now(), deps.events);
+      if (!updated) return json({ error: "schedule_not_found" }, 404);
+      return json(updated);
+    } catch (error) {
+      return fail(error);
+    }
   }
 
   if (sub === undefined && request.method === "DELETE") {
-    if (!getSchedule(deps.db, id)) return json({ error: "schedule_not_found" }, 404);
-    deleteSchedule(deps.db, id, deps.events);
+    if (!deleteBinding(deps.db, id, deps.events)) return json({ error: "schedule_not_found" }, 404);
     return json({ deleted: true, id });
   }
 

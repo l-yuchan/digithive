@@ -2,14 +2,18 @@ import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import type { ToolRuntime } from "./registry";
 import {
-  CreateScheduleSchema,
-  UpdateScheduleSchema,
-  createSchedule,
-  deleteSchedule,
-  listSchedules,
-  runScheduleNow,
-  updateSchedule,
-} from "../scheduler/schedules";
+  CreateScheduleBindingSchema,
+  UpdateScheduleBindingSchema,
+} from "../workflows/workflow-types";
+import { WorkflowError } from "../workflows/workflow-store";
+import {
+  bindingRuns,
+  createBinding,
+  deleteBinding,
+  getBinding,
+  listBindingViews,
+  updateBinding,
+} from "../scheduler/schedule-store";
 import { z } from "zod";
 
 export type ScheduleToolDeps = {
@@ -19,95 +23,155 @@ export type ScheduleToolDeps = {
 
 const TriggerDescription =
   "once {kind:'once',at:ISO} | interval {kind:'interval',everySeconds:int,anchorAt:ISO} | daily {kind:'daily',time:'HH:mm',timeZone:IANA}";
-const ExecutorDescription =
-  "{kind:'agent'} | {kind:'builtin',name:'sync_sources'|'briefing',accountId?} | {kind:'script',path,args?}";
+
+function failure(error: unknown): string {
+  if (error instanceof WorkflowError) {
+    return JSON.stringify({ error: error.code, detail: error.detail });
+  }
+  throw error;
+}
 
 /**
- * Conversation-facing schedule management. Read lists definitions; edit only
- * persists definitions or enqueues a manual run. Nothing executes inline.
+ * A schedule only decides *when* a workflow runs. Editing one never changes the
+ * definition, and nothing here starts a run.
  */
 export function scheduleTools(deps: ScheduleToolDeps): ToolRuntime[] {
   return [
     {
-      name: "schedules_list",
-      description: "저장된 일정 정의와 마지막 실행 상태를 나열합니다. 실행을 시작하지 않습니다.",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+      name: "schedule_list",
+      description:
+        "스케줄(워크플로의 자동 실행) 목록입니다. workflowId를 주면 그 정의에 걸린 것만 봅니다. trigger: " +
+        TriggerDescription,
+      parameters: {
+        type: "object",
+        properties: { workflowId: { type: "string" } },
+        additionalProperties: false,
+      },
       action: "read",
       conversation: true,
-      execute: async () => JSON.stringify({ schedules: listSchedules(deps.db) }),
+      execute: async (raw) => {
+        const input = z.object({ workflowId: z.string().min(1).optional() }).parse(raw);
+        return JSON.stringify({ schedules: listBindingViews(deps.db, input.workflowId) });
+      },
     },
     {
-      name: "schedules_edit",
-      description: `일정 정의를 만들기·수정하기·삭제하거나 지금 실행을 큐에 넣습니다. trigger: ${TriggerDescription}. executor: ${ExecutorDescription}. create/update/delete는 실행하지 않습니다.`,
+      name: "schedule_detail",
+      description: "스케줄 하나와 최근 실행 기록입니다.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      action: "read",
+      conversation: true,
+      execute: async (raw) => {
+        const { id } = z.object({ id: z.string().min(1) }).parse(raw);
+        const binding = getBinding(deps.db, id);
+        if (!binding) return failure(new WorkflowError("schedule_not_found"));
+        const runs = (bindingRuns(deps.db, id) ?? []).slice(0, 5).map((run) => ({
+          id: run.id,
+          status: run.status,
+          scheduledFor: run.scheduledFor,
+          manual: run.manual,
+          settledAt: run.settledAt,
+          resultJson: run.resultJson === null ? null : run.resultJson.slice(0, 2_000),
+        }));
+        return JSON.stringify({ schedule: binding, runs });
+      },
+    },
+    {
+      name: "schedule_create",
+      description:
+        "워크플로에 자동 실행을 추가합니다. args는 정의가 선언한 파라미터 값이며, 무효하면 저장되지 않습니다. trigger: " +
+        TriggerDescription,
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["create", "update", "delete", "run"] },
-          id: { type: "string", description: "update/delete/run 대상 일정 id" },
-          title: { type: "string" },
-          instruction: { type: "string", description: "agent 실행의 목표" },
-          enabled: { type: "boolean" },
+          workflowId: { type: "string" },
           trigger: { type: "object", description: TriggerDescription },
-          executor: { type: "object", description: ExecutorDescription },
-          timeoutSeconds: { type: "integer", minimum: 1, maximum: 86_400 },
+          enabled: { type: "boolean" },
+          args: { type: "object" },
         },
-        required: ["action"],
+        required: ["workflowId", "trigger"],
         additionalProperties: false,
       },
       action: "edit",
       conversation: true,
       execute: async (raw) => {
-        const args = z.record(z.string(), z.unknown()).parse(raw);
-        const action = args["action"];
-        if (action === "create") {
-          const schedule = createSchedule(
+        try {
+          const schedule = createBinding(
             deps.db,
-            CreateScheduleSchema.parse({
-              title: args["title"],
-              instruction: args["instruction"],
-              enabled: args["enabled"],
-              trigger: args["trigger"],
-              executor: args["executor"],
-              timeoutSeconds: args["timeoutSeconds"],
-            }),
+            CreateScheduleBindingSchema.parse(raw),
             Date.now(),
             deps.events,
           );
           return JSON.stringify({ schedule });
+        } catch (error) {
+          return failure(error);
         }
-        const id = typeof args["id"] === "string" ? args["id"] : "";
-        if (id.length === 0) throw new Error("schedule_id_required");
-        if (action === "update") {
-          const patch: Record<string, unknown> = {};
-          for (const key of [
-            "title",
-            "instruction",
-            "enabled",
-            "trigger",
-            "executor",
-            "timeoutSeconds",
-          ] as const) {
-            if (args[key] !== undefined) patch[key] = args[key];
-          }
-          const parsed = UpdateScheduleSchema.parse(patch);
-          const schedule = updateSchedule(deps.db, id, parsed, Date.now(), deps.events);
-          if (!schedule) throw new Error("schedule_not_found");
-          return JSON.stringify({ schedule });
-        }
-        if (action === "delete") {
-          if (!deleteSchedule(deps.db, id, deps.events)) throw new Error("schedule_not_found");
-          return JSON.stringify({ deleted: true, id });
-        }
-        if (action === "run") {
-          const queued = runScheduleNow(deps, id);
-          if (!queued) throw new Error("schedule_not_found");
-          return JSON.stringify({
-            run: queued.run,
-            occurrence: { scheduledFor: queued.scheduledFor, manual: true },
-          });
-        }
-        throw new Error("invalid_action");
       },
     },
+    {
+      name: "schedule_edit",
+      description: "스케줄의 반복·사용 여부·파라미터 값을 수정합니다. 정의는 바꾸지 않습니다.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          delta: { type: "object", description: "trigger?, enabled?, args?" },
+        },
+        required: ["id", "delta"],
+        additionalProperties: false,
+      },
+      action: "edit",
+      conversation: true,
+      execute: async (raw) => {
+        try {
+          const input = z
+            .object({ id: z.string().min(1), delta: z.record(z.string(), z.unknown()) })
+            .parse(raw);
+          const schedule = updateBinding(
+            deps.db,
+            input.id,
+            UpdateScheduleBindingSchema.parse(input.delta),
+            Date.now(),
+            deps.events,
+          );
+          if (!schedule) return failure(new WorkflowError("schedule_not_found"));
+          return JSON.stringify({ schedule });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    },
+    {
+      name: "schedule_delete",
+      description: "스케줄을 삭제합니다. 워크플로 정의와 실행 기록은 남습니다.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      action: "edit",
+      conversation: true,
+      execute: async (raw) => {
+        const { id } = z.object({ id: z.string().min(1) }).parse(raw);
+        if (!deleteBinding(deps.db, id, deps.events))
+          return failure(new WorkflowError("schedule_not_found"));
+        return JSON.stringify({ deleted: true, id });
+      },
+    },
+  ];
+}
+
+export function scheduleToolNames(): string[] {
+  return [
+    "schedule_list",
+    "schedule_detail",
+    "schedule_create",
+    "schedule_edit",
+    "schedule_delete",
   ];
 }

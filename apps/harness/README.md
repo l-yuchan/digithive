@@ -72,6 +72,27 @@ TypeScript의 enum, namespace, constructor parameter property 등 non-erasable
 `tests/`는 저장소·이벤트·상태·정책·모델 프로토콜·동기화·대화 분기와
 프로세스 간 실행을 다룬다. 외부 모델 호출 없이 돈다.
 
+## 워크플로와 스케줄 (v10)
+
+정의와 자동 실행을 분리했다.
+
+- **워크플로**: 재사용 가능한 정의. `title`, `instruction`, `executor`(agent/builtin/script),
+  `params`(선언된 입력), `timeoutSeconds`. trigger는 없다.
+- **스케줄**: 정의 하나를 자동 실행하는 바인딩. `trigger`, `enabled`, `args`(바인딩된 파라미터 값),
+  `next_run_at`. 스케줄을 지워도 정의와 실행 기록은 남는다.
+- **실행**: `runs` 행이 `workflow_id`·`workflow_title`·`schedule_id`·`trigger_kind`
+  (`schedule`/`manual`/`tool`/`script`/`delegation`)·`params_json` 스냅샷을 함께 가진다.
+
+마이그레이션 v10은 기존 `schedules` 행을 `wf-<id>` 정의 + 바인딩으로 옮긴다. `schedules` 테이블은
+`schedule_occurrences`의 외래키 때문에 DROP하지 않고 제자리에서 컬럼을 바꾼다.
+
+도구(대화·작업 공용): `workflow_list`(keyword/regex/bm25 중 하나) · `workflow_detail`(섹션 선택) ·
+`workflow_create` · `workflow_edit` · `workflow_delete` · `workflow_run`(기본 동기 즉시 실행,
+`async:true`면 큐 적재) · `schedule_list/detail/create/edit/delete`.
+
+스크립트 SDK: [docs/workflow-sdk.md](../../docs/workflow-sdk.md), 예제
+`scripts/jobs/example-workflow.ts`.
+
 ## 현재 범위 (W0·W1)
 
 - 세션·엔트리·part·run·tool_call·approval·event 스키마와 마이그레이션

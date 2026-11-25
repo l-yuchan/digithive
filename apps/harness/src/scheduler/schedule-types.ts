@@ -1,92 +1,59 @@
-import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
-import { RunExecutorSchema, type RunExecutor } from "../core/executor";
-import { ScheduleTriggerSchema, nextDueAfter, type ScheduleTrigger } from "./triggers";
+import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { ScheduleTriggerSchema } from "./triggers";
+import type { ScheduleBinding } from "../workflows/workflow-types";
 
-const ScheduleInput = z.object({
-  title: z.string().trim().min(1).max(200),
-  instruction: z.string().trim().min(1).max(4_096),
-  enabled: z.boolean().default(true),
-  trigger: ScheduleTriggerSchema,
-  executor: RunExecutorSchema,
-  timeoutSeconds: z.number().int().min(1).max(86_400).default(1_800),
-});
-
-export const CreateScheduleSchema = ScheduleInput;
-/** A patch has no defaults: absent keys must never reset enabled/timeout fields. */
-export const UpdateScheduleSchema = z.object({
-  title: z.string().trim().min(1).max(200).optional(),
-  instruction: z.string().trim().min(1).max(4_096).optional(),
-  enabled: z.boolean().optional(),
-  trigger: ScheduleTriggerSchema.optional(),
-  executor: RunExecutorSchema.optional(),
-  timeoutSeconds: z.number().int().min(1).max(86_400).optional(),
-});
-
-export type CreateScheduleInput = z.infer<typeof CreateScheduleSchema>;
-export type UpdateScheduleInput = z.infer<typeof UpdateScheduleSchema>;
-
-export type Schedule = {
-  readonly id: string;
-  readonly title: string;
-  readonly instruction: string;
-  readonly enabled: boolean;
-  readonly trigger: ScheduleTrigger;
-  readonly executor: RunExecutor;
-  readonly timeoutSeconds: number;
-  readonly nextRunAt: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-};
-
-export type LastRun = {
-  readonly id: string;
-  readonly status: string;
-  readonly resultJson: string | null;
-  readonly settledAt: string | null;
-};
-
-export type ScheduleView = Schedule & { readonly lastRun: LastRun | null };
-
-export type ScheduleRow = {
+/** A schedule is only the automatic trigger of one workflow. */
+export type BindingRow = {
   id: string;
-  title: string;
-  instruction: string;
-  enabled: number;
+  workflow_id: string | null;
   trigger_json: string;
-  executor_json: string;
-  timeout_seconds: number;
+  enabled: number;
+  args_json: string;
   next_run_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export const SCHEDULE_SELECT =
-  "SELECT id,title,instruction,enabled,trigger_json,executor_json,timeout_seconds,next_run_at,created_at,updated_at FROM schedules";
+export type BindingViewRow = BindingRow & { workflow_title: string | null };
 
-export function rowToSchedule(row: ScheduleRow): Schedule {
+export const BINDING_SELECT =
+  "SELECT id,workflow_id,trigger_json,enabled,args_json,next_run_at,created_at,updated_at FROM schedules";
+
+export function parseArgs(raw: string): Readonly<Record<string, unknown>> {
+  try {
+    const value: unknown = JSON.parse(raw || "{}");
+    const parsed = z.record(z.string(), z.unknown()).safeParse(value);
+    return parsed.success ? parsed.data : {};
+  } catch {
+    return {};
+  }
+}
+
+export function rowToBinding(row: BindingRow): ScheduleBinding {
   return {
     id: row.id,
-    title: row.title,
-    instruction: row.instruction,
-    enabled: row.enabled === 1,
+    workflowId: row.workflow_id ?? "",
     trigger: ScheduleTriggerSchema.parse(JSON.parse(row.trigger_json)),
-    executor: RunExecutorSchema.parse(JSON.parse(row.executor_json)),
-    timeoutSeconds: row.timeout_seconds,
+    enabled: row.enabled === 1,
+    args: parseArgs(row.args_json),
     nextRunAt: row.next_run_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-export function readSchedule(db: Database, id: string): ScheduleRow | null {
-  return (
-    db.query<ScheduleRow, SQLQueryBindings[]>(`${SCHEDULE_SELECT} WHERE id = ?`).get(id) ?? null
-  );
+export function getBindingRow(db: Database, id: string): BindingRow | null {
+  return db.query<BindingRow, SQLQueryBindings[]>(`${BINDING_SELECT} WHERE id = ?`).get(id) ?? null;
 }
 
-export function nextFor(trigger: ScheduleTrigger, enabled: boolean, now: number): string | null {
-  if (!enabled) return null;
-  const at = nextDueAfter(trigger, now);
-  return at === null ? null : new Date(at).toISOString();
+export function listBindings(db: Database, workflowId?: string): ScheduleBinding[] {
+  const rows = workflowId
+    ? db
+        .query<BindingRow, SQLQueryBindings[]>(
+          `${BINDING_SELECT} WHERE workflow_id = ? ORDER BY created_at`,
+        )
+        .all(workflowId)
+    : db.query<BindingRow, SQLQueryBindings[]>(`${BINDING_SELECT} ORDER BY created_at`).all();
+  return rows.map(rowToBinding);
 }

@@ -210,24 +210,24 @@ test("v9 gives the placeholder account an ordinary id and moves every reference 
     expect(db.query("SELECT account_id FROM oauth_states WHERE state='st'").get()).toEqual({
       account_id: RENAMED_LEGACY_ID,
     });
-    expect(db.query("SELECT executor_json FROM schedules WHERE id='mine'").get()).toEqual({
+    expect(db.query("SELECT executor_json FROM workflows WHERE id='wf-mine'").get()).toEqual({
       executor_json: JSON.stringify({
         kind: "builtin",
         name: "sync_sources",
         accountId: RENAMED_LEGACY_ID,
       }),
     });
-    // The account-less seed is gone; every account has its own collection schedule.
-    expect(db.query("SELECT id FROM schedules WHERE id='system-sync'").get()).toBeNull();
+    // The account-less seed is gone; every account has its own collection workflow.
+    expect(db.query("SELECT id FROM workflows WHERE id='wf-system-sync'").get()).toBeNull();
     const collectors = db
       .query<{ id: string; account: string }, []>(
-        `SELECT id, json_extract(executor_json,'$.accountId') AS account FROM schedules
+        `SELECT id, json_extract(executor_json,'$.accountId') AS account FROM workflows
           WHERE json_extract(executor_json,'$.name')='sync_sources' ORDER BY id`,
       )
       .all();
     expect(collectors).toEqual([
-      { id: "collect-canvas-default", account: "canvas-default" },
-      { id: "mine", account: RENAMED_LEGACY_ID },
+      { id: "wf-collect-canvas-default", account: "canvas-default" },
+      { id: "wf-mine", account: RENAMED_LEGACY_ID },
     ]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
   } finally {

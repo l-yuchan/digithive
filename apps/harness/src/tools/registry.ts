@@ -5,6 +5,11 @@ export type ToolRuntime = ToolSpec & {
   readonly conversation?: boolean;
   /** Policy action used for the approval decision, e.g. "shell" or "read". */
   readonly action: string;
+  /**
+   * The tool enforces its own deadline (an inline workflow run does), so the
+   * surface must not race it against the generic per-call timer.
+   */
+  readonly selfDeadline?: boolean;
   readonly execute: (
     args: Record<string, unknown>,
     context: { readonly runId: string; readonly signal?: AbortSignal },

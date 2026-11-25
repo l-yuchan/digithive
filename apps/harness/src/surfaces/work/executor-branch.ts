@@ -4,6 +4,7 @@ import type { keepLease } from "./lease";
 import { ownsLease } from "./lease";
 import type { RunExecutor } from "../../core/executor";
 import { runScriptFile } from "./script";
+import { parseArgs } from "../../scheduler/schedule-types";
 import { abortMessage, dbCancelled, settle, type RunOutcome } from "./settle";
 
 type Lease = ReturnType<typeof keepLease>;
@@ -41,12 +42,27 @@ export async function executeNonAgent(
     }
 
     if (!deps.scriptsRoot) throw new Error("scripts_root_unavailable");
-    const result = await runScriptFile({
-      scriptsRoot: deps.scriptsRoot,
-      path: executor.path,
-      args: executor.args,
-      signal: lease.signal,
+    const params = parseArgs(run.paramsJson);
+    const ticket = deps.sdk?.issue({
+      runId: run.id,
+      workflowId: run.workflowId,
+      workflowTitle: run.workflowTitle,
+      params,
+      capabilities: executor.capabilities ?? [],
+      deadlineAt: now + run.timeoutSeconds * 1_000,
     });
+    let result;
+    try {
+      result = await runScriptFile({
+        scriptsRoot: deps.scriptsRoot,
+        path: executor.path,
+        args: executor.args,
+        signal: lease.signal,
+        ...(ticket === undefined ? {} : { env: ticket.env }),
+      });
+    } finally {
+      if (ticket) deps.sdk?.revoke(ticket.token);
+    }
     if (result.exitCode !== 0) {
       settle(
         deps.db,

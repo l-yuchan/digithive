@@ -4,6 +4,7 @@ import type { PolicyRule } from "../../core/policy";
 import { RunExecutorSchema, type RunExecutor } from "../../core/executor";
 import { leaseExpiry } from "../../core/run-state";
 import type { ToolRegistry } from "../../tools/registry";
+import type { ScriptTicketIssuer } from "../../sdk/ticket";
 import type { StreamFn } from "../../providers/openai";
 import type { ProviderDiagnostic } from "../../providers/router";
 import { ok } from "node:assert/strict";
@@ -29,8 +30,9 @@ export type WorkDeps = {
   };
   readonly maxConcurrent?: number;
   readonly leaseMs?: number;
-  /** Injected by main for builtin executors; scripts run locally via scriptsRoot. */
-  readonly scriptExecutor?: (
+  /** Issues the run-scoped SDK bridge ticket a script needs; absent means no SDK. */
+  readonly sdk?: ScriptTicketIssuer;
+  /** Injected by main for builtin executors; scripts run locally via scriptsRoot. */ readonly scriptExecutor?: (
     executor: Extract<RunExecutor, { kind: "builtin" }>,
     context: { readonly runId: string; readonly signal: AbortSignal },
   ) => Promise<string>;
@@ -98,6 +100,10 @@ export function enqueueRun(
     readonly delegation?: DelegateFields;
     readonly executor?: RunExecutor;
     readonly timeoutSeconds?: number;
+    /** The definition this run executes, captured so history survives deletion. */
+    readonly workflow?: { readonly id: string; readonly title: string; readonly params: unknown };
+    readonly triggerKind?: "schedule" | "manual" | "tool" | "script" | "delegation";
+    readonly scheduleId?: string | null;
     readonly now?: number;
   },
 ): RunRow {
@@ -109,8 +115,8 @@ export function enqueueRun(
   if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 86_400)
     throw new Error("invalid_timeout");
   db.query(
-    `INSERT INTO runs (id, session_id, parent_run_id, origin, goal, status, budget_json, executor_json, timeout_seconds, created_at)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+    `INSERT INTO runs (id, session_id, parent_run_id, origin, goal, status, budget_json, executor_json, timeout_seconds, workflow_id, workflow_title, schedule_id, trigger_kind, params_json, created_at)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     input.sessionId ?? null,
@@ -120,6 +126,11 @@ export function enqueueRun(
     JSON.stringify(input.delegation ?? input.budget ?? {}),
     JSON.stringify(executor),
     timeoutSeconds,
+    input.workflow?.id ?? null,
+    input.workflow?.title ?? null,
+    input.scheduleId ?? null,
+    input.triggerKind ?? null,
+    JSON.stringify(input.workflow?.params ?? {}),
     iso,
   );
   events.append({

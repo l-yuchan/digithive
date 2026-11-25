@@ -356,9 +356,12 @@ export async function runTurn(
         let timedOut = false;
         let toolTimer: ReturnType<typeof setTimeout> | undefined;
         try {
+          // A tool that manages its own deadline must not be cut off by this timer:
+          // an inline workflow run budgets from the caller's remaining time instead.
           output = await Promise.race([
             tool.execute(args, { runId }),
             new Promise<string>((resolve) => {
+              if (tool.selfDeadline === true) return;
               toolTimer = setTimeout(() => resolve("__tool_timeout__"), limits.toolMs);
             }),
           ]);

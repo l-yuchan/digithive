@@ -43,6 +43,7 @@ import type { CanvasConfig } from "../integrations/canvas";
 import { listAccounts } from "../integrations/accounts";
 import { handleAccountRequest } from "./account-routes";
 import { handleScheduleRequest } from "./schedule-routes";
+import { handleWorkflowRequest } from "./workflow-routes";
 import { handleKnowledgeRequest } from "./knowledge-routes";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
 import { latestBriefing, runBriefing } from "../scheduler/compose";
@@ -248,6 +249,8 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
 
     const accountResponse = await handleAccountRequest(request, deps);
     if (accountResponse) return accountResponse;
+    const workflowResponse = await handleWorkflowRequest(request, deps);
+    if (workflowResponse) return workflowResponse;
     const scheduleResponse = await handleScheduleRequest(request, deps);
     if (scheduleResponse) return scheduleResponse;
 

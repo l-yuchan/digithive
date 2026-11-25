@@ -18,6 +18,8 @@ const BudgetSchema = z.object({
   inputRefs: z.array(z.string()).optional(),
   completionCondition: z.string().optional(),
   permissionProfile: z.string().optional(),
+  /** Values the caller supplied for the definition's declared parameters. */
+  params: z.record(z.string(), z.unknown()).optional(),
   budget: z.object({ maxToolCalls: z.number(), maxMicroUsd: z.number() }).optional(),
   maxToolCalls: z.number().optional(),
 });
@@ -58,6 +60,9 @@ export async function executeAgent(
   let system = built.system;
   if (contract.completionCondition) {
     system += `\n\nInput references: ${JSON.stringify(contract.inputRefs)}\nCompletion condition: ${contract.completionCondition}\nPermission profile: ${contract.permissionProfile}`;
+  }
+  if (contract.params && Object.keys(contract.params).length > 0) {
+    system += `\n\n## Workflow parameters\n${JSON.stringify(contract.params, null, 2)}`;
   }
   state.messages = [{ role: "system", content: system }, ...history];
   const maxToolCalls = contract.budget?.maxToolCalls ?? contract.maxToolCalls ?? Infinity;

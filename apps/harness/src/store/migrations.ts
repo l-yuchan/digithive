@@ -5,6 +5,7 @@ import {
   COLLECTION_SEED_RETIREMENT,
   SCHEDULE_MIGRATION,
 } from "./schedule-migration";
+import { WORKFLOW_MIGRATION } from "./workflow-migration";
 
 export type Migration = {
   readonly version: number;
@@ -215,4 +216,5 @@ CREATE INDEX sync_items_at ON sync_items(at);
   { version: 7, sql: SCHEDULE_MIGRATION },
   { version: 8, sql: `${IDENTITY_MIGRATION}${COLLECTION_SEED_RETIREMENT}` },
   { version: 9, sql: `${LEGACY_GOOGLE_ACCOUNT_RENAME}${COLLECTION_SCHEDULE_SEED}` },
+  { version: 10, sql: WORKFLOW_MIGRATION },
 ];

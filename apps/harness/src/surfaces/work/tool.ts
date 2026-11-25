@@ -17,10 +17,14 @@ export function toolDecision(
   const tool = deps.tools.get(call.name);
   if (!tool || (profile === "read-only" && tool.action !== "read")) return "deny";
   const args = argumentsOf(call);
-  return decide(deps.policy, {
+  const decision = decide(deps.policy, {
     action: tool.action,
     resource: z.string().parse(args["path"] ?? args["summary"] ?? "*"),
   });
+  // Nobody is present to approve while an inline workflow call runs inside the
+  // caller's tool slot, so "ask" becomes a refusal the model can read.
+  if (profile === "inline" && decision === "ask") return "deny";
+  return decision;
 }
 
 export async function executeTool(
@@ -64,7 +68,9 @@ export async function executeTool(
         controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {
           once: true,
         });
-        timer = setTimeout(() => controller.abort(new Error("tool_timeout")), toolMs);
+        // A self-deadlined tool (inline workflow run) bounds itself by the caller's budget.
+        if (tool.selfDeadline !== true)
+          timer = setTimeout(() => controller.abort(new Error("tool_timeout")), toolMs);
       }),
     ]);
   } catch (error) {

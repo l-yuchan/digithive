@@ -16,6 +16,11 @@ export type RunRow = {
   stateJson: string | null;
   executorJson: string;
   timeoutSeconds: number;
+  workflowId: string | null;
+  workflowTitle: string | null;
+  scheduleId: string | null;
+  triggerKind: string | null;
+  paramsJson: string;
   createdAt: string;
   settledAt: string | null;
 };
@@ -36,6 +41,11 @@ type StoredRun = {
   state_json: string | null;
   executor_json: string;
   timeout_seconds: number;
+  workflow_id: string | null;
+  workflow_title: string | null;
+  schedule_id: string | null;
+  trigger_kind: string | null;
+  params_json: string;
   created_at: string;
   settled_at: string | null;
 };
@@ -56,12 +66,17 @@ const RunShape = (row: StoredRun): RunRow => ({
   stateJson: row["state_json"] === null ? null : row["state_json"],
   executorJson: row["executor_json"],
   timeoutSeconds: row["timeout_seconds"],
+  workflowId: row["workflow_id"],
+  workflowTitle: row["workflow_title"],
+  scheduleId: row["schedule_id"],
+  triggerKind: row["trigger_kind"],
+  paramsJson: row["params_json"],
   createdAt: row["created_at"],
   settledAt: row["settled_at"] === null ? null : row["settled_at"],
 });
 
 const SELECT =
-  "SELECT id, session_id, parent_run_id, origin, goal, status, cancel_intent, lease_owner, lease_expires_at, attempt, budget_json, result_json, state_json, executor_json, timeout_seconds, created_at, settled_at FROM runs";
+  "SELECT id, session_id, parent_run_id, origin, goal, status, cancel_intent, lease_owner, lease_expires_at, attempt, budget_json, result_json, state_json, executor_json, timeout_seconds, workflow_id, workflow_title, schedule_id, trigger_kind, params_json, created_at, settled_at FROM runs";
 
 export function getRun(db: Database, id: string): RunRow | null {
   const row = db.query<StoredRun, SQLQueryBindings[]>(`${SELECT} WHERE id = ?`).get(id);

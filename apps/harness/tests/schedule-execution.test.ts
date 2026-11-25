@@ -19,9 +19,53 @@ import {
 } from "../src/surfaces/work/runner";
 import { cancelRun } from "../src/surfaces/work/cancel";
 import { resolveScriptPath } from "../src/surfaces/work/script";
-import { createSchedule, dispatchDueSchedules } from "../src/scheduler/schedules";
+import { createWorkflow } from "../src/workflows/workflow-store";
+import { createBinding } from "../src/scheduler/schedule-store";
+import { dispatchDueSchedules } from "../src/scheduler/schedule-dispatch";
 import { createBuiltinExecutor } from "../src/scheduler/builtins";
 import { scheduleTools } from "../src/tools/schedules";
+import { workflowTools } from "../src/tools/workflows";
+
+/** A definition plus its trigger: the two rows a scheduled run needs. */
+function scheduledFixture(
+  db: Database,
+  deps: { readonly events: EventLog },
+  input: {
+    readonly title: string;
+    readonly instruction: string;
+    readonly executor: Parameters<typeof createWorkflow>[1]["executor"];
+    readonly timeoutSeconds?: number;
+    readonly everySeconds?: number;
+  },
+  now = BASE,
+) {
+  const workflow = createWorkflow(
+    db,
+    {
+      title: input.title,
+      instruction: input.instruction,
+      executor: input.executor,
+      params: [],
+      ...(input.timeoutSeconds === undefined ? {} : { timeoutSeconds: input.timeoutSeconds }),
+    },
+    now,
+    deps.events,
+  );
+  const binding = createBinding(
+    db,
+    {
+      workflowId: workflow.id,
+      trigger: {
+        kind: "interval",
+        everySeconds: input.everySeconds ?? 60,
+        anchorAt: new Date(now).toISOString(),
+      },
+    },
+    now,
+    deps.events,
+  );
+  return { workflow, binding };
+}
 
 const resources: { db: Database; root: string; outside: string }[] = [];
 afterEach(() => {
@@ -40,6 +84,8 @@ function setup(stream?: StreamFn) {
   db.exec("PRAGMA foreign_keys=ON");
   migrate(db);
   db.query("DELETE FROM schedules").run();
+  db.query("DELETE FROM workflows").run();
+  db.query("DELETE FROM workflows_fts").run();
   const events = new EventLog(db);
   let modelCalls = 0;
   const defaultStream: StreamFn = async function* () {
@@ -322,51 +368,60 @@ describe("builtin and agent executors", () => {
     expect(getRun(db, run.id)?.status).toBe("succeeded");
   });
 
-  test("scheduler tools never execute work inline; only automatic dispatch enqueues", async () => {
-    const { db, deps, modelCalls } = setup();
+  test("관리 도구는 실행을 만들지 않고, workflow_run만 그 자리에서 실행한다", async () => {
+    const { db, deps } = setup();
     let callbacks = 0;
     const toolDeps: WorkDeps = {
       ...deps,
       scriptExecutor: async () => {
         callbacks += 1;
-        return "should not run inline";
+        return "executed";
       },
     };
-    const tools = scheduleTools(toolDeps);
-    const edit = tools.find((tool) => tool.name === "schedules_edit");
-    if (!edit) throw new Error("fixture");
-    const ToolCreated = z.object({ schedule: z.object({ id: z.string() }) });
-    const created = ToolCreated.parse(
+    const workflows = workflowTools({ db, events: deps.events, work: () => toolDeps });
+    const createTool = workflows.find((tool) => tool.name === "workflow_create");
+    const runTool = workflows.find((tool) => tool.name === "workflow_run");
+    if (!createTool || !runTool) throw new Error("fixture");
+    const created = z.object({ workflow: z.object({ id: z.string() }) }).parse(
       JSON.parse(
-        await edit.execute(
+        await createTool.execute(
           {
-            action: "create",
             title: "자동",
             instruction: "수집",
-            enabled: true,
-            trigger: {
-              kind: "interval",
-              everySeconds: 60,
-              anchorAt: new Date(BASE).toISOString(),
-            },
-            executor: { kind: "builtin", name: "sync_sources" },
-            timeoutSeconds: 60,
+            executor: { kind: "builtin", name: "sync_sources", accountId: "acct-a" },
           },
           { runId: "conversation" },
         ),
       ),
     );
+    const scheduleTool = scheduleTools({ db, events: deps.events }).find(
+      (tool) => tool.name === "schedule_create",
+    );
+    if (!scheduleTool) throw new Error("fixture");
+    await scheduleTool.execute(
+      {
+        workflowId: created.workflow.id,
+        trigger: { kind: "interval", everySeconds: 60, anchorAt: new Date(BASE).toISOString() },
+      },
+      { runId: "conversation" },
+    );
     expect(callbacks).toBe(0);
     expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM runs").get()?.n).toBe(0);
 
-    db.query("UPDATE schedules SET next_run_at = ? WHERE id = ?").run(
+    db.query("UPDATE schedules SET next_run_at = ? WHERE workflow_id = ?").run(
       new Date(BASE).toISOString(),
-      created.schedule.id,
+      created.workflow.id,
     );
     expect(dispatchDueSchedules(toolDeps, BASE + 60_000).enqueued).toBe(1);
-    expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM runs").get()?.n).toBe(1);
     expect(callbacks).toBe(0);
-    expect(modelCalls()).toBe(0);
+
+    const inline = z
+      .object({ runId: z.string(), status: z.string() })
+      .parse(
+        JSON.parse(await runTool.execute({ id: created.workflow.id }, { runId: "conversation" })),
+      );
+    expect(inline.status).toBe("succeeded");
+    expect(callbacks).toBe(1);
   });
 
   test("a collection schedule dispatches its own account and sources and refuses anything else", async () => {
@@ -393,27 +448,20 @@ describe("builtin and agent executors", () => {
         return JSON.stringify({ accountId: executor.accountId, outcomes: [] });
       },
     };
-    const schedule = createSchedule(
-      db,
-      {
-        title: "A 메일·일정 수집",
-        instruction: "A 계정의 메일과 일정을 모읍니다.",
-        enabled: true,
-        trigger: { kind: "interval", everySeconds: 60, anchorAt: new Date(BASE).toISOString() },
-        executor: {
-          kind: "builtin",
-          name: "sync_sources",
-          accountId: "acct-a",
-          sources: ["gmail"],
-        },
-        timeoutSeconds: 60,
+    const { binding } = scheduledFixture(db, deps, {
+      title: "A 메일·일정 수집",
+      instruction: "A 계정의 메일과 일정을 모읍니다.",
+      executor: {
+        kind: "builtin",
+        name: "sync_sources",
+        accountId: "acct-a",
+        sources: ["gmail"],
       },
-      BASE,
-      deps.events,
-    );
+      timeoutSeconds: 60,
+    });
     db.query("UPDATE schedules SET next_run_at = ? WHERE id = ?").run(
       new Date(BASE).toISOString(),
-      schedule.id,
+      binding.id,
     );
     expect(dispatchDueSchedules(collecting, BASE + 60_000).enqueued).toBe(1);
     expect(await executeRun(collecting, requiredClaim(db, deps.events, "w1"))).toBe("succeeded");
@@ -522,32 +570,23 @@ describe("builtin and agent executors", () => {
 describe("schedule dispatch integration", () => {
   test("a dispatch schedules an agent run with its instruction and timeout", () => {
     const { db, deps } = setup();
-    const schedule = createSchedule(
-      db,
-      {
-        title: "에이전트",
-        instruction: "회의록을 요약한다",
-        enabled: true,
-        trigger: {
-          kind: "interval",
-          everySeconds: 3_600,
-          anchorAt: new Date(BASE).toISOString(),
-        },
-        executor: { kind: "agent" },
-        timeoutSeconds: 7_200,
-      },
-      BASE,
-    );
+    const { binding } = scheduledFixture(db, deps, {
+      title: "에이전트",
+      instruction: "회의록을 요약한다",
+      executor: { kind: "agent" },
+      timeoutSeconds: 7_200,
+      everySeconds: 3_600,
+    });
     db.query("UPDATE schedules SET next_run_at = ? WHERE id = ?").run(
       new Date(BASE).toISOString(),
-      schedule.id,
+      binding.id,
     );
     expect(dispatchDueSchedules(deps, BASE + 1_000).enqueued).toBe(1);
     const row = db
       .query<{ run_id: string }, SQLQueryBindings[]>(
         "SELECT run_id FROM schedule_occurrences WHERE schedule_id = ?",
       )
-      .get(schedule.id);
+      .get(binding.id);
     const run = getRun(db, row?.run_id ?? "");
     expect(run?.origin).toBe("work");
     expect(run?.goal).toBe("회의록을 요약한다");

@@ -77,13 +77,15 @@ export async function runScriptFile(input: {
   readonly path: string;
   readonly args: readonly string[];
   readonly signal: AbortSignal;
+  /** Extra environment for this run only (the SDK bridge URL and its token). */
+  readonly env?: Readonly<Record<string, string>>;
 }): Promise<ScriptExecution> {
   const script = resolveScriptPath(input.scriptsRoot, input.path);
   if (input.signal.aborted) throw input.signal.reason;
   const proc = Bun.spawn({
     cmd: [process.execPath, script, ...input.args],
     cwd: resolve(input.scriptsRoot),
-    env: process.env,
+    env: { ...process.env, ...input.env },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",

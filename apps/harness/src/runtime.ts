@@ -1,3 +1,5 @@
+import { SdkBridge } from "./sdk/bridge";
+import { syncSdkFile } from "./sdk/generated";
 import { dirname, join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { openDatabase } from "./store/db";
@@ -6,6 +8,7 @@ import { createRegistry } from "./tools/registry";
 import { builtinTools, WORK_POLICY } from "./tools/builtins";
 import { personalTools } from "./tools/personal";
 import { scheduleTools } from "./tools/schedules";
+import { workflowTools } from "./tools/workflows";
 import { memoryTools } from "./tools/memory";
 import { fileTools } from "./tools/files";
 import { createBuiltinExecutor } from "./scheduler/builtins";
@@ -118,6 +121,9 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     { primary, fallbacks: config.fallbackProviders },
     { cooldownMs: config.providerCooldownMs, retries: config.providerRetries },
   );
+  // `workflow_run` executes inline and therefore needs the work layer that owns
+  // the registry; the getter reads the holder once the runtime object exists.
+  const holder: { work: WorkDeps | null } = { work: null };
   const tools = createRegistry([
     ...builtinTools({ root: config.workspaceRoot }),
     ...personalTools({
@@ -130,10 +136,22 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
         redirectUri: config.googleRedirectUri,
       },
     }),
+    ...workflowTools({
+      db,
+      events,
+      work: () => {
+        if (!holder.work) throw new Error("work_deps_not_ready");
+        return holder.work;
+      },
+    }),
     ...scheduleTools({ db, events }),
     ...memoryTools(db),
     ...fileTools(db),
   ]);
+  // Scripts are separate processes, so the SDK is a loopback bridge plus a
+  // generated module; both exist only while the runtime is alive.
+  const sdk = new SdkBridge({ tools });
+  syncSdkFile(config.scriptsRoot);
   const work: WorkDeps = {
     db,
     events,
@@ -148,6 +166,7 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     },
     maxConcurrent: config.maxConcurrent,
     leaseMs: config.leaseMs,
+    sdk,
     scriptsRoot: config.scriptsRoot,
     scriptExecutor: createBuiltinExecutor({
       google: {
@@ -168,7 +187,14 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
       },
     }),
   };
-  return { work, close: () => db.close() };
+  holder.work = work;
+  return {
+    work,
+    close: () => {
+      sdk.close();
+      db.close();
+    },
+  };
 }
 
 export { claimNext, executeRun, reconcileWork, settleExpiredRuns };
