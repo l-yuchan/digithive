@@ -15,16 +15,63 @@ function triggerLabel(trigger: Trigger): string {
   }
 }
 
-function executorLabel(schedule: Schedule): string {
+const SOURCE_TEXT: Record<string, string> = {
+  calendar: "캘린더",
+  gmail: "메일",
+  canvas: "한양 LMS",
+};
+
+/**
+ * What this schedule runs, step by step: the agent instruction, the builtin steps
+ * with the exact account and sources, or the script path with each argument.
+ */
+function workflow(schedule: Schedule): { title: string; steps: string[] } {
   switch (schedule.executor.kind) {
     case "agent":
-      return "에이전트";
-    case "builtin":
-      return schedule.executor.name === "sync_sources"
-        ? "내장 · 연결 자료 수집"
-        : "내장 · 브리핑 생성";
+      return {
+        title: "에이전트 실행",
+        steps: [
+          "1. 아래 프롬프트로 에이전트를 호출합니다.",
+          `2. 프롬프트: "${schedule.instruction}"`,
+        ],
+      };
     case "script":
-      return `스크립트 · ${schedule.executor.path}`;
+      return {
+        title: "스크립트 실행",
+        steps: [
+          `1. ${schedule.executor.path} 를 실행합니다.`,
+          ...(schedule.executor.args.length === 0
+            ? ["2. 인자 없음"]
+            : schedule.executor.args.map(
+                (arg, index) => `2-${index + 1}. 인자 ${index + 1}: ${JSON.stringify(arg)}`,
+              )),
+          "3. 산출물과 종료 코드를 실행 기록에 남깁니다.",
+        ],
+      };
+    case "builtin": {
+      if (schedule.executor.name === "sync_sources") {
+        const account = schedule.executor.accountId ?? "(지정 안 됨)";
+        const sources = (schedule.executor.sources ?? []).map(
+          (source) => SOURCE_TEXT[source] ?? source,
+        );
+        return {
+          title: "수집 스케줄",
+          steps: [
+            `1. 계정 ${account} 의 연결 정보로 접근 권한을 확인합니다.`,
+            `2. ${sources.length > 0 ? sources.join(", ") : "계정에서 사용 중인 모든 정보"} 를 증분 수집합니다.`,
+            `3. 수집 결과(건수, 다음 커서, 오류)를 실행 기록에 남깁니다.`,
+          ],
+        };
+      }
+      return {
+        title: "브리핑 생성",
+        steps: [
+          `1. ${schedule.executor.accountId ? `계정 ${schedule.executor.accountId} 의` : "수집된"} 일정·메일·과제를 읽습니다.`,
+          "2. 오늘의 브리핑 문장을 만듭니다.",
+          "3. 등록된 기기로 알림을 보냅니다.",
+        ],
+      };
+    }
     default:
       throw new Error("알 수 없는 실행 방식입니다.");
   }
@@ -69,9 +116,15 @@ export function ScheduleList({
           </div>
           <p className="schedule-instruction">{schedule.instruction}</p>
           <p className="run-meta">{triggerLabel(schedule.trigger)}</p>
-          <p className="run-meta">
-            {executorLabel(schedule)} · 제한 {schedule.timeoutSeconds}초
-          </p>
+          <div className="schedule-workflow" data-testid="schedule-workflow">
+            <strong>{workflow(schedule).title}</strong>
+            <ul className="workflow-steps">
+              {workflow(schedule).steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ul>
+          </div>
+          <p className="run-meta">제한 {schedule.timeoutSeconds}초</p>
           <p className="run-meta">
             다음 실행:{" "}
             {schedule.enabled

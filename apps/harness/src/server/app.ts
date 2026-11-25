@@ -41,13 +41,11 @@ import {
 import type { GoogleDeps } from "../integrations/google";
 import type { CanvasConfig } from "../integrations/canvas";
 import { listAccounts } from "../integrations/accounts";
-import { syncEnabledSources } from "../integrations/sync";
 import { handleAccountRequest } from "./account-routes";
 import { handleScheduleRequest } from "./schedule-routes";
 import { handleKnowledgeRequest } from "./knowledge-routes";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
 import { latestBriefing, runBriefing } from "../scheduler/compose";
-import { syncStates } from "../integrations/normalize";
 
 export type AppDeps = {
   readonly db: Database;
@@ -247,12 +245,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
         canvasConfigured:
           deps.canvas.config.baseUrl.length > 0 && deps.canvas.config.token.length > 0,
         pushConfigured: pushConfigured(deps.vapid),
-        states: syncStates(deps.db),
       });
-    }
-
-    if (path === "/api/connections/sync" && request.method === "POST") {
-      return json({ results: await syncEnabledSources(deps) });
     }
 
     if (path === "/api/push/key" && request.method === "GET")
@@ -303,21 +296,13 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/runs") {
-      if (request.method === "GET")
-        return json({ runs: withApprovals(deps.db, listRuns(deps.db)) });
-      if (request.method === "POST") {
-        const raw = z
-          .union([
-            z.object({ goal: z.unknown().optional(), sessionId: z.unknown().optional() }),
-            z.null(),
-          ])
-          .catch(null)
-          .parse(await request.json().catch(() => null));
-        const goal = typeof raw?.goal === "string" ? raw.goal.trim() : "";
-        if (goal.length === 0 || goal.length > 4_096) return json({ error: "invalid_goal" }, 422);
-        const sessionId = typeof raw?.sessionId === "string" ? raw.sessionId : null;
-        const run = enqueueRun(deps.db, deps.events, { goal, sessionId, origin: "work" });
-        return json(run, 201);
+      if (request.method === "GET") {
+        const filters = {
+          query: url.searchParams.get("q") ?? "",
+          status: url.searchParams.get("status") ?? "",
+          origin: url.searchParams.get("origin") ?? "",
+        };
+        return json({ runs: withApprovals(deps.db, listRuns(deps.db, filters)) });
       }
     }
 

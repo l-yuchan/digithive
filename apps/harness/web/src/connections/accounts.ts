@@ -10,6 +10,12 @@ export const AccountSourceSchema = z.object({
   error: z.union([z.string(), z.null()]),
 });
 
+export const CollectorSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  enabled: z.boolean(),
+});
+
 export const AccountSchema = z.object({
   id: z.string(),
   provider: z.enum(["google", "canvas"]),
@@ -17,6 +23,7 @@ export const AccountSchema = z.object({
   email: z.union([z.string(), z.null()]),
   label: z.string(),
   connected: z.boolean(),
+  collectors: z.array(CollectorSchema).optional(),
   sources: z.array(AccountSourceSchema),
 });
 
@@ -27,6 +34,7 @@ export const AccountsResponseSchema = z.object({
 });
 
 export type AccountSource = z.infer<typeof AccountSourceSchema>;
+export type Collector = z.infer<typeof CollectorSchema>;
 export type Account = z.infer<typeof AccountSchema>;
 export type AccountsResponse = z.infer<typeof AccountsResponseSchema>;
 

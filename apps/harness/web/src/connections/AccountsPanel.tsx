@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
-import { apiUrl, getJson, postJson, sendJson } from "../api";
+import { apiUrl, getJson, sendJson } from "../api";
 import { reportAsync } from "../async";
 import {
   AccountsResponseSchema,
@@ -195,14 +195,6 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
             googleConfigured={state.googleConfigured}
             busyKey={busyKey}
             confirmDelete={confirmDelete === account.id}
-            onSync={() =>
-              reportAsync(
-                runAction(`sync:${account.id}`, () =>
-                  postJson(`/api/accounts/${encodeURIComponent(account.id)}/sync`, {}, z.unknown()),
-                ),
-                (error) => setActionError(String(error)),
-              )
-            }
             onToggleSource={(source, enabled) => toggleSource(account, source, enabled)}
             onDeleteStart={() => setConfirmDelete(account.id)}
             onDeleteCancel={() => setConfirmDelete(null)}

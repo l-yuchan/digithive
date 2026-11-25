@@ -68,10 +68,36 @@ export function getRun(db: Database, id: string): RunRow | null {
   return row ? RunShape(row) : null;
 }
 
-export function listRuns(db: Database, limit = 30): RunRow[] {
+export type RunFilters = {
+  /** Substring of the goal, the run id, or the recorded result. */
+  readonly query?: string;
+  readonly status?: string;
+  readonly origin?: string;
+};
+
+/** Execution history, newest first, narrowed by the log viewer's filters. */
+export function listRuns(db: Database, filters: RunFilters | number = {}, cap = 30): RunRow[] {
+  const options: RunFilters = typeof filters === "number" ? {} : filters;
+  const limit = typeof filters === "number" ? filters : cap;
+  const where: string[] = [];
+  const bindings: SQLQueryBindings[] = [];
+  if (options.query && options.query.trim().length > 0) {
+    const like = `%${options.query.trim()}%`;
+    where.push("(goal LIKE ? OR id LIKE ? OR result_json LIKE ?)");
+    bindings.push(like, like, like);
+  }
+  if (options.status) {
+    where.push("status = ?");
+    bindings.push(options.status);
+  }
+  if (options.origin) {
+    where.push("origin = ?");
+    bindings.push(options.origin);
+  }
+  const clause = where.length > 0 ? ` WHERE ${where.join(" AND ")}` : "";
   return db
-    .query<StoredRun, SQLQueryBindings[]>(`${SELECT} ORDER BY created_at DESC LIMIT ?`)
-    .all(limit)
+    .query<StoredRun, SQLQueryBindings[]>(`${SELECT}${clause} ORDER BY created_at DESC LIMIT ?`)
+    .all(...bindings, limit)
     .map(RunShape);
 }
 

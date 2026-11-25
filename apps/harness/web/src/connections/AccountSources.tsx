@@ -2,11 +2,16 @@ import type { Account, AccountSource } from "./accounts";
 import { SOURCE_LABELS } from "./accounts";
 import { formatDateTime } from "../format";
 
+/**
+ * A source switch is a permission: it decides whether this account's information
+ * may be used at all, by conversations, briefings and collection schedules. It is
+ * not a collection switch; collection is an ordinary schedule.
+ */
 function sourceState(
   source: AccountSource,
   connected: boolean,
 ): { label: string; className: string } {
-  if (!source.enabled) return { label: "일시정지됨", className: "" };
+  if (!source.enabled) return { label: "사용 안 함", className: "" };
   if (!connected) return { label: "연결 필요", className: "failed" };
   if (!source.lastAttemptAt && !source.lastSyncAt && !source.error)
     return { label: "확인 전", className: "" };
@@ -25,12 +30,14 @@ export function AccountSources({
   readonly onToggle: (source: AccountSource["source"], enabled: boolean) => void;
 }) {
   if (account.sources.length === 0)
-    return <p className="run-meta">이 계정에 등록된 수집 소스가 없습니다.</p>;
+    return <p className="run-meta">이 계정에 등록된 기능이 없습니다.</p>;
 
+  const collectors = account.collectors ?? [];
   return (
     <ul className="account-sources" data-testid="account-sources">
       {account.sources.map((source) => {
         const state = sourceState(source, account.connected);
+        const using = collectors.filter((schedule) => schedule.enabled);
         return (
           <li className="account-source" key={source.source} data-source={source.source}>
             <div className="source-head">
@@ -41,23 +48,30 @@ export function AccountSources({
                   type="checkbox"
                   checked={source.enabled}
                   disabled={disabled}
-                  aria-label={`${SOURCE_LABELS[source.source]} 수집 사용`}
+                  aria-label={`${SOURCE_LABELS[source.source]} 정보 사용`}
                   onChange={(event) => onToggle(source.source, event.target.checked)}
                 />
-                수집 사용
+                정보 사용
               </label>
             </div>
             <p className="run-meta">
-              {source.enabled ? "자동 수집을 사용합니다." : "수집이 일시정지되어 있습니다."}
-              {" · "}이어받기 정보 {source.cursor === null ? "없음" : "저장됨"}
+              {source.enabled
+                ? "대화 검색, 브리핑, 수집 스케줄이 이 정보를 사용할 수 있습니다."
+                : "사용을 끄면 대화 검색·브리핑·수집이 모두 이 정보를 읽지 않습니다."}
             </p>
             <p className="run-meta">
-              마지막 성공: {source.lastSyncAt ? formatDateTime(source.lastSyncAt) : "기록 없음"}
+              {using.length > 0
+                ? `이 정보를 읽는 스케줄: ${using.map((schedule) => schedule.title).join(", ")}`
+                : "이 정보를 읽는 활성 스케줄이 없습니다. 수집하려면 스케줄 탭에서 수집 스케줄을 만드세요."}
+            </p>
+            <p className="run-meta">
+              마지막 수집 성공:{" "}
+              {source.lastSyncAt ? formatDateTime(source.lastSyncAt) : "기록 없음"}
               <br />
-              마지막 시도:{" "}
+              마지막 수집 시도:{" "}
               {source.lastAttemptAt ? formatDateTime(source.lastAttemptAt) : "기록 없음"}
             </p>
-            {source.error ? <p className="error">최근 오류: {source.error}</p> : null}
+            {source.error ? <p className="error">최근 수집 오류: {source.error}</p> : null}
           </li>
         );
       })}

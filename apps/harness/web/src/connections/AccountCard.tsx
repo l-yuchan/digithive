@@ -8,7 +8,6 @@ export function AccountCard({
   googleConfigured,
   busyKey,
   confirmDelete,
-  onSync,
   onToggleSource,
   onDeleteStart,
   onDeleteCancel,
@@ -18,7 +17,6 @@ export function AccountCard({
   readonly googleConfigured: boolean;
   readonly busyKey: string | null;
   readonly confirmDelete: boolean;
-  readonly onSync: () => void;
   readonly onToggleSource: (source: AccountSource["source"], enabled: boolean) => void;
   readonly onDeleteStart: () => void;
   readonly onDeleteCancel: () => void;
@@ -44,15 +42,6 @@ export function AccountCard({
       <AccountSources account={account} disabled={busy} onToggle={onToggleSource} />
 
       <div className="run-actions">
-        <button
-          className="ghost"
-          type="button"
-          disabled={busy}
-          onClick={onSync}
-          data-testid="account-sync"
-        >
-          {busyKey === `sync:${account.id}` ? "동기화 중…" : "이 계정 동기화"}
-        </button>
         {account.provider === "google" && googleConfigured ? (
           <a
             className="ghost button-link"

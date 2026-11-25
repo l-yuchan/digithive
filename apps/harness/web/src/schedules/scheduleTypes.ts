@@ -14,12 +14,17 @@ export const TriggerSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+export const SourceNameSchema = z.enum(["calendar", "gmail", "canvas"]);
+export type SourceName = z.infer<typeof SourceNameSchema>;
+
 export const ExecutorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
   z.object({
     kind: z.literal("builtin"),
     name: z.enum(["sync_sources", "briefing"]),
     accountId: z.string().optional(),
+    /** Collection reads exactly these sources; absent means the account's enabled ones. */
+    sources: z.array(SourceNameSchema).min(1).max(3).optional(),
   }),
   z.object({
     kind: z.literal("script"),

@@ -17,8 +17,7 @@ import {
 } from "../src/server/auth";
 import type { StreamFn } from "../src/providers/openai";
 import type { ConversationDeps } from "../src/surfaces/conversation/loop";
-import type { WorkDeps } from "../src/surfaces/work/runner";
-import { z } from "zod";
+import { enqueueRun, type WorkDeps } from "../src/surfaces/work/runner";
 
 const auth = { passphrase: "correct horse", secret: "test-secret-value" };
 const idle: StreamFn = async function* () {};
@@ -162,14 +161,9 @@ describe("auth gate on the server", () => {
   test("delegation API rejects missing and non-finite budgets instead of creating a child", async () => {
     const fixture = deps({ passphrase: "" });
     const delegationApp = createApp(fixture);
-    const parent = await delegationApp(
-      new Request("http://local/api/runs", {
-        method: "POST",
-        body: JSON.stringify({ goal: "parent" }),
-      }),
-    );
-    const body = z.object({ id: z.string() }).parse(await parent.json());
-    expect(parent.status).toBe(201);
+    // Runs start from conversation and schedule execution; the API path is the
+    // delegation endpoint the test is about.
+    const body = enqueueRun(fixture.db, fixture.events, { goal: "parent", origin: "work" });
     for (const budget of [undefined, {}, { maxMicroUsd: -1, maxToolCalls: 1 }]) {
       const result = await delegationApp(
         new Request(`http://local/api/runs/${body.id}/delegate`, {

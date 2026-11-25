@@ -4,17 +4,10 @@ import { getJson, postJson } from "../api";
 import { PushPanel } from "./PushPanel";
 import { AccountsPanel } from "./AccountsPanel";
 
-const SyncStateSchema = z.object({
-  source: z.string(),
-  ok: z.boolean(),
-  lastSyncAt: z.union([z.string(), z.null()]),
-  error: z.union([z.string(), z.null()]),
-});
 const ConnectionsSchema = z.object({
   googleConnected: z.boolean(),
   canvasConfigured: z.boolean(),
   pushConfigured: z.boolean(),
-  states: z.array(SyncStateSchema),
 });
 type Connections = z.infer<typeof ConnectionsSchema>;
 const BriefingSchema = z.union([
@@ -26,8 +19,6 @@ const BriefingSchema = z.union([
   z.null(),
 ]);
 type Briefing = z.infer<typeof BriefingSchema>;
-
-const LABELS: Record<string, string> = { calendar: "캘린더", gmail: "메일", canvas: "한양 LMS" };
 
 export function ConnectionsPanel() {
   const [state, setState] = useState<Connections | null>(null);
@@ -59,40 +50,6 @@ export function ConnectionsPanel() {
     const timer = setInterval(refresh, 20_000);
     return () => clearInterval(timer);
   }, [refresh]);
-
-  const sync = async () => {
-    setBusy("sync");
-    setMessage(null);
-    try {
-      const result = await postJson(
-        "/api/connections/sync",
-        {},
-        z.object({
-          results: z.array(
-            z.object({
-              source: z.string(),
-              ok: z.boolean(),
-              count: z.number(),
-              error: z.union([z.string(), z.null()]),
-            }),
-          ),
-        }),
-      );
-      setMessage(
-        result.results
-          .map(
-            (row) =>
-              `${LABELS[row.source] ?? row.source} ${row.ok ? `${row.count}건` : `실패: ${row.error ?? ""}`}`,
-          )
-          .join(" · "),
-      );
-      await load();
-    } catch (error) {
-      setMessage(String(error));
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const runBriefing = async () => {
     setBusy("briefing");
@@ -129,43 +86,6 @@ export function ConnectionsPanel() {
         </p>
       ) : null}
       <AccountsPanel onChanged={refresh} />
-
-      <div className="card">
-        <div className="card-head">
-          <h2>수집 상태</h2>
-          <button
-            className="ghost"
-            type="button"
-            data-testid="sync-now"
-            disabled={busy !== null}
-            onClick={() => void sync()}
-          >
-            지금 동기화
-          </button>
-        </div>
-        <ul className="state-list" data-testid="sync-states">
-          {state === null ? (
-            <li className="run-meta">연결 상태를 불러오는 중입니다.</li>
-          ) : state.states.length === 0 ? (
-            <li className="run-meta">아직 수집 기록이 없습니다.</li>
-          ) : null}
-          {(state?.states ?? []).map((row) => (
-            <li key={row.source}>
-              <span className={`badge ${row.ok ? "succeeded" : "failed"}`}>
-                {row.ok ? "정상" : "오류"}
-              </span>{" "}
-              {LABELS[row.source] ?? row.source}
-              {row.error ? <span className="run-meta"> · {row.error}</span> : null}
-              {row.lastSyncAt ? (
-                <span className="run-meta">
-                  {" "}
-                  · {new Date(row.lastSyncAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </div>
 
       <PushPanel
         configured={state?.pushConfigured ?? null}

@@ -24,7 +24,7 @@ import {
   syncGoogleGmail,
   type GoogleDeps,
 } from "../src/integrations/google";
-import { syncEnabledSources } from "../src/integrations/sync";
+import { collectSources, type SyncSourcesDeps } from "../src/integrations/sync";
 import { syncStates } from "../src/integrations/normalize";
 import { handleAccountRequest } from "../src/server/account-routes";
 import { personalTools } from "../src/tools/personal";
@@ -43,6 +43,7 @@ const AccountsBody = z.object({
     z.object({
       id: z.string(),
       connected: z.boolean(),
+      collectors: z.array(z.object({ id: z.string(), title: z.string(), enabled: z.boolean() })),
       sources: z.array(z.object({ source: z.string(), enabled: z.boolean() })),
     }),
   ),
@@ -93,6 +94,16 @@ function fakeFetch(
 
 function bearer(init?: Parameters<typeof fetch>[1]): string {
   return new Headers(init?.headers).get("authorization") ?? "";
+}
+
+/** The gmail cursor the source actually reads; writes to last_sync_at prove nothing. */
+function gmailCursor(db: Database, accountId: string): string | null {
+  const row = db
+    .query<{ cursor: string | null }, SQLQueryBindings[]>(
+      "SELECT cursor FROM account_sources WHERE account_id=? AND source='gmail'",
+    )
+    .get(accountId);
+  return row?.cursor ?? null;
 }
 
 function addGoogle(
@@ -235,34 +246,99 @@ describe("account-scoped sync", () => {
     const a = addGoogle(db, "a@example.com", "sub-a", "at-a");
     const b = addGoogle(db, "b@example.com", "sub-b", "at-b");
     db.query(
-      "UPDATE account_sources SET cursor='old-a', ok=1 WHERE account_id=? AND source='gmail'",
+      "UPDATE account_sources SET cursor='1', ok=1 WHERE account_id=? AND source='gmail'",
     ).run(a);
     db.query(
-      "UPDATE account_sources SET cursor='old-b', ok=1 WHERE account_id=? AND source='gmail'",
+      "UPDATE account_sources SET cursor='2', ok=1 WHERE account_id=? AND source='gmail'",
     ).run(b);
     setSourceEnabled(db, b, "gmail", false);
     setSourceEnabled(db, DEFAULT_CANVAS_ACCOUNT_ID, "canvas", false);
     const calls: string[] = [];
     const deps = googleDeps(db, events, calendarAndMailFetch(calls));
 
-    const results = await syncEnabledSources({ google: deps, canvas: routeDeps(deps).canvas });
+    const syncDeps: SyncSourcesDeps = { google: deps, canvas: routeDeps(deps).canvas };
+    const results = await collectSources(syncDeps, { accountId: b });
     const byAccount = results.filter((row) => row.accountId === b);
-    expect(byAccount.map((row) => row.source)).toEqual(["calendar"]);
-    expect(results.filter((row) => row.accountId === a).map((row) => row.source)).toEqual([
-      "calendar",
-      "gmail",
-    ]);
+    expect(byAccount.map((row) => `${row.source}:${row.error ?? "ok"}`)).toEqual(
+      expect.arrayContaining(["calendar:ok", "gmail:source_disabled"]),
+    );
     expect(calls.some((call) => call.includes("/history") && call.includes("at-b"))).toBe(false);
-    expect(calls.some((call) => call.includes("/history") && call.includes("at-a"))).toBe(true);
+    expect(gmailCursor(db, b)).toBe("2");
 
     const direct = await syncGoogleGmail(deps, b);
     expect(direct).toMatchObject({ ok: false, skipped: true, error: "source_disabled" });
-    const still = db
-      .query<{ cursor: string }, SQLQueryBindings[]>(
-        "SELECT cursor FROM account_sources WHERE account_id=? AND source='gmail'",
+    expect(gmailCursor(db, b)).toBe("2");
+  });
+
+  test("a collection run reads only the sources it names, and refuses a foreign source", async () => {
+    const db = fresh();
+    const events = new EventLog(db);
+    const a = addGoogle(db, "a@example.com", "sub-a", "at-a");
+    db.query(
+      "UPDATE account_sources SET cursor='1', ok=1 WHERE account_id=? AND source='gmail'",
+    ).run(a);
+    const calls: string[] = [];
+    const deps = googleDeps(db, events, calendarAndMailFetch(calls));
+    const syncDeps: SyncSourcesDeps = { google: deps, canvas: routeDeps(deps).canvas };
+
+    const gmailOnly = await collectSources(syncDeps, { accountId: a, sources: ["gmail"] });
+    expect(gmailOnly.map((row) => row.source)).toEqual(["gmail"]);
+    expect(calls.some((call) => call.includes("/events"))).toBe(false);
+
+    const foreign = collectSources(syncDeps, { accountId: a, sources: ["canvas"] });
+    await expect(foreign).rejects.toThrow(/source_not_supported: google account/);
+    const missing = collectSources(syncDeps, { accountId: "missing" });
+    await expect(missing).rejects.toThrow(/account_not_found: missing/);
+  });
+
+  test("a disabled feature refuses collection and its cached data, and re-enabling restores it", async () => {
+    const db = fresh();
+    const events = new EventLog(db);
+    const a = addGoogle(db, "a@example.com", "sub-a", "at-a");
+    const calls: string[] = [];
+    const deps = googleDeps(db, events, calendarAndMailFetch(calls));
+    const syncDeps: SyncSourcesDeps = { google: deps, canvas: routeDeps(deps).canvas };
+    db.query(
+      "UPDATE account_sources SET cursor='1', ok=1 WHERE account_id=? AND source='gmail'",
+    ).run(a);
+    expect(await collectSources(syncDeps, { accountId: a, sources: ["gmail"] })).toEqual([
+      expect.objectContaining({ source: "gmail", ok: true, cursor: "history-at-a" }),
+    ]);
+    const cached = db
+      .query<{ n: number }, SQLQueryBindings[]>(
+        "SELECT count(*) AS n FROM sync_items WHERE account_id=? AND source='gmail'",
       )
-      .get(b);
-    expect(still).toEqual({ cursor: "old-b" });
+      .get(a);
+    expect(cached?.n).toBe(1);
+
+    expect(setSourceEnabled(db, a, "gmail", false)).toMatchObject({ enabled: false });
+    const disabled = await collectSources(syncDeps, { accountId: a, sources: ["gmail"] });
+    expect(disabled).toEqual([
+      expect.objectContaining({
+        source: "gmail",
+        ok: false,
+        skipped: true,
+        error: "source_disabled",
+      }),
+    ]);
+    const search = personalTools(deps).find((tool) => tool.name === "personal_data_search");
+    const body = SearchBody.parse(
+      JSON.parse(
+        (await search?.execute({ source: "gmail", query: "메일", accountId: a }, { runId: "r" })) ??
+          "{}",
+      ),
+    );
+    expect(body.items).toEqual([]);
+    expect(body.states).toEqual([expect.objectContaining({ accountId: a, enabled: false })]);
+
+    expect(setSourceEnabled(db, a, "gmail", true)).toMatchObject({ enabled: true });
+    const again = SearchBody.parse(
+      JSON.parse(
+        (await search?.execute({ source: "gmail", query: "메일", accountId: a }, { runId: "r" })) ??
+          "{}",
+      ),
+    );
+    expect(again.items).toHaveLength(1);
   });
 
   test("one failing token does not disturb the other account's tokens or items", async () => {
@@ -290,7 +366,11 @@ describe("account-scoped sync", () => {
       }),
     );
 
-    const results = await syncEnabledSources({ google: deps, canvas: routeDeps(deps).canvas });
+    const deps2: SyncSourcesDeps = { google: deps, canvas: routeDeps(deps).canvas };
+    const results = [
+      ...(await collectSources(deps2, { accountId: healthy })),
+      ...(await collectSources(deps2, { accountId: broken })),
+    ];
     expect(results.filter((row) => row.accountId === healthy).every((row) => row.ok)).toBe(true);
     const failed = results.filter((row) => row.accountId === broken);
     expect(failed).toHaveLength(2);
@@ -653,6 +733,35 @@ describe("account API and tools", () => {
     expect(db.query("SELECT count(*) AS n FROM sync_items WHERE account_id=?").get(a)).toEqual({
       n: 0,
     });
+  });
+
+  test("connecting an account grants use and never starts a collection", async () => {
+    const db = fresh();
+    const events = new EventLog(db);
+    const calls: string[] = [];
+    const deps = routeDeps(googleDeps(db, events, calendarAndMailFetch(calls)));
+    const before = db
+      .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM sync_items")
+      .get();
+
+    const body = AccountsBody.parse(
+      await (await handleAccountRequest(new Request("https://local/api/accounts"), deps))?.json(),
+    );
+    expect(body.accounts.map((account) => account.connected)).toEqual([false, false]);
+    expect(calls).toEqual([]);
+    const after = db
+      .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM sync_items")
+      .get();
+    expect(after).toEqual(before);
+
+    const manual = await handleAccountRequest(
+      new Request(`https://local/api/accounts/${DEFAULT_GOOGLE_ACCOUNT_ID}/sync`, {
+        method: "POST",
+      }),
+      deps,
+    );
+    // The route is gone: "/api/accounts/<id>/sync" matches no handler.
+    expect(manual).toBeNull();
   });
 
   test("authUrl asks for openid and email so identity is verifiable", () => {

@@ -1,6 +1,7 @@
 import {
   ScheduleInputSchema,
   type Executor,
+  type SourceName,
   type Schedule,
   type ScheduleInput,
   type Trigger,
@@ -19,6 +20,8 @@ export type ScheduleDraft = {
   readonly executorKind: Executor["kind"];
   readonly builtinName: "sync_sources" | "briefing";
   readonly accountId: string;
+  /** Collection sources, as the form's checkboxes hold them. */
+  readonly sources: readonly SourceName[];
   readonly scriptPath: string;
   readonly scriptArgs: string;
   readonly timeoutSeconds: string;
@@ -49,10 +52,14 @@ function fromTrigger(
 
 function fromExecutor(
   executor: Executor,
-): Pick<ScheduleDraft, "builtinName" | "accountId" | "scriptPath" | "scriptArgs"> {
+): Pick<ScheduleDraft, "builtinName" | "accountId" | "sources" | "scriptPath" | "scriptArgs"> {
   return {
     builtinName: executor.kind === "builtin" ? executor.name : "sync_sources",
     accountId: executor.kind === "builtin" ? (executor.accountId ?? "") : "",
+    sources:
+      executor.kind === "builtin" && executor.name === "sync_sources"
+        ? (executor.sources ?? [])
+        : [],
     scriptPath: executor.kind === "script" ? executor.path : "",
     scriptArgs: executor.kind === "script" ? executor.args.join("\n") : "",
   };
@@ -80,6 +87,7 @@ export function createDraft(schedule: Schedule | null): ScheduleDraft {
       : {
           builtinName: "sync_sources" as const,
           accountId: "",
+          sources: [],
           scriptPath: "",
           scriptArgs: "",
         }),
@@ -149,12 +157,24 @@ function makeExecutor(draft: ScheduleDraft): Executor {
   switch (draft.executorKind) {
     case "agent":
       return { kind: "agent" };
-    case "builtin":
+    case "builtin": {
+      if (draft.builtinName === "sync_sources") {
+        if (!draft.accountId)
+          throw new Error("수집할 계정을 고르세요. 수집은 계정을 명시한 스케줄에서만 실행됩니다.");
+        if (draft.sources.length === 0) throw new Error("수집할 정보를 하나 이상 고르세요.");
+        return {
+          kind: "builtin",
+          name: draft.builtinName,
+          accountId: draft.accountId,
+          sources: [...draft.sources],
+        };
+      }
       return {
         kind: "builtin",
         name: draft.builtinName,
         ...(draft.accountId ? { accountId: draft.accountId } : {}),
       };
+    }
     case "script":
       return {
         kind: "script",

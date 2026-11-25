@@ -1,5 +1,5 @@
 import type { WorkDeps } from "../surfaces/work/runner";
-import { syncEnabledSources, type SyncSourcesDeps } from "../integrations/sync";
+import { collectSources, type SyncSourcesDeps } from "../integrations/sync";
 import { runBriefing } from "./compose";
 import { getAccount } from "../integrations/accounts";
 import { sendPush, type PushConfig } from "./push";
@@ -18,15 +18,25 @@ export function createBuiltinExecutor(deps: BuiltinDeps): NonNullable<WorkDeps["
       );
     switch (executor.name) {
       case "sync_sources": {
-        const outcomes = await syncEnabledSources(
+        if (!executor.accountId) {
+          throw new Error("account_required: collection runs name the account they read");
+        }
+        const outcomes = await collectSources(
           {
             google: { ...deps.google, fetchImpl: scopedFetch(deps.google.fetchImpl ?? fetch) },
             canvas: { ...deps.canvas, fetchImpl: scopedFetch(deps.canvas.fetchImpl ?? fetch) },
           },
-          executor.accountId,
+          {
+            accountId: executor.accountId,
+            ...(executor.sources === undefined ? {} : { sources: executor.sources }),
+          },
         );
         context.signal.throwIfAborted();
-        const output = JSON.stringify({ outcomes });
+        const output = JSON.stringify({
+          accountId: executor.accountId,
+          sources: executor.sources ?? "enabled",
+          outcomes,
+        });
         if (outcomes.some((outcome) => !outcome.ok && !outcome.skipped)) throw new Error(output);
         return output;
       }

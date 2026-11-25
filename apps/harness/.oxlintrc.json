@@ -39,6 +39,13 @@
       "rules": { "programming/no-em-dash-copy": "error" }
     },
     {
+      "files": ["tests/**"],
+      "rules": {
+        "typescript/no-unsafe-argument": "off",
+        "typescript/await-thenable": "off"
+      }
+    },
+    {
       "files": ["lint/**/*.js", "web/sw.js"],
       "rules": {
         "typescript/no-unsafe-assignment": "off",

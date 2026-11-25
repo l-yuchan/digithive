@@ -11,6 +11,7 @@ import {
   setSourceEnabled,
   sourcesForProvider,
   upsertGoogleAccount,
+  type AccountRecord,
   type SourceName,
 } from "../integrations/accounts";
 import {
@@ -21,7 +22,6 @@ import {
   saveTokens,
   type GoogleDeps,
 } from "../integrations/google";
-import { syncEnabledSources } from "../integrations/sync";
 import { z } from "zod";
 
 /** The same object shape the app already assembles for Google and Canvas. */
@@ -42,14 +42,41 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/**
+ * Schedules that read this account, so the permission switch can name what will
+ * stop using the account's information if it is turned off.
+ */
+function collectorNames(deps: AccountRouteDeps, accounts: readonly AccountRecord[]) {
+  const rows = deps.google.db
+    .query<{ id: string; title: string; enabled: number; executor_json: string }, []>(
+      "SELECT id,title,enabled,executor_json FROM schedules ORDER BY title",
+    )
+    .all();
+  const byAccount = new Map<string, { id: string; title: string; enabled: boolean }[]>();
+  for (const row of rows) {
+    const executor = z
+      .object({ accountId: z.unknown().optional() })
+      .safeParse(JSON.parse(row.executor_json));
+    const accountId = executor.success ? executor.data.accountId : undefined;
+    if (typeof accountId !== "string") continue;
+    const list = byAccount.get(accountId) ?? [];
+    list.push({ id: row.id, title: row.title, enabled: row.enabled === 1 });
+    byAccount.set(accountId, list);
+  }
+  return new Map(accounts.map((account) => [account.id, byAccount.get(account.id) ?? []]));
+}
+
 function accountJson(deps: AccountRouteDeps, canvasConnected: boolean) {
-  return listAccounts(deps.google.db, { canvasConfigured: canvasConnected }).map((account) => ({
+  const accounts = listAccounts(deps.google.db, { canvasConfigured: canvasConnected });
+  const collectors = collectorNames(deps, accounts);
+  return accounts.map((account) => ({
     id: account.id,
     provider: account.provider,
     subject: account.subject,
     email: account.email,
     label: account.label,
     connected: account.connected,
+    collectors: collectors.get(account.id) ?? [],
     sources: account.sources.map((source) => ({
       source: source.source,
       enabled: source.enabled,
@@ -150,7 +177,7 @@ async function handleOAuthCallback(request: Request, deps: AccountRouteDeps): Pr
         kind: "integration.connected",
         payload: { provider: "google", accountId: target.id, subject: identity.subject },
       });
-      await syncEnabledSources({ google: deps.google, canvas: deps.canvas }, target.id);
+      // Connecting grants use; it never collects. Collection is a schedule.
       return redirect(url, { oauth: "ok", account: target.id });
     }
 
@@ -170,7 +197,6 @@ async function handleOAuthCallback(request: Request, deps: AccountRouteDeps): Pr
         created: account.created,
       },
     });
-    await syncEnabledSources({ google: deps.google, canvas: deps.canvas }, account.id);
     return redirect(url, { oauth: "ok", account: account.id });
   } catch (error) {
     deps.google.events.append({
@@ -237,25 +263,6 @@ export async function handleAccountRequest(
       payload: { accountId, source, enabled: parsed.data.enabled },
     });
     return json({ accountId, source: updated });
-  }
-
-  const syncMatch = /^\/api\/accounts\/([^/]+)\/sync$/.exec(path);
-  if (syncMatch && request.method === "POST") {
-    const accountId = decodeURIComponent(syncMatch[1] ?? "");
-    if (!getAccount(deps.google.db, accountId))
-      return json({ error: "account_not_found", detail: accountId }, 404);
-    try {
-      const results = await syncEnabledSources(
-        { google: deps.google, canvas: deps.canvas },
-        accountId,
-      );
-      return json({ accountId, results });
-    } catch (error) {
-      return json(
-        { error: "sync_failed", detail: error instanceof Error ? error.message : "unknown" },
-        500,
-      );
-    }
   }
 
   const deleteMatch = /^\/api\/accounts\/([^/]+)$/.exec(path);

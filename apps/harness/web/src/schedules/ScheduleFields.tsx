@@ -1,5 +1,5 @@
 import type { Account } from "../connections/accounts";
-import { PROVIDER_LABELS } from "../connections/accounts";
+import { PROVIDER_LABELS, SOURCE_LABELS } from "../connections/accounts";
 import type { ScheduleDraft } from "./scheduleDraft";
 
 export type ChangeDraft = <K extends keyof ScheduleDraft>(key: K, value: ScheduleDraft[K]) => void;
@@ -139,12 +139,12 @@ export function ExecutorFields({
             </select>
           </label>
           <label className="field">
-            <span>계정 범위(선택)</span>
+            <span>{draft.builtinName === "sync_sources" ? "수집 계정" : "계정 범위(선택)"}</span>
             <select
               value={draft.accountId}
               onChange={(event) => onChange("accountId", event.target.value)}
             >
-              <option value="">모든 계정</option>
+              {draft.builtinName === "sync_sources" ? null : <option value="">모든 계정</option>}
               {accountMissing ? (
                 <option value={draft.accountId}>{draft.accountId} · 현재 목록에 없음</option>
               ) : null}
@@ -155,7 +155,39 @@ export function ExecutorFields({
                 </option>
               ))}
             </select>
+            {draft.builtinName === "sync_sources" ? (
+              <small>수집 스케줄은 이 계정만 읽습니다. 기능 끄기와 무관하게 실행됩니다.</small>
+            ) : null}
           </label>
+          {draft.builtinName === "sync_sources" ? (
+            <fieldset className="field field-wide source-picker">
+              <legend>수집할 정보</legend>
+              {(accounts.find((account) => account.id === draft.accountId)?.sources ?? [])
+                .length === 0 ? (
+                <small>계정을 고르면 그 계정이 제공하는 정보를 선택할 수 있습니다.</small>
+              ) : null}
+              {(accounts.find((account) => account.id === draft.accountId)?.sources ?? []).map(
+                (source) => (
+                  <label key={source.source} className="source-toggle">
+                    <input
+                      type="checkbox"
+                      checked={draft.sources.includes(source.source)}
+                      onChange={(event) =>
+                        onChange(
+                          "sources",
+                          event.target.checked
+                            ? [...draft.sources, source.source]
+                            : draft.sources.filter((item) => item !== source.source),
+                        )
+                      }
+                    />
+                    {SOURCE_LABELS[source.source]}
+                    {source.enabled ? null : <span className="run-meta"> · 기능 꺼짐</span>}
+                  </label>
+                ),
+              )}
+            </fieldset>
+          ) : null}
         </>
       ) : null}
       {draft.executorKind === "script" ? (
