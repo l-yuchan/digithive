@@ -1,5 +1,5 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { appendEntry, listEntries, type Entry } from "./sessions";
+import { appendEntry, listEntries, type Entry, type Session } from "./sessions";
 
 function entryById(db: Database, sessionId: string, entryId: string): Entry | null {
   return listEntries(db, sessionId).find((candidate) => candidate.id === entryId) ?? null;
@@ -162,31 +162,27 @@ export function forkSession(
   return { sessionId: id, entries: chain.length };
 }
 
-export function searchSessions(
-  db: Database,
-  query: string,
-  limit = 20,
-): { id: string; title: string }[] {
+export function searchSessions(db: Database, query: string, limit = 20): Session[] {
   const trimmed = query.trim();
   if (trimmed.length === 0) return [];
   try {
     if (trimmed.length >= 3) {
       return db
-        .query<{ id: string; title: string }, SQLQueryBindings[]>(
-          `SELECT DISTINCT s.id AS id, s.title AS title FROM sessions s
-           JOIN entries_fts f ON f.session_id = s.id
-           WHERE s.deleted_at IS NULL AND entries_fts MATCH ?
+        .query<Session, SQLQueryBindings[]>(
+          `SELECT s.id,s.title,s.created_at,s.updated_at FROM sessions s
+           WHERE s.deleted_at IS NULL AND (s.title LIKE ? OR s.id IN
+             (SELECT session_id FROM entries_fts WHERE entries_fts MATCH ?))
            LIMIT ?`,
         )
-        .all(`"${trimmed.replace(/"/g, '""')}"`, limit);
+        .all(`%${trimmed}%`, `"${trimmed.replace(/"/g, '""')}"`, limit);
     }
   } catch {
     // fall through to LIKE for short or unparsable queries
   }
   const like = `%${trimmed}%`;
   return db
-    .query<{ id: string; title: string }, SQLQueryBindings[]>(
-      `SELECT DISTINCT s.id AS id, s.title AS title FROM sessions s
+    .query<Session, SQLQueryBindings[]>(
+      `SELECT DISTINCT s.id,s.title,s.created_at,s.updated_at FROM sessions s
        LEFT JOIN entries e ON e.session_id = s.id
        WHERE s.deleted_at IS NULL AND (s.title LIKE ? OR e.payload_json LIKE ?)
        LIMIT ?`,

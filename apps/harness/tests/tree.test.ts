@@ -224,7 +224,7 @@ describe("conversation tree", () => {
     expect(pathEntries(db, sessionId).map((entry) => entry.id)).toEqual([u1.id, a1.id]);
   });
 
-  test("search finds Korean text in message bodies", () => {
+  test("search returns complete sessions from titles and Korean message bodies", () => {
     const { db, sessionId } = setup();
     const user = appendEntry(db, {
       sessionId,
@@ -239,8 +239,13 @@ describe("conversation tree", () => {
       "complete",
       sessionId,
     );
-    expect(searchSessions(db, "회의").map((row) => row.id)).toContain(sessionId);
+    const found = searchSessions(db, "회의");
+    expect(found.map((row) => row.id)).toContain(sessionId);
+    expect(typeof found[0]?.created_at).toBe("string");
+    expect(typeof found[0]?.updated_at).toBe("string");
     expect(searchSessions(db, "준비물").map((row) => row.id)).toContain(sessionId);
     expect(searchSessions(db, "없는단어")).toHaveLength(0);
+    db.query("UPDATE sessions SET title='뉴스레터 자료' WHERE id=?").run(sessionId);
+    expect(searchSessions(db, "뉴스레터").map((row) => row.id)).toEqual([sessionId]);
   });
 });

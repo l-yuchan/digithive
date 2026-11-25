@@ -162,7 +162,7 @@ export type GoogleDeps = {
 };
 
 /** Returns a live access token, refreshing and re-saving it when it is expired. */
-async function accessToken(deps: GoogleDeps): Promise<string> {
+export async function accessToken(deps: GoogleDeps): Promise<string> {
   const tokens = loadTokens(deps.db, deps.vaultSecret);
   if (!tokens) throw new Error("google_not_connected");
   const now = (deps.now ?? Date.now)();

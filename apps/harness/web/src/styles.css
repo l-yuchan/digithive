@@ -30,7 +30,7 @@ body {
 
 .shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   height: 100dvh;
 }
 
@@ -42,6 +42,11 @@ body {
   background: var(--panel);
   border-right: 1px solid #232a36;
   min-height: 0;
+  min-width: 0;
+}
+
+.sidebar-toggle {
+  display: none;
 }
 
 .sidebar h1 {
@@ -87,6 +92,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   padding: 16px;
   gap: 12px;
 }
@@ -157,6 +163,13 @@ body {
   color: #ffb3b3;
 }
 
+.tool-call pre,
+.tool-result pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
 .typing {
   color: var(--muted);
 }
@@ -212,17 +225,33 @@ a.primary[aria-disabled="true"] {
 
 @media (max-width: 720px) {
   .shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar-toggle {
+    display: block;
+    margin: 8px 10px 0;
+    min-height: 44px;
+    text-align: left;
   }
 
   .sidebar {
-    flex-direction: row;
-    align-items: center;
+    display: none;
+    grid-row: 2;
+    flex-direction: column;
     gap: 8px;
     border-right: none;
     border-bottom: 1px solid #232a36;
     padding: 10px 12px;
+  }
+
+  .sidebar-open .sidebar {
+    display: flex;
+  }
+
+  .sidebar-open .conversation {
+    display: none;
   }
 
   .sidebar h1 {
@@ -231,14 +260,19 @@ a.primary[aria-disabled="true"] {
   }
 
   .session-list {
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
+    display: block;
+    overflow-y: auto;
     flex: 1;
   }
 
   .session-item {
     white-space: nowrap;
+    min-height: 44px;
+  }
+
+  .sidebar .icon {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .conn {
@@ -248,6 +282,25 @@ a.primary[aria-disabled="true"] {
   .conversation {
     padding: 10px;
   }
+}
+
+.composer textarea,
+.run-form input,
+.rename-form input,
+.login input {
+  min-width: 0;
+}
+
+.run-actions,
+.card-head {
+  flex-wrap: wrap;
+}
+
+.run-meta,
+.error,
+.tool-result,
+.reasoning {
+  overflow-wrap: anywhere;
 }
 
 .search {
@@ -542,6 +595,12 @@ button.ghost {
 .card-head h2 {
   font-size: 15px;
   margin: 0;
+}
+
+.card-head .badge {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .state-list {

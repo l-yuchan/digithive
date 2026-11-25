@@ -12,9 +12,11 @@ import {
   type Session,
 } from "./api";
 import { Composer } from "./composer/Composer";
+import { ConversationSidebar, type RenameTarget } from "./sidebar/ConversationSidebar";
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { Login } from "./auth/Login";
+import { MessageParts } from "./MessageParts";
 
 type State = {
   readonly sessions: Session[];
@@ -135,57 +137,16 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-function Parts({ parts }: { parts: Part[] }) {
-  return (
-    <>
-      {parts.map((part, index) => {
-        if (part.type === "text")
-          return (
-            <p key={index} className="text">
-              {part.text}
-            </p>
-          );
-        if (part.type === "reasoning")
-          return (
-            <p key={index} className="reasoning">
-              {part.text}
-            </p>
-          );
-        if (part.type === "tool_call")
-          return (
-            <p key={index} className="tool-call" data-testid="tool-call">
-              도구 호출 · {part.name}
-            </p>
-          );
-        if (part.type === "tool_result")
-          return (
-            <p
-              key={index}
-              className={part.denied ? "tool-result denied" : "tool-result"}
-              data-testid="tool-result"
-            >
-              {part.denied ? "거부됨" : part.timeout ? "시간 초과" : "결과"} · {part.name}
-            </p>
-          );
-        return (
-          <p key={index} className="error">
-            {part.message}
-          </p>
-        );
-      })}
-    </>
-  );
-}
-
 export function App() {
   const [state, dispatch] = useReducer(reducer, initial);
   const [sending, setSending] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
+  const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"chat" | "work" | "connections">("chat");
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     void getJson("/api/session", z.object({ authenticated: z.boolean() }))
@@ -329,6 +290,7 @@ export function App() {
     const created = await postJson("/api/sessions", { title: "새 대화" }, SessionSchema);
     await reloadSessions();
     dispatch({ type: "active", id: created.id });
+    setSidebarOpen(false);
   };
 
   const saveRename = async () => {
@@ -425,100 +387,33 @@ export function App() {
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
   return (
-    <div className="shell">
-      <aside className="sidebar" aria-label="대화 목록">
-        <h1>digithive</h1>
-        <button
-          className="primary"
-          type="button"
-          data-testid="new-session"
-          onClick={() => void newSession()}
-        >
-          새 대화
-        </button>
-        <input
-          className="search"
-          type="search"
-          placeholder="대화 검색"
-          data-testid="session-search"
-          value={query}
-          onChange={(event) => void search(event.target.value)}
-        />
-        <ul className="session-list">
-          {state.sessions.map((session) => (
-            <li key={session.id} className="session-row">
-              {renaming?.id === session.id ? (
-                <span className="rename-form">
-                  <input
-                    data-testid="rename-input"
-                    value={renaming.title}
-                    onChange={(event) => setRenaming({ id: session.id, title: event.target.value })}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") saveRename().catch(reportError);
-                      if (event.key === "Escape") setRenaming(null);
-                    }}
-                    autoFocus
-                  />
-                  <button type="button" data-testid="rename-save" onClick={() => void saveRename()}>
-                    저장
-                  </button>
-                  <button type="button" onClick={() => setRenaming(null)}>
-                    취소
-                  </button>
-                </span>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="session-item"
-                    aria-current={session.id === state.activeId ? "true" : undefined}
-                    onClick={() => dispatch({ type: "active", id: session.id })}
-                  >
-                    {session.title}
-                  </button>
-                  <button
-                    type="button"
-                    className="icon"
-                    aria-label={`${session.title} 이름 변경`}
-                    data-testid="session-rename"
-                    onClick={() => setRenaming({ id: session.id, title: session.title })}
-                  >
-                    ✎
-                  </button>
-                  {confirmDelete === session.id ? (
-                    <>
-                      <button
-                        type="button"
-                        className="icon danger"
-                        data-testid="session-delete-confirm"
-                        onClick={() => void removeSession(session.id)}
-                      >
-                        삭제
-                      </button>
-                      <button type="button" className="icon" onClick={() => setConfirmDelete(null)}>
-                        취소
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="icon"
-                      aria-label={`${session.title} 삭제`}
-                      data-testid="session-delete"
-                      onClick={() => setConfirmDelete(session.id)}
-                    >
-                      ×
-                    </button>
-                  )}
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-        <p className="conn" data-testid="connection">
-          {state.connected ? "연결됨" : "연결 중…"}
-        </p>
-      </aside>
+    <div className={`shell${sidebarOpen ? " sidebar-open" : ""}`}>
+      <ConversationSidebar
+        sessions={state.sessions}
+        activeId={state.activeId}
+        connected={state.connected}
+        open={sidebarOpen}
+        query={query}
+        renaming={renaming}
+        confirmDelete={confirmDelete}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        onClose={() => setSidebarOpen(false)}
+        onNew={() => void newSession()}
+        onSearch={(value) => void search(value)}
+        onSelect={(id) => {
+          dispatch({ type: "active", id });
+          setSidebarOpen(false);
+        }}
+        onRenameStart={(session) => setRenaming({ id: session.id, title: session.title })}
+        onRenameChange={(title) =>
+          setRenaming((current) => (current ? { id: current.id, title } : current))
+        }
+        onRenameSave={() => void saveRename()}
+        onRenameCancel={() => setRenaming(null)}
+        onDeleteStart={(id) => setConfirmDelete(id)}
+        onDelete={(id) => void removeSession(id)}
+        onDeleteCancel={() => setConfirmDelete(null)}
+      />
       <main className="conversation" aria-label={view === "chat" ? "대화" : "작업"}>
         <nav className="tabs" role="tablist">
           <button
@@ -617,7 +512,7 @@ export function App() {
                         </span>
                       </span>
                     ) : (
-                      <Parts parts={entry.parts} />
+                      <MessageParts parts={entry.parts} />
                     )}
                     {entry.status === "streaming" && entry.parts.length === 0 ? (
                       <span className="typing">…</span>

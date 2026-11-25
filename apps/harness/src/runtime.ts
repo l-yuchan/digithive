@@ -4,6 +4,7 @@ import { openDatabase } from "./store/db";
 import { EventLog } from "./events/log";
 import { createRegistry } from "./tools/registry";
 import { builtinTools, WORK_POLICY } from "./tools/builtins";
+import { personalTools } from "./tools/personal";
 import { openAiStream } from "./providers/openai";
 import { settleExpiredRuns } from "./core/run-state";
 import {
@@ -43,6 +44,11 @@ export type HarnessConfig = {
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): HarnessConfig {
+  if (env["GOOGLE_CLIENT_ID"] && !env["HARNESS_SESSION_SECRET"]) {
+    throw new Error(
+      "HARNESS_SESSION_SECRET is required to share Google credentials across processes",
+    );
+  }
   const dataDir = resolve(appRoot, "data");
   return {
     port: Number(env["PORT"] ?? "8799"),
@@ -82,7 +88,19 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     model: config.model,
     headers: parseHeaders(config.modelHeaders),
   });
-  const tools = createRegistry(builtinTools({ root: config.workspaceRoot }));
+  const tools = createRegistry([
+    ...builtinTools({ root: config.workspaceRoot }),
+    ...personalTools({
+      db,
+      events,
+      vaultSecret: config.sessionSecret,
+      config: {
+        clientId: config.googleClientId,
+        clientSecret: config.googleClientSecret,
+        redirectUri: config.googleRedirectUri,
+      },
+    }),
+  ]);
   const work: WorkDeps = {
     db,
     events,

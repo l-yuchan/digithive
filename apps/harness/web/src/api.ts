@@ -12,7 +12,10 @@ export function apiUrl(path: string): string {
 
 export async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<T> {
   const response = await fetch(apiUrl(url));
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  if (!response.ok)
+    throw new Error(
+      `GET ${apiUrl(url)} → ${response.status} ${response.statusText}\n${await response.text()}`,
+    );
   return schema.parse(await response.json());
 }
 
@@ -44,6 +47,9 @@ export async function sendJson(
       ? { method }
       : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
   const response = await fetch(apiUrl(url), init);
-  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  if (!response.ok)
+    throw new Error(
+      `${method} ${apiUrl(url)} → ${response.status} ${response.statusText}\n${await response.text()}`,
+    );
   return schema.parse(await response.json());
 }

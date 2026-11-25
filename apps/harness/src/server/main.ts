@@ -42,7 +42,7 @@ export function createHarness(config: HarnessConfig): {
     db,
     events,
     stream,
-    tools: createRegistry([]),
+    tools: createRegistry(runtime.work.tools.tools.filter((tool) => tool.action === "read")),
     summarize,
     maxChars: config.maxChars,
   };

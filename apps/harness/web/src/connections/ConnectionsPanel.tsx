@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl, getJson, postJson } from "../api";
+import { PushPanel } from "./PushPanel";
 
 const SyncStateSchema = z.object({
   source: z.string(),
@@ -27,21 +28,12 @@ type Briefing = z.infer<typeof BriefingSchema>;
 
 const LABELS: Record<string, string> = { calendar: "캘린더", gmail: "메일", canvas: "한양 LMS" };
 
-function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
-  const padding = "=".repeat((4 - (base64.length % 4)) % 4);
-  const normalized = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(normalized);
-  const bytes = new Uint8Array(new ArrayBuffer(raw.length));
-  for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
-  return bytes;
-}
-
 export function ConnectionsPanel() {
   const [state, setState] = useState<Connections | null>(null);
   const [briefing, setBriefing] = useState<Briefing>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [pushState, setPushState] = useState<string>("확인 전");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(
     () =>
@@ -56,8 +48,13 @@ export function ConnectionsPanel() {
   );
 
   useEffect(() => {
-    void load().catch((error: unknown) => setMessage(String(error)));
-    const timer = setInterval(() => void load().catch(() => undefined), 20_000);
+    const refresh = () => {
+      void load()
+        .then(() => setLoadError(null))
+        .catch((error: unknown) => setLoadError(String(error)));
+    };
+    refresh();
+    const timer = setInterval(refresh, 20_000);
     return () => clearInterval(timer);
   }, [load]);
 
@@ -122,71 +119,29 @@ export function ConnectionsPanel() {
     }
   };
 
-  const enablePush = async () => {
-    setBusy("push");
-    setMessage(null);
-    try {
-      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-        setPushState("이 브라우저는 푸시를 지원하지 않습니다");
-        return;
-      }
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setPushState("알림 권한이 거부되었습니다");
-        return;
-      }
-      const registration = await navigator.serviceWorker.register(apiUrl("/sw.js"));
-      const { publicKey } = await getJson("/api/push/key", z.object({ publicKey: z.string() }));
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(publicKey),
-      });
-      await postJson("/api/push/subscribe", { subscription: subscription.toJSON() });
-      setPushState("이 기기로 알림을 받습니다");
-      setMessage("알림 구독을 저장했습니다.");
-    } catch (error) {
-      setPushState(`구독 실패: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const testPush = async () => {
-    setBusy("test");
-    try {
-      const outcome = await postJson(
-        "/api/push/test",
-        {},
-        z.object({ sent: z.number(), failed: z.number(), errors: z.array(z.string()) }),
-      );
-      setMessage(
-        outcome.sent > 0
-          ? `테스트 알림 전송(${outcome.sent}대)`
-          : `전송 실패: ${outcome.errors.join(", ")}`,
-      );
-    } catch (error) {
-      setMessage(String(error));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <section className="connections" aria-label="연결">
+      {loadError ? (
+        <p className="error" role="alert" data-testid="connections-load-error">
+          연결 상태를 불러오지 못했습니다: {loadError}
+        </p>
+      ) : null}
       <div className="card">
         <div className="card-head">
           <h2>Google (캘린더·메일)</h2>
           <span
-            className={`badge ${state?.googleConnected ? "succeeded" : "failed"}`}
+            className={`badge ${state === null ? "" : state.googleConnected ? "succeeded" : "failed"}`}
             data-testid="google-state"
           >
-            {state?.googleConnected ? "연결됨" : "미연결"}
+            {state === null ? "확인 중" : state.googleConnected ? "연결됨" : "미연결"}
           </span>
         </div>
         <p className="run-meta">
-          {state?.googleConnected
-            ? "증분 수집이 켜져 있습니다. 캘린더는 syncToken, 메일은 historyId로 이어받습니다."
-            : "연결하면 캘린더와 메일을 읽어 일정·메일 브리핑에 넣습니다."}
+          {state === null
+            ? "연결 상태를 확인 중입니다."
+            : state.googleConnected
+              ? "증분 수집이 켜져 있습니다. 캘린더는 syncToken, 메일은 historyId로 이어받습니다."
+              : "연결하면 캘린더와 메일을 읽어 일정·메일 브리핑에 넣습니다."}
         </p>
         <div className="run-actions">
           <a
@@ -203,10 +158,10 @@ export function ConnectionsPanel() {
         <div className="card-head">
           <h2>한양 LMS</h2>
           <span
-            className={`badge ${state?.canvasConfigured ? "succeeded" : "failed"}`}
+            className={`badge ${state === null ? "" : state.canvasConfigured ? "succeeded" : "failed"}`}
             data-testid="canvas-state"
           >
-            {state?.canvasConfigured ? "설정됨" : "미설정"}
+            {state === null ? "확인 중" : state.canvasConfigured ? "설정됨" : "미설정"}
           </span>
         </div>
         <p className="run-meta">과제·퀴즈 마감을 가져와 브리핑에 넣습니다.</p>
@@ -226,7 +181,9 @@ export function ConnectionsPanel() {
           </button>
         </div>
         <ul className="state-list" data-testid="sync-states">
-          {(state?.states ?? []).length === 0 ? (
+          {state === null ? (
+            <li className="run-meta">연결 상태를 불러오는 중입니다.</li>
+          ) : state.states.length === 0 ? (
             <li className="run-meta">아직 수집 기록이 없습니다.</li>
           ) : null}
           {(state?.states ?? []).map((row) => (
@@ -247,38 +204,12 @@ export function ConnectionsPanel() {
         </ul>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h2>알림</h2>
-          <span className="badge" data-testid="push-state">
-            {pushState}
-          </span>
-        </div>
-        <p className="run-meta">
-          브리핑이 만들어지면 이 기기로 알립니다. (VAPID:{" "}
-          {state?.pushConfigured ? "설정됨" : "미설정"})
-        </p>
-        <div className="run-actions">
-          <button
-            className="primary"
-            type="button"
-            data-testid="push-enable"
-            disabled={busy !== null}
-            onClick={() => void enablePush()}
-          >
-            이 기기에서 알림 받기
-          </button>
-          <button
-            className="ghost"
-            type="button"
-            data-testid="push-test"
-            disabled={busy !== null}
-            onClick={() => void testPush()}
-          >
-            테스트 알림
-          </button>
-        </div>
-      </div>
+      <PushPanel
+        configured={state?.pushConfigured ?? null}
+        busy={busy !== null}
+        onBusy={(pending) => setBusy(pending ? "push" : null)}
+        onMessage={setMessage}
+      />
 
       <div className="card">
         <div className="card-head">

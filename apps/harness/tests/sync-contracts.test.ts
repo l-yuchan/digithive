@@ -69,12 +69,16 @@ test("a failing later calendar page preserves the previous snapshot and cursor",
       : json({ items: [{ id: "new", summary: "partial" }], nextPageToken: "p2" }),
   );
   seed(deps.db, "calendar", "previous");
+  deps.db.query("UPDATE integration_state SET last_sync_at='2026-11-24T00:00:00.000Z'").run();
   expect((await syncGoogleCalendar(deps)).ok).toBe(false);
   expect(deps.db.query("SELECT cursor,ok FROM integration_state").get()).toEqual({
     cursor: "previous",
     ok: 0,
   });
   expect(deps.db.query("SELECT item_id FROM sync_items").all()).toEqual([{ item_id: "old" }]);
+  expect(deps.db.query("SELECT last_sync_at FROM integration_state").get()).toEqual({
+    last_sync_at: "2026-11-24T00:00:00.000Z",
+  });
   expect(deps.events.after(0).at(-1)?.payload).toMatchObject({
     source: "calendar",
     ok: false,

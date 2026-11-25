@@ -36,6 +36,7 @@ services:
     command: ["bun", "scripts/worker.ts"]
     environment:
       HARNESS_DB: /data/harness.db
+      HARNESS_SESSION_SECRET: ${HARNESS_SESSION_SECRET:?set HARNESS_SESSION_SECRET in .env}
       HARNESS_WORKSPACE: /data/workspace
       HARNESS_LEASE_MS: ${HARNESS_LEASE_MS:-45000}
       HARNESS_MAX_CONCURRENT: ${HARNESS_MAX_CONCURRENT:-2}

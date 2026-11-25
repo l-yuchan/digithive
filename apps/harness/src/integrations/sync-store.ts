@@ -29,9 +29,9 @@ export function recordOutcome(
   const iso = new Date(now).toISOString();
   input.db
     .query(
-      "INSERT INTO integration_state (source, cursor, last_sync_at, ok, error, detail_json) VALUES (?,?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET cursor=COALESCE(excluded.cursor, integration_state.cursor), last_sync_at=excluded.last_sync_at, ok=excluded.ok, error=excluded.error, detail_json=excluded.detail_json",
+      "INSERT INTO integration_state (source, cursor, last_sync_at, ok, error, detail_json) VALUES (?,?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET cursor=COALESCE(excluded.cursor, integration_state.cursor), last_sync_at=COALESCE(excluded.last_sync_at,integration_state.last_sync_at), ok=excluded.ok, error=excluded.error, detail_json=excluded.detail_json",
     )
-    .run(source, cursor, iso, ok ? 1 : 0, error, JSON.stringify({ count }));
+    .run(source, cursor, ok ? iso : null, ok ? 1 : 0, error, JSON.stringify({ count }));
   input.events.append({
     kind: "integration.sync_state",
     payload: { source, ok, count, error },
