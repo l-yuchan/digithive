@@ -27,6 +27,7 @@ import {
 import { collectSources, type SyncSourcesDeps } from "../src/integrations/sync";
 import { syncStates } from "../src/integrations/normalize";
 import { handleAccountRequest } from "../src/server/account-routes";
+import { handleScheduleRequest } from "../src/server/schedule-routes";
 import { personalTools } from "../src/tools/personal";
 
 const SECRET = "accounts-test-secret";
@@ -733,6 +734,40 @@ describe("account API and tools", () => {
     expect(db.query("SELECT count(*) AS n FROM sync_items WHERE account_id=?").get(a)).toEqual({
       n: 0,
     });
+  });
+
+  test("a collection schedule that reads a disabled feature is refused with the reason", async () => {
+    const db = fresh();
+    const events = new EventLog(db);
+    const a = upsertGoogleAccount(db, { subject: "sub-a", email: "a@example.com" }).id;
+    setSourceEnabled(db, a, "gmail", false);
+    const deps = { db, events };
+    const before = db
+      .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM schedules")
+      .get();
+    const refused = await handleScheduleRequest(
+      new Request("https://local/api/schedules", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "메일 수집",
+          instruction: "메일을 모읍니다",
+          enabled: true,
+          trigger: { kind: "interval", everySeconds: 900, anchorAt: new Date(NOW).toISOString() },
+          executor: { kind: "builtin", name: "sync_sources", accountId: a, sources: ["gmail"] },
+          timeoutSeconds: 60,
+        }),
+      }),
+      deps,
+    );
+    ok(refused, "schedule route matched");
+    expect(refused.status).toBe(422);
+    const body = z.object({ error: z.string(), detail: z.string() }).parse(await refused.json());
+    expect(body.error).toBe("collection_not_permitted");
+    expect(body.detail).toContain("꺼져 있습니다");
+    const after = db
+      .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM schedules")
+      .get();
+    expect(after).toEqual(before);
   });
 
   test("connecting an account grants use and never starts a collection", async () => {

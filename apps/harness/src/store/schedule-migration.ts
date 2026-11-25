@@ -34,12 +34,12 @@ CREATE TABLE schedule_occurrences (
 );
 CREATE INDEX schedule_occurrences_schedule ON schedule_occurrences(schedule_id,created_at);
 
+/*
+ * Only the briefings ship enabled. Collection is a user-defined schedule that
+ * names its account and sources, so nothing ships that reads every account.
+ */
 INSERT INTO schedules(id,title,instruction,trigger_json,executor_json,next_run_at,created_at,updated_at)
 VALUES
-('system-sync','연결 자료 수집','사용 중인 계정과 소스의 자료를 수집합니다.',
- json_object('kind','interval','everySeconds',900,'anchorAt',strftime('%Y-%m-%dT%H:%M:%fZ','now')),
- '{"kind":"builtin","name":"sync_sources"}',
- strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')),
 ('system-briefing-morning','아침 브리핑','수집된 자료로 브리핑을 만들고 등록된 기기에 알립니다.',
  '{"kind":"daily","time":"07:30","timeZone":"Asia/Seoul"}',
  '{"kind":"builtin","name":"briefing"}',NULL,strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ','now')),

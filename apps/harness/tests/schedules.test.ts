@@ -108,10 +108,12 @@ describe("schedule definitions", () => {
   test("seeded system schedules exist and dispatch initializes daily deadlines without firing", () => {
     const { db, deps } = setup({ seeds: true });
     const before = listSchedules(db);
-    expect(before).toHaveLength(3);
-    const sync = before.find((row) => row.id === "system-sync");
+    // Only briefings ship: collection names its account, so it is never a seed.
+    expect(before.map((row) => row.id).toSorted()).toEqual([
+      "system-briefing-evening",
+      "system-briefing-morning",
+    ]);
     const morning = before.find((row) => row.id === "system-briefing-morning");
-    expect(sync?.nextRunAt).not.toBeNull();
     expect(morning?.nextRunAt).toBeNull();
 
     const stats = dispatchDueSchedules(deps, Date.parse("2020-01-01T00:00:00.000Z"));

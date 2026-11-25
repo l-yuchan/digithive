@@ -14,6 +14,8 @@ import {
 } from "../scheduler/schedules";
 import { cancelRun } from "../surfaces/work/cancel";
 import { getRun } from "../surfaces/work/runner";
+import type { RunExecutor } from "../core/executor";
+import { getAccount, isSourceEnabled } from "../integrations/accounts";
 
 export type ScheduleRouteDeps = {
   readonly db: Database;
@@ -32,6 +34,23 @@ function invalid(error: { readonly issues: unknown }): Response {
 }
 
 const RequestBody = z.record(z.string(), z.unknown());
+
+/**
+ * Saving a collection schedule is where the owner grants use of that account's
+ * information, so a schedule that reads a disabled feature is refused here with
+ * the reason instead of silently collecting nothing on every run.
+ */
+function collectionProblem(db: Database, executor: RunExecutor | undefined): string | null {
+  if (!executor || executor.kind !== "builtin" || executor.name !== "sync_sources") return null;
+  if (!executor.accountId) return "수집 스케줄은 계정을 골라야 합니다.";
+  const account = getAccount(db, executor.accountId);
+  if (!account) return `계정 ${executor.accountId} 이(가) 없습니다.`;
+  for (const source of executor.sources ?? []) {
+    if (!isSourceEnabled(db, account.id, source))
+      return `${account.label} 의 ${source} 정보 사용이 꺼져 있습니다. 연결 탭에서 켜거나 이 정보를 수집에서 제외하세요.`;
+  }
+  return null;
+}
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
   const parsed: unknown = await request.json().catch(() => null);
@@ -54,6 +73,8 @@ export async function handleScheduleRequest(
     if (request.method === "POST") {
       const parsed = CreateScheduleSchema.safeParse(await readJson(request));
       if (!parsed.success) return invalid(parsed.error);
+      const problem = collectionProblem(deps.db, parsed.data.executor);
+      if (problem) return json({ error: "collection_not_permitted", detail: problem }, 422);
       return json(createSchedule(deps.db, parsed.data, Date.now(), deps.events), 201);
     }
     return null;
@@ -93,6 +114,8 @@ export async function handleScheduleRequest(
   if (sub === undefined && request.method === "PATCH") {
     const parsed = UpdateScheduleSchema.safeParse(await readJson(request));
     if (!parsed.success) return invalid(parsed.error);
+    const problem = collectionProblem(deps.db, parsed.data.executor);
+    if (problem) return json({ error: "collection_not_permitted", detail: problem }, 422);
     const updated = updateSchedule(deps.db, id, parsed.data, Date.now(), deps.events);
     if (!updated) return json({ error: "schedule_not_found" }, 404);
     return json(updated);

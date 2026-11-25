@@ -20,6 +20,7 @@ import {
 import { cancelRun } from "../src/surfaces/work/cancel";
 import { resolveScriptPath } from "../src/surfaces/work/script";
 import { createSchedule, dispatchDueSchedules } from "../src/scheduler/schedules";
+import { createBuiltinExecutor } from "../src/scheduler/builtins";
 import { scheduleTools } from "../src/tools/schedules";
 
 const resources: { db: Database; root: string; outside: string }[] = [];
@@ -366,6 +367,81 @@ describe("builtin and agent executors", () => {
     expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM runs").get()?.n).toBe(1);
     expect(callbacks).toBe(0);
     expect(modelCalls()).toBe(0);
+  });
+
+  test("a collection schedule dispatches its own account and sources and refuses anything else", async () => {
+    const { db, deps } = setup();
+    db.query(
+      "INSERT INTO integration_accounts(id,provider,subject,email,label,created_at,updated_at) VALUES ('acct-a','google','sub-a','a@example.com','A','2026-01-01','2026-01-01'),('acct-b','google','sub-b','b@example.com','B','2026-01-01','2026-01-01')",
+    ).run();
+    for (const id of ["acct-a", "acct-b"]) {
+      db.query("INSERT INTO account_sources(account_id,source) VALUES (?,?),(?,?)").run(
+        id,
+        "calendar",
+        id,
+        "gmail",
+      );
+    }
+    const seen: { accountId: string; sources?: readonly string[] }[] = [];
+    const collecting: WorkDeps = {
+      ...deps,
+      scriptExecutor: async (executor) => {
+        seen.push({
+          accountId: executor.accountId ?? "",
+          ...(executor.sources ? { sources: executor.sources } : {}),
+        });
+        return JSON.stringify({ accountId: executor.accountId, outcomes: [] });
+      },
+    };
+    const schedule = createSchedule(
+      db,
+      {
+        title: "A 메일·일정 수집",
+        instruction: "A 계정의 메일과 일정을 모읍니다.",
+        enabled: true,
+        trigger: { kind: "interval", everySeconds: 60, anchorAt: new Date(BASE).toISOString() },
+        executor: {
+          kind: "builtin",
+          name: "sync_sources",
+          accountId: "acct-a",
+          sources: ["gmail"],
+        },
+        timeoutSeconds: 60,
+      },
+      BASE,
+      deps.events,
+    );
+    db.query("UPDATE schedules SET next_run_at = ? WHERE id = ?").run(
+      new Date(BASE).toISOString(),
+      schedule.id,
+    );
+    expect(dispatchDueSchedules(collecting, BASE + 60_000).enqueued).toBe(1);
+    expect(await executeRun(collecting, requiredClaim(db, deps.events, "w1"))).toBe("succeeded");
+    expect(seen).toEqual([{ accountId: "acct-a", sources: ["gmail"] }]);
+
+    // A collection run without an account fails with the reason, never quietly.
+    // The executor below is the real builtin path; only the network is faked.
+    const nameless = enqueueRun(db, deps.events, {
+      goal: "계정 없음",
+      executor: { kind: "builtin", name: "sync_sources", sources: ["gmail"] },
+      timeoutSeconds: 60,
+    });
+    const realBuiltin: WorkDeps = {
+      ...deps,
+      scriptExecutor: createBuiltinExecutor({
+        google: {
+          db,
+          events: deps.events,
+          config: { clientId: "", clientSecret: "", redirectUri: "" },
+          vaultSecret: "s",
+        },
+        canvas: { db, events: deps.events, config: { baseUrl: "", token: "" } },
+        push: { publicKey: "", privateKey: "", subject: "" },
+      }),
+    };
+    const outcome = await executeRun(realBuiltin, requiredClaim(db, deps.events, "w2"));
+    expect(outcome).toBe("failed");
+    expect(resultOf(db, nameless.id)["error"]).toContain("account_required");
   });
 
   test("scheduled agent runs receive shared clock/tool context and one system entry on resume", async () => {
