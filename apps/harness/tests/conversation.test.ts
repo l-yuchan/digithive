@@ -32,6 +32,16 @@ function textStream(chunks: string[]): StreamFn {
   };
 }
 
+async function waitFor<T>(read: () => T | null, timeoutMs = 2_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = read();
+    if (value !== null) return value;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("condition not met in time");
+}
+
 describe("conversation turn", () => {
   test("provider failure persists a visible error part and run diagnostics", async () => {
     const { db, events, sessionId } = setup();
@@ -83,6 +93,34 @@ describe("conversation turn", () => {
       .get(result.runId);
     ok(run, "fixture row exists");
     expect(run.status).toBe("succeeded");
+  });
+
+  test("an answer is stored while it still streams, so a reconnect sees it", async () => {
+    const { db, events, sessionId } = setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stream: StreamFn = async function* () {
+      yield { type: "text_delta", text: "먼저 확인합니다. " };
+      await gate;
+      yield { type: "text_delta", text: "확인을 마쳤습니다." };
+      yield { type: "done", finishReason: "stop" };
+    };
+    const running = runTurn(deps(db, events, stream), { sessionId, text: "진행 상황" });
+    const partial = await waitFor(() => {
+      const entry = listEntries(db, sessionId).find((candidate) => candidate.role === "assistant");
+      return entry && entry.parts.length > 0 ? entry : null;
+    });
+    expect(partial.status).toBe("streaming");
+    expect(partial.parts).toEqual([{ type: "text", text: "먼저 확인합니다. " }]);
+    release();
+    const result = await running;
+    expect(result.status).toBe("succeeded");
+    const settled = listEntries(db, sessionId).find((entry) => entry.role === "assistant");
+    expect(settled?.status).toBe("complete");
+    expect(settled?.parts).toEqual([{ type: "text", text: "먼저 확인합니다. 확인을 마쳤습니다." }]);
+    db.close();
   });
 
   test("a denied tool call becomes a tool_result the model sees, and the turn continues", async () => {

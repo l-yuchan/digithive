@@ -60,6 +60,8 @@ export type AppDeps = {
   };
   readonly vapid: PushConfig;
   readonly webRoot: string;
+  /** The build the served web bundle was made from; browsers reload when it changes. */
+  readonly buildId: string;
   readonly filesRoot?: string;
   readonly maxUploadBytes?: number;
   readonly auth: AuthConfig;
@@ -72,9 +74,16 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function sse(request: Request, deps: AppDeps, after: number, sessionId: string | null): Response {
+/**
+ * Live session events. The connection opens with a snapshot of the persisted state
+ * and then carries only new events, so a reconnect never replays old deltas over
+ * an answer that is already on screen. Partial assistant text is persisted while
+ * it streams (see the conversation loop), so the snapshot is current even
+ * mid-turn.
+ */
+function sse(request: Request, deps: AppDeps, sessionId: string | null): Response {
   const encoder = new TextEncoder();
-  let lastWritten = after;
+  let lastWritten = 0;
   let cleanup: (() => void) | undefined;
 
   const body = new ReadableStream<Uint8Array>({
@@ -100,7 +109,9 @@ function sse(request: Request, deps: AppDeps, after: number, sessionId: string |
         lastSeq: deps.events.lastSeq(),
       };
       controller.enqueue(encoder.encode(`event: snapshot\ndata: ${JSON.stringify(snapshot)}\n\n`));
-      for (const event of deps.events.after(after, sessionId ?? undefined)) send(event);
+      // The snapshot already carries every event up to lastSeq; replaying history
+      // would append the same text twice.
+      lastWritten = snapshot.lastSeq;
 
       const unsubscribe = deps.events.subscribe(send, lastWritten);
       const ping = setInterval(() => {
@@ -109,7 +120,7 @@ function sse(request: Request, deps: AppDeps, after: number, sessionId: string |
         } catch {
           cleanup?.();
         }
-      }, 15_000);
+      }, 10_000);
       cleanup = () => {
         clearInterval(ping);
         unsubscribe();
@@ -160,7 +171,11 @@ async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
           ? "text/css; charset=utf-8"
           : "text/html; charset=utf-8";
       return new Response(handle, {
-        headers: { "content-type": type, "cache-control": "no-cache" },
+        // The shell is never stored: a browser always asks which build is current.
+        headers: {
+          "content-type": type,
+          "cache-control": file === "index.html" ? "no-store" : "no-cache",
+        },
       });
     }
   }
@@ -388,12 +403,10 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/events" && request.method === "GET") {
-      const after = Number(
-        request.headers.get("last-event-id") ?? url.searchParams.get("after") ?? "0",
-      );
-      const session = url.searchParams.get("session");
-      return sse(request, deps, Number.isFinite(after) ? after : 0, session);
+      return sse(request, deps, url.searchParams.get("session"));
     }
+
+    if (path === "/api/version") return json({ build: deps.buildId });
 
     if (path === "/api/sessions") {
       if (request.method === "GET") {

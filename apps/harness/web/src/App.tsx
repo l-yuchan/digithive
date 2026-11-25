@@ -20,6 +20,7 @@ import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { hasOAuthResult } from "./connections/oauth";
 import { Login } from "./auth/Login";
 import { MessageParts } from "./MessageParts";
+import { watchBuild } from "./buildCheck";
 
 type State = {
   readonly sessions: Session[];
@@ -58,13 +59,46 @@ function appendText(parts: Part[], text: string, reasoning = false): Part[] {
   return [...parts, { type, text }];
 }
 
+function textSize(parts: readonly Part[]): number {
+  return parts.reduce(
+    (total, part) =>
+      total + (part.type === "text" || part.type === "reasoning" ? part.text.length : 0),
+    0,
+  );
+}
+
+/**
+ * A reconnect replaces the list with the server's copy. An entry the reader is
+ * watching stream can be a few deltas behind the server's last save, so the copy
+ * with more text wins while the turn is still running.
+ */
+function mergeSnapshot(local: readonly Entry[], incoming: readonly Entry[]): Entry[] {
+  const localById = new Map(local.map((entry) => [entry.id, entry]));
+  const merged = incoming.map((entry) => {
+    const current = localById.get(entry.id);
+    if (
+      current &&
+      current.status === "streaming" &&
+      entry.status === "streaming" &&
+      textSize(current.parts) > textSize(entry.parts)
+    )
+      return { ...entry, parts: current.parts };
+    return entry;
+  });
+  const known = new Set(merged.map((entry) => entry.id));
+  for (const entry of local) {
+    if (entry.status === "streaming" && !known.has(entry.id)) merged.push(entry);
+  }
+  return merged;
+}
+
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "snapshot":
       return {
         ...state,
         sessions: action.sessions,
-        entries: action.entries,
+        entries: mergeSnapshot(state.entries, action.entries),
         lastSeq: Math.max(state.lastSeq, action.lastSeq),
       };
     case "sessions":
@@ -154,6 +188,11 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
+    if (authed !== true) return undefined;
+    return watchBuild(() => window.location.reload());
+  }, [authed]);
+
+  useEffect(() => {
     void getJson("/api/session", z.object({ authenticated: z.boolean() }))
       .then((body) => setAuthed(body.authenticated))
       .catch(() => setAuthed(false));
@@ -211,7 +250,8 @@ export function App() {
       dispatch({ type: "error", message: String(error) }),
     );
 
-    const source = new EventSource(apiUrl(`/api/events?after=0&session=${encodeURIComponent(id)}`));
+    const source = new EventSource(apiUrl(`/api/events?session=${encodeURIComponent(id)}`));
+    source.addEventListener("open", () => dispatch({ type: "connected", value: true }));
     source.addEventListener("snapshot", (event) => {
       if (!(event instanceof MessageEvent)) return;
       const data = z

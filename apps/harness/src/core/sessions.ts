@@ -182,6 +182,17 @@ export function appendEntry(
   };
 }
 
+/**
+ * Streaming progress, stored as it arrives so a reconnect or reload can show what
+ * the reader already saw. The search index is written once, at completion.
+ */
+export function saveEntryParts(db: Database, entryId: string, parts: readonly Part[]): void {
+  db.query("UPDATE entries SET payload_json = ? WHERE id = ?").run(
+    JSON.stringify({ parts }),
+    entryId,
+  );
+}
+
 export function updateEntryParts(
   db: Database,
   entryId: string,

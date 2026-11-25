@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../../events/log";
-import { appendEntry, updateEntryParts, type Part } from "../../core/sessions";
+import { appendEntry, saveEntryParts, updateEntryParts, type Part } from "../../core/sessions";
 import { getLeaf, pathEntries, setLeaf } from "../../core/tree";
 import { buildContext } from "../../core/context";
 import { recallMemories } from "../../knowledge/memory";
@@ -175,6 +175,16 @@ export async function runTurn(
   );
   const parts: Part[] = [];
   let text = "";
+  // Partial text is stored between deltas so a reconnecting or reloading view sees
+  // the answer that was already streamed instead of an empty bubble.
+  let deltasSinceSave = 0;
+  let savedOnce = false;
+  const saveProgress = (force = false) => {
+    if (!force && savedOnce && deltasSinceSave < 8) return;
+    deltasSinceSave = 0;
+    savedOnce = true;
+    saveEntryParts(deps.db, assistantEntry.id, parts);
+  };
 
   try {
     if (deps.summarize) {
@@ -260,6 +270,8 @@ export async function runTurn(
           if (last && last.type === "text")
             parts[parts.length - 1] = { type: "text", text: last.text + event.text };
           else parts.push({ type: "text", text: event.text });
+          deltasSinceSave += 1;
+          saveProgress();
           deps.events.append({
             kind: "message.delta",
             runId,
@@ -272,6 +284,8 @@ export async function runTurn(
           if (last && last.type === "reasoning")
             parts[parts.length - 1] = { type: "reasoning", text: last.text + event.text };
           else parts.push({ type: "reasoning", text: event.text });
+          deltasSinceSave += 1;
+          saveProgress();
           deps.events.append({
             kind: "message.delta",
             runId,
@@ -307,6 +321,7 @@ export async function runTurn(
           args = {};
         }
         parts.push({ type: "tool_call", id: call.id, name: call.name, arguments: call.arguments });
+        saveProgress(true);
         deps.events.append({
           kind: "tool.started",
           runId,
@@ -356,6 +371,7 @@ export async function runTurn(
         if (timedOut) {
           output = "도구 실행 시간이 초과되었습니다.";
           parts.push({ type: "tool_result", id: call.id, name: call.name, output, timeout: true });
+          saveProgress(true);
           deps.events.append({
             kind: "tool.timeout",
             runId,
@@ -365,6 +381,7 @@ export async function runTurn(
           });
         } else {
           parts.push({ type: "tool_result", id: call.id, name: call.name, output });
+          saveProgress(true);
           deps.events.append({
             kind: "tool.result",
             runId,

@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createRuntime, loadConfig } from "../runtime";
 import { createRegistry } from "../tools/registry";
@@ -7,6 +8,20 @@ import { createApp, type AppDeps } from "./app";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
 
 export type HarnessConfig = ReturnType<typeof loadConfig>;
+
+/** The web build id written by `build:web`; absent or unreadable stays "unknown". */
+export function readBuildId(webRoot: string): string {
+  const path = resolve(webRoot, "build.json");
+  if (!existsSync(path)) return "unknown";
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (parsed && typeof parsed === "object" && "id" in parsed && typeof parsed.id === "string")
+      return parsed.id;
+  } catch {
+    // a half-written or hand-edited file must never stop the server
+  }
+  return "unknown";
+}
 
 export { loadConfig };
 
@@ -69,6 +84,7 @@ export function createHarness(config: HarnessConfig): {
       subject: config.vapidSubject,
     },
     webRoot: resolve(config.webRoot),
+    buildId: readBuildId(config.webRoot),
     filesRoot: config.filesRoot,
     maxUploadBytes: config.maxUploadBytes,
     auth: { passphrase: config.passphrase, secret: config.sessionSecret },
@@ -91,7 +107,9 @@ if (import.meta.main) {
     const result = reconcileWork(harness.deps.db, harness.deps.events);
     if (result.interrupted > 0) console.log(`reconciled ${result.interrupted} interrupted run(s)`);
   }, 15_000).unref();
-  const server = Bun.serve({ port: config.port, fetch: harness.handler });
+  // A conversation can be silent for longer than any fixed idle limit while a model
+  // thinks or a tool runs; a live event stream must outlast that silence.
+  const server = Bun.serve({ port: config.port, idleTimeout: 0, fetch: harness.handler });
   console.log(
     `digithive harness on http://127.0.0.1:${server.port} (model ${config.model} @ ${config.baseUrl})`,
   );
