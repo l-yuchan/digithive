@@ -100,6 +100,16 @@ export const sdk = {
   mail: {
     search: (query: string, options: { limit?: number; accountId?: string } = {}) =>
       sdk.call("gmail_search", { query, ...options }),
+    send: (title: string, body: string) => sdk.call("push_send", { title, body }),
+  },
+  accounts: {
+    list: (accountId?: string) =>
+      sdk.call("account_list", accountId ? { accountId } : {}),
+    collect: (source: string, accountId: string) =>
+      sdk.call("source_collect", { source, accountId }),
+  },
+  briefing: {
+    compose: () => sdk.call("briefing_compose", {}),
   },
   files: {
     list: () => sdk.call("stored_file_list", {}),

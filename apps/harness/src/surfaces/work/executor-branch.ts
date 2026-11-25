@@ -21,7 +21,7 @@ function cancelledOutcome(
   return "cancelled";
 }
 
-/** Builtin callbacks and confined local scripts share lease and settlement. */
+/** Confined local scripts share lease and settlement with agent runs. */
 export async function executeNonAgent(
   deps: WorkDeps,
   run: RunRow,
@@ -30,17 +30,6 @@ export async function executeNonAgent(
   now: number,
 ): Promise<RunOutcome> {
   try {
-    if (executor.kind === "builtin") {
-      if (!deps.scriptExecutor) throw new Error("script_executor_unavailable");
-      const text = await deps.scriptExecutor(executor, {
-        runId: run.id,
-        signal: lease.signal,
-      });
-      if (lease.signal.aborted) throw lease.signal.reason;
-      settle(deps.db, deps.events, run, "succeeded", { text }, now);
-      return "succeeded";
-    }
-
     if (!deps.scriptsRoot) throw new Error("scripts_root_unavailable");
     const params = parseArgs(run.paramsJson);
     const ticket = deps.sdk?.issue({

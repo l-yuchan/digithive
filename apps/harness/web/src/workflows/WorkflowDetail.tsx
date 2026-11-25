@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { postJson, sendJson } from "../api";
 import { reportAsync } from "../async";
-import type { Account } from "../connections/accounts";
 import { ErrorMessage } from "./ErrorMessage";
 import { RunDialog } from "./RunDialog";
 import { ScheduleForm } from "./ScheduleForm";
@@ -25,7 +24,6 @@ export function WorkflowDetail({
   workflow,
   schedules,
   runs,
-  accounts,
   onEdit,
   onChanged,
   onDeleted,
@@ -33,7 +31,6 @@ export function WorkflowDetail({
   readonly workflow: WorkflowView;
   readonly schedules: readonly ScheduleBindingView[];
   readonly runs: readonly RunSummary[];
-  readonly accounts: readonly Account[];
   readonly onEdit: () => void;
   readonly onChanged: () => Promise<void>;
   readonly onDeleted: () => Promise<void>;
@@ -166,7 +163,7 @@ export function WorkflowDetail({
           {notice}
         </p>
       ) : null}
-      <WorkflowDefinition workflow={workflow} accounts={accounts} />
+      <WorkflowDefinition workflow={workflow} />
       <ScheduleSection
         schedules={schedules}
         busyKey={busyKey}

@@ -229,7 +229,6 @@ async function probe(): Promise<void> {
   installQaFetch();
   const { createRuntime, loadConfig } = await import("../src/runtime");
   const { claimNext, executeRun } = await import("../src/surfaces/work/runner");
-  const { createBuiltinExecutor } = await import("../src/scheduler/builtins");
   const { syncGoogleGmail } = await import("../src/integrations/google");
   const { EventLog } = await import("../src/events/log");
   const config = loadConfig();
@@ -254,36 +253,9 @@ async function probe(): Promise<void> {
     runtime.close();
     return;
   }
-  const googleDeps = {
-    db: runtime.work.db,
-    events: runtime.work.events,
-    vaultSecret: config.sessionSecret,
-    config: {
-      clientId: config.googleClientId,
-      clientSecret: config.googleClientSecret,
-      redirectUri: config.googleRedirectUri,
-    },
-    fetchImpl: globalThis.fetch,
-  };
-  const work = {
-    ...runtime.work,
-    scriptExecutor: createBuiltinExecutor({
-      google: googleDeps,
-      canvas: {
-        db: runtime.work.db,
-        events: runtime.work.events,
-        config: { baseUrl: config.canvasBaseUrl, token: config.canvasToken },
-      },
-      push: {
-        publicKey: config.vapidPublicKey,
-        privateKey: config.vapidPrivateKey,
-        subject: config.vapidSubject,
-      },
-    }),
-  };
   const run = claimNext(runtime.work.db, runtime.work.events, "probe", 2, Date.now(), 45_000);
   console.log(run ? `claimed ${run.id} ${run.executorJson}` : "nothing queued");
-  if (run) console.log(`outcome ${await executeRun(work, run)}`);
+  if (run) console.log(`outcome ${await executeRun(runtime.work, run)}`);
   runtime.close();
 }
 

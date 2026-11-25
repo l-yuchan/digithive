@@ -217,4 +217,9 @@ CREATE INDEX sync_items_at ON sync_items(at);
   { version: 8, sql: `${IDENTITY_MIGRATION}${COLLECTION_SEED_RETIREMENT}` },
   { version: 9, sql: `${LEGACY_GOOGLE_ACCOUNT_RENAME}${COLLECTION_SCHEDULE_SEED}` },
   { version: 10, sql: WORKFLOW_MIGRATION },
+  // 11 is not SQL: stored builtin executors become the app's script jobs, which
+  // needs to read and rewrite each row (`migrateBuiltinExecutors`). Its statement
+  // only records the version; the session and the worker call the rewrite right
+  // after `openDatabase`.
+  { version: 11, sql: "SELECT 1;" },
 ];

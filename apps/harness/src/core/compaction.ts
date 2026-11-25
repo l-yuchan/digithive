@@ -1,5 +1,6 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { appendEntry } from "./sessions";
+import { conversationText } from "./contracts";
 import { pathEntries } from "./tree";
 import type { CompactionView } from "./context";
 import { z } from "zod";
@@ -61,11 +62,7 @@ export async function maybeCompact(options: CompactionOptions): Promise<Compacti
       (!latest || entry.seq > latest.coversSeq),
   );
   const totalChars = messages.reduce(
-    (sum, entry) =>
-      sum +
-      entry.parts
-        .filter((part): part is { type: "text"; text: string } => part.type === "text")
-        .reduce((inner, part) => inner + part.text.length, 0),
+    (sum, entry) => sum + conversationText(entry.events).length,
     0,
   );
   if (messages.length <= keepRecent || totalChars < options.maxChars * threshold) {
@@ -79,10 +76,7 @@ export async function maybeCompact(options: CompactionOptions): Promise<Compacti
 
   const transcript = covered
     .map((entry) => {
-      const text = entry.parts
-        .filter((part): part is { type: "text"; text: string } => part.type === "text")
-        .map((part) => part.text)
-        .join(" ");
+      const text = conversationText(entry.events);
       return `${entry.role === "user" ? "사용자" : "비서"}: ${text}`;
     })
     .join("\n");
@@ -94,12 +88,12 @@ export async function maybeCompact(options: CompactionOptions): Promise<Compacti
   const entry = appendEntry(options.db, {
     sessionId: options.sessionId,
     kind: "compaction",
-    parts: [{ type: "text", text: summary }],
+    events: [{ type: "text", id: 0, text: summary }],
     now,
   });
   options.db.query("UPDATE entries SET payload_json = ? WHERE id = ?").run(
     JSON.stringify({
-      parts: [{ type: "text", text: summary }],
+      events: [{ type: "text", id: 0, text: summary }],
       summary,
       coversSeq: lastCovered.seq,
       coversUpTo: lastCovered.id,

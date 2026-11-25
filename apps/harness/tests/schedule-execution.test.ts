@@ -22,7 +22,8 @@ import { resolveScriptPath } from "../src/surfaces/work/script";
 import { createWorkflow } from "../src/workflows/workflow-store";
 import { createBinding } from "../src/scheduler/schedule-store";
 import { dispatchDueSchedules } from "../src/scheduler/schedule-dispatch";
-import { createBuiltinExecutor } from "../src/scheduler/builtins";
+import { collectionExecutor } from "../src/workflows/collection";
+import { RunExecutorSchema } from "../src/core/executor";
 import { scheduleTools } from "../src/tools/schedules";
 import { workflowTools } from "../src/tools/workflows";
 
@@ -298,36 +299,37 @@ describe("local script execution", () => {
   });
 });
 
-describe("builtin and agent executors", () => {
-  test("builtin runs through the injected scriptExecutor with the run signal", async () => {
-    const { db, deps } = setup();
-    const calls: { name: string; runId: string; aborted: boolean }[] = [];
-    const withExecutor: WorkDeps = {
-      ...deps,
-      scriptExecutor: async (executor, context) => {
-        calls.push({ name: executor.name, runId: context.runId, aborted: context.signal.aborted });
-        return "동기화 완료";
-      },
-    };
-    const run = enqueueRun(db, deps.events, {
-      goal: "sync",
-      executor: { kind: "builtin", name: "sync_sources" },
-      timeoutSeconds: 120,
-    });
-    expect(await executeRun(withExecutor, requiredClaim(db, deps.events, "w1"))).toBe("succeeded");
-    expect(calls).toEqual([{ name: "sync_sources", runId: run.id, aborted: false }]);
-    expect(resultOf(db, run.id)["text"]).toBe("동기화 완료");
+describe("script and agent executors", () => {
+  test("a script is the only non-agent kind: a builtin executor no longer exists", () => {
+    // The app's own collection and briefing jobs are scripts; the schema must refuse
+    // a stored builtin rather than quietly running one.
+    expect(RunExecutorSchema.safeParse({ kind: "builtin", name: "sync_sources" }).success).toBe(
+      false,
+    );
+    expect(
+      RunExecutorSchema.parse({
+        kind: "script",
+        path: "jobs/collection.ts",
+        args: ["acct-a"],
+        capabilities: ["account.read"],
+      }),
+    ).toMatchObject({ kind: "script", path: "jobs/collection.ts", args: ["acct-a"] });
   });
 
-  test("a builtin without an injected executor fails instead of falling back to the model", async () => {
+  test("a script without a scripts root fails instead of falling back to the model", async () => {
     const { db, deps, modelCalls } = setup();
     const run = enqueueRun(db, deps.events, {
-      goal: "no callback",
-      executor: { kind: "builtin", name: "briefing" },
+      goal: "no root",
+      executor: { kind: "script", path: "jobs/briefing.ts", args: [] },
       timeoutSeconds: 60,
     });
-    expect(await executeRun(deps, requiredClaim(db, deps.events, "w1"))).toBe("failed");
-    expect(resultOf(db, run.id)["error"]).toBe("script_executor_unavailable");
+    expect(
+      await executeRun(
+        (({ scriptsRoot: _root, ...rest }) => rest)(deps),
+        requiredClaim(db, deps.events, "w1"),
+      ),
+    ).toBe("failed");
+    expect(resultOf(db, run.id)["error"]).toBe("scripts_root_unavailable");
     expect(modelCalls()).toBe(0);
   });
 
@@ -369,15 +371,15 @@ describe("builtin and agent executors", () => {
   });
 
   test("관리 도구는 실행을 만들지 않고, workflow_run만 그 자리에서 실행한다", async () => {
-    const { db, deps } = setup();
-    let callbacks = 0;
-    const toolDeps: WorkDeps = {
-      ...deps,
-      scriptExecutor: async () => {
-        callbacks += 1;
-        return "executed";
-      },
-    };
+    const { db, deps, root } = setup();
+    const calls = { count: 0 };
+    await writeScript(
+      root,
+      "jobs/mark.ts",
+      `const fs = await import("node:fs");\nfs.appendFileSync(${JSON.stringify(join(root, "calls.log"))}, "x");\nconsole.log("executed");\n`,
+    );
+    db.exec("CREATE TABLE IF NOT EXISTS unrelated (id TEXT)");
+    const toolDeps: WorkDeps = deps;
     const workflows = workflowTools({ db, events: deps.events, work: () => toolDeps });
     const createTool = workflows.find((tool) => tool.name === "workflow_create");
     const runTool = workflows.find((tool) => tool.name === "workflow_run");
@@ -388,7 +390,7 @@ describe("builtin and agent executors", () => {
           {
             title: "자동",
             instruction: "수집",
-            executor: { kind: "builtin", name: "sync_sources", accountId: "acct-a" },
+            executor: { kind: "script", path: "jobs/mark.ts", args: [] },
           },
           { runId: "conversation" },
         ),
@@ -405,7 +407,11 @@ describe("builtin and agent executors", () => {
       },
       { runId: "conversation" },
     );
-    expect(callbacks).toBe(0);
+    const executions = () => {
+      const file = Bun.file(join(root, "calls.log"));
+      return file.exists();
+    };
+    expect(await executions()).toBe(false);
     expect(db.query<{ n: number }, []>("SELECT count(*) AS n FROM runs").get()?.n).toBe(0);
 
     db.query("UPDATE schedules SET next_run_at = ? WHERE workflow_id = ?").run(
@@ -413,7 +419,8 @@ describe("builtin and agent executors", () => {
       created.workflow.id,
     );
     expect(dispatchDueSchedules(toolDeps, BASE + 60_000).enqueued).toBe(1);
-    expect(callbacks).toBe(0);
+    // Dispatching only queues: the script has not run yet.
+    expect(await executions()).toBe(false);
 
     const inline = z
       .object({ runId: z.string(), status: z.string() })
@@ -421,11 +428,12 @@ describe("builtin and agent executors", () => {
         JSON.parse(await runTool.execute({ id: created.workflow.id }, { runId: "conversation" })),
       );
     expect(inline.status).toBe("succeeded");
-    expect(callbacks).toBe(1);
+    expect(await executions()).toBe(true);
+    expect(calls.count).toBe(0);
   });
 
-  test("a collection schedule dispatches its own account and sources and refuses anything else", async () => {
-    const { db, deps } = setup();
+  test("a collection schedule runs its account's job with the account as the argument", async () => {
+    const { db, deps, root } = setup();
     db.query(
       "INSERT INTO integration_accounts(id,provider,subject,email,label,created_at,updated_at) VALUES ('acct-a','google','sub-a','a@example.com','A','2026-01-01','2026-01-01'),('acct-b','google','sub-b','b@example.com','B','2026-01-01','2026-01-01')",
     ).run();
@@ -437,59 +445,49 @@ describe("builtin and agent executors", () => {
         "gmail",
       );
     }
-    const seen: { accountId: string; sources?: readonly string[] }[] = [];
-    const collecting: WorkDeps = {
-      ...deps,
-      scriptExecutor: async (executor) => {
-        seen.push({
-          accountId: executor.accountId ?? "",
-          ...(executor.sources ? { sources: executor.sources } : {}),
-        });
-        return JSON.stringify({ accountId: executor.accountId, outcomes: [] });
-      },
-    };
+    // A stand-in for the installed job: it records the argument it was given.
+    await writeScript(
+      root,
+      "jobs/collection.ts",
+      "console.log(JSON.stringify({ accountId: process.argv[2] ?? null }));\n",
+    );
     const { binding } = scheduledFixture(db, deps, {
-      title: "A 메일·일정 수집",
-      instruction: "A 계정의 메일과 일정을 모읍니다.",
-      executor: {
-        kind: "builtin",
-        name: "sync_sources",
-        accountId: "acct-a",
-        sources: ["gmail"],
-      },
+      title: "A 수집",
+      instruction: "A 계정의 자료을 모읍니다.",
+      executor: collectionExecutor("acct-a"),
       timeoutSeconds: 60,
     });
     db.query("UPDATE schedules SET next_run_at = ? WHERE id = ?").run(
       new Date(BASE).toISOString(),
       binding.id,
     );
-    expect(dispatchDueSchedules(collecting, BASE + 60_000).enqueued).toBe(1);
-    expect(await executeRun(collecting, requiredClaim(db, deps.events, "w1"))).toBe("succeeded");
-    expect(seen).toEqual([{ accountId: "acct-a", sources: ["gmail"] }]);
+    expect(dispatchDueSchedules(deps, BASE + 60_000).enqueued).toBe(1);
+    expect(await executeRun(deps, requiredClaim(db, deps.events, "w1"))).toBe("succeeded");
+    const run = db
+      .query<{ id: string }, []>("SELECT id FROM runs WHERE workflow_id IS NOT NULL LIMIT 1")
+      .get();
+    const text = resultOf(db, run?.id ?? "")["text"];
+    expect(typeof text === "string" ? JSON.parse(text) : null).toEqual({ accountId: "acct-a" });
 
-    // A collection run without an account fails with the reason, never quietly.
-    // The executor below is the real builtin path; only the network is faked.
+    // The job itself refuses a missing account: it exits 2 with the reason.
     const nameless = enqueueRun(db, deps.events, {
       goal: "계정 없음",
-      executor: { kind: "builtin", name: "sync_sources", sources: ["gmail"] },
+      executor: {
+        kind: "script",
+        path: "jobs/no-account.ts",
+        args: [],
+        capabilities: ["account.read"],
+      },
       timeoutSeconds: 60,
     });
-    const realBuiltin: WorkDeps = {
-      ...deps,
-      scriptExecutor: createBuiltinExecutor({
-        google: {
-          db,
-          events: deps.events,
-          config: { clientId: "", clientSecret: "", redirectUri: "" },
-          vaultSecret: "s",
-        },
-        canvas: { db, events: deps.events, config: { baseUrl: "", token: "" } },
-        push: { publicKey: "", privateKey: "", subject: "" },
-      }),
-    };
-    const outcome = await executeRun(realBuiltin, requiredClaim(db, deps.events, "w2"));
-    expect(outcome).toBe("failed");
-    expect(resultOf(db, nameless.id)["error"]).toContain("account_required");
+    await writeScript(
+      root,
+      "jobs/no-account.ts",
+      'console.error("수집할 계정 id가 필요합니다.");\nprocess.exit(2);\n',
+    );
+    expect(await executeRun(deps, requiredClaim(db, deps.events, "w2"))).toBe("failed");
+    expect(resultOf(db, nameless.id)["exitCode"]).toBe(2);
+    expect(resultOf(db, nameless.id)["stderr"]).toContain("계정 id가 필요합니다");
   });
 
   test("scheduled agent runs receive shared clock/tool context and one system entry on resume", async () => {

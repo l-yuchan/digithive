@@ -4,7 +4,6 @@ import {
   WorkflowParamsSchema,
   valueMatchesParamType,
   type Executor,
-  type SourceName,
   type Workflow,
   type WorkflowParam,
   type WorkflowParamType,
@@ -24,9 +23,6 @@ export type WorkflowDraft = {
   readonly instruction: string;
   readonly timeoutSeconds: string;
   readonly executorKind: Executor["kind"];
-  readonly builtinName: "sync_sources" | "briefing";
-  readonly accountId: string;
-  readonly sources: readonly SourceName[];
   readonly scriptPath: string;
   readonly scriptArgs: string;
   readonly capabilities: readonly CapabilityGroup[];
@@ -52,12 +48,6 @@ export function createWorkflowDraft(workflow: Workflow | null): WorkflowDraft {
     instruction: workflow?.instruction ?? "",
     timeoutSeconds: String(workflow?.timeoutSeconds ?? 1_800),
     executorKind: executor?.kind ?? "agent",
-    builtinName: executor?.kind === "builtin" ? executor.name : "sync_sources",
-    accountId: executor?.kind === "builtin" ? (executor.accountId ?? "") : "",
-    sources:
-      executor?.kind === "builtin" && executor.name === "sync_sources"
-        ? (executor.sources ?? [])
-        : [],
     scriptPath: executor?.kind === "script" ? executor.path : "",
     scriptArgs: executor?.kind === "script" ? executor.args.join("\n") : "",
     capabilities: executor?.kind === "script" ? (executor.capabilities ?? []) : [],
@@ -102,28 +92,11 @@ function scriptPath(value: string): string {
 
 function makeExecutor(draft: WorkflowDraft): Executor {
   if (draft.executorKind === "agent") return { kind: "agent" };
-  if (draft.executorKind === "script") {
-    return {
-      kind: "script",
-      path: scriptPath(draft.scriptPath),
-      args: draft.scriptArgs.split(/\r?\n/).filter((line) => line.length > 0),
-      capabilities: [...draft.capabilities],
-    };
-  }
-  if (draft.builtinName === "sync_sources") {
-    if (!draft.accountId) throw new Error("수집할 계정을 선택하세요.");
-    if (draft.sources.length === 0) throw new Error("수집할 정보를 하나 이상 선택하세요.");
-    return {
-      kind: "builtin",
-      name: "sync_sources",
-      accountId: draft.accountId,
-      sources: [...draft.sources],
-    };
-  }
   return {
-    kind: "builtin",
-    name: "briefing",
-    ...(draft.accountId ? { accountId: draft.accountId } : {}),
+    kind: "script",
+    path: scriptPath(draft.scriptPath),
+    args: draft.scriptArgs.split(/\r?\n/).filter((line) => line.length > 0),
+    capabilities: [...draft.capabilities],
   };
 }
 

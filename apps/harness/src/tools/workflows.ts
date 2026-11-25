@@ -33,8 +33,13 @@ export type WorkflowToolDeps = {
 
 const TriggerDescription =
   "once {kind:'once',at:ISO} | interval {kind:'interval',everySeconds:int,anchorAt:ISO} | daily {kind:'daily',time:'HH:mm',timeZone:IANA}";
+/**
+ * The model's tool catalogue. There is no builtin executor kind: the app's own
+ * collection and briefing jobs are scripts under `jobs/`, so they are created like
+ * any other script workflow.
+ */
 const ExecutorDescription =
-  "{kind:'agent'} | {kind:'builtin',name:'sync_sources'|'briefing',accountId?} | {kind:'script',path,args?,capabilities?}";
+  "{kind:'agent'} | {kind:'script',path,args?,capabilities?}. 앱이 제공하는 작업: 연결 자료 수집 {kind:'script',path:'jobs/collection.ts',args:[accountId],capabilities:['account.read']}, 브리핑 생성 {kind:'script',path:'jobs/briefing.ts',capabilities:['account.read','mail.send']}";
 
 function failure(error: unknown): string {
   if (error instanceof WorkflowError) {

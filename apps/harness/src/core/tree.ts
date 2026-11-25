@@ -1,5 +1,6 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { appendEntry, listEntries, type Entry, type Session } from "./sessions";
+import { conversationText } from "./contracts";
 
 function entryById(db: Database, sessionId: string, entryId: string): Entry | null {
   return listEntries(db, sessionId).find((candidate) => candidate.id === entryId) ?? null;
@@ -94,7 +95,7 @@ export function editUserMessage(
     parentId: original.parentId,
     kind: original.kind,
     role: "user",
-    parts: [{ type: "text", text: input.text }],
+    events: [{ type: "text", id: 0, text: input.text }],
     ...(input.now === undefined ? {} : { now: input.now }),
   });
   setLeaf(db, input.sessionId, entry.id);
@@ -114,10 +115,7 @@ export function regeneratePoint(
   if (!target) throw new Error("entry_not_found");
   const parent = target.parentId ? all.find((entry) => entry.id === target.parentId) : null;
   if (!parent || parent.role !== "user") throw new Error("not_regenerable");
-  const userText = parent.parts
-    .filter((part): part is { type: "text"; text: string } => part.type === "text")
-    .map((part) => part.text)
-    .join("");
+  const userText = conversationText(parent.events);
   setLeaf(db, input.sessionId, parent.id);
   return { parentId: parent.id, userText };
 }
@@ -152,7 +150,7 @@ export function forkSession(
       kind: entry.kind,
       role: entry.role,
       status: entry.status,
-      parts: entry.parts,
+      events: entry.events,
       now,
     });
     parent = created.id;

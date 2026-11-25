@@ -1,59 +1,36 @@
-import { SOURCE_LABELS, type Account } from "../connections/accounts";
 import { formatDateTime } from "../format";
 import type { Executor, WorkflowView } from "./workflowTypes";
 
 function executorLabel(executor: Executor): string {
-  if (executor.kind === "agent") return "에이전트";
-  if (executor.kind === "builtin")
-    return executor.name === "sync_sources" ? "내장 · 연결 자료 수집" : "내장 · 브리핑 생성";
-  return "스크립트";
+  return executor.kind === "agent" ? "에이전트" : "스크립트";
 }
 
-export function WorkflowDefinition({
-  workflow,
-  accounts,
-}: {
-  readonly workflow: WorkflowView;
-  readonly accounts: readonly Account[];
-}) {
+/** The app's own jobs are scripts; calling one out by name is the only difference. */
+const JOB_LABELS: Readonly<Record<string, string>> = {
+  "jobs/collection.ts": "연결 자료 수집",
+  "jobs/briefing.ts": "브리핑 생성",
+};
+
+export function WorkflowDefinition({ workflow }: { readonly workflow: WorkflowView }) {
   const executor = workflow.executor;
-  const account =
-    executor.kind === "builtin"
-      ? accounts.find((item) => item.id === executor.accountId)
-      : undefined;
+  const job = executor.kind === "script" ? JOB_LABELS[executor.path] : undefined;
   return (
     <>
       <section className="card workflow-definition" aria-label="워크플로 정의">
         <div className="card-head">
           <h3>정의</h3>
           <span className="badge">{executorLabel(executor)}</span>
+          {job ? <span className="badge">앱 제공 작업</span> : null}
         </div>
         <p className="workflow-instruction">{workflow.instruction}</p>
         <p className="run-meta">
           제한 시간: {workflow.timeoutSeconds}초 · 수정 {formatDateTime(workflow.updatedAt)}
         </p>
-        {executor.kind === "builtin" ? (
-          <div className="executor-summary">
-            <p className="run-meta">
-              계정:{" "}
-              {account?.label ??
-                executor.accountId ??
-                (executor.name === "sync_sources" ? "계정 미지정" : "모든 계정")}
-              {executor.accountId && !account && accounts.length > 0 ? " · 현재 목록에 없음" : ""}
-            </p>
-            {executor.name === "sync_sources" ? (
-              <p className="run-meta">
-                수집 정보:{" "}
-                {(executor.sources ?? []).map((source) => SOURCE_LABELS[source]).join(", ") ||
-                  "계정의 사용 중인 정보"}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
         {executor.kind === "script" ? (
           <div className="executor-summary">
             <p className="run-meta">
               경로: <code>{executor.path}</code>
+              {job ? ` · ${job}` : ""}
             </p>
             <p className="run-meta">
               인자:{" "}

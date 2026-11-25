@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
-import { createSession, listEntries, softDeleteSession } from "../src/core/sessions";
+import { appendEntry, createSession, listEntries, softDeleteSession } from "../src/core/sessions";
 import { createRegistry } from "../src/tools/registry";
 import { ProviderError, type AdapterEvent, type StreamFn } from "../src/providers/openai";
 import { runTurn, type ConversationDeps } from "../src/surfaces/conversation/loop";
@@ -52,11 +52,17 @@ describe("conversation turn", () => {
     const result = await runTurn(deps(db, events, stream), { sessionId, text: "실패 재현" });
     expect(result.status).toBe("failed");
     const assistant = listEntries(db, sessionId).find((entry) => entry.role === "assistant");
-    expect(assistant?.parts).toContainEqual({
-      type: "error",
-      message: "HTTP 429: quota exhausted; reset in 31m",
-    });
-    expect(assistant?.parts).toContainEqual({ type: "text", text: "부분 응답" });
+    // The routing failure is an event of its own, ahead of the partial answer.
+    const kinds = assistant?.events.map((event) => event.type) ?? [];
+    expect(kinds).toContain("error");
+    expect(
+      assistant?.events.some(
+        (event) => event.type === "error" && event.detail.includes("quota exhausted"),
+      ),
+    ).toBe(true);
+    expect(
+      assistant?.events.some((event) => event.type === "text" && event.text === "부분 응답"),
+    ).toBe(true);
     const row = db
       .query<{ result_json: string }, [string]>("SELECT result_json FROM runs WHERE id = ?")
       .get(result.runId);
@@ -76,17 +82,18 @@ describe("conversation turn", () => {
     const entries = listEntries(db, sessionId);
     const assistant = entries.find((entry) => entry.role === "assistant");
     expect(assistant?.status).toBe("complete");
-    expect(assistant?.parts).toEqual([{ type: "text", text: "안녕하세요" }]);
+    expect(assistant?.events).toEqual([{ type: "text", id: 0, text: "안녕하세요" }]);
 
     const kinds = events.after(0, sessionId).map((event) => event.kind);
-    const order = ["turn.started", "message.delta", "message.completed", "turn.settled"];
+    const order = ["turn.started", "text.delta", "turn.response.completed", "turn.done"];
     let cursor = -1;
     for (const kind of order) {
       const index = kinds.indexOf(kind, cursor + 1);
       expect(index).toBeGreaterThan(cursor);
       cursor = index;
     }
-    expect(kinds.filter((kind) => kind === "message.delta").length).toBe(3);
+    expect(kinds.filter((kind) => kind === "text.delta").length).toBe(3);
+    expect(kinds).not.toContain("turn.response.aborted");
 
     const run = db
       .query<{ status: string }, SQLQueryBindings[]>("SELECT status FROM runs WHERE id = ?")
@@ -110,16 +117,18 @@ describe("conversation turn", () => {
     const running = runTurn(deps(db, events, stream), { sessionId, text: "진행 상황" });
     const partial = await waitFor(() => {
       const entry = listEntries(db, sessionId).find((candidate) => candidate.role === "assistant");
-      return entry && entry.parts.length > 0 ? entry : null;
+      return entry && entry.events.length > 0 ? entry : null;
     });
     expect(partial.status).toBe("streaming");
-    expect(partial.parts).toEqual([{ type: "text", text: "먼저 확인합니다. " }]);
+    expect(partial.events).toEqual([{ type: "text", id: 0, text: "먼저 확인합니다. " }]);
     release();
     const result = await running;
     expect(result.status).toBe("succeeded");
     const settled = listEntries(db, sessionId).find((entry) => entry.role === "assistant");
     expect(settled?.status).toBe("complete");
-    expect(settled?.parts).toEqual([{ type: "text", text: "먼저 확인합니다. 확인을 마쳤습니다." }]);
+    expect(settled?.events).toEqual([
+      { type: "text", id: 0, text: "먼저 확인합니다. 확인을 마쳤습니다." },
+    ]);
     db.close();
   });
 
@@ -161,8 +170,15 @@ describe("conversation turn", () => {
     expect(result.text).toBe("거부되었습니다.");
 
     const assistant = listEntries(db, sessionId).find((entry) => entry.role === "assistant");
-    const toolResult = assistant?.parts.find((part) => part.type === "tool_result");
-    expect(toolResult).toMatchObject({ type: "tool_result", denied: true, name: "shell_exec" });
+    const toolResult = assistant?.events.find((part) => part.type === "tool_result");
+    expect(toolResult).toMatchObject({
+      type: "tool_result",
+      failed: true,
+      name: "shell_exec",
+      detail: "정책이 이 호출을 거부했습니다.",
+    });
+    // The call and its result are separate events answering the same call.
+    expect(assistant?.events.filter((event) => event.type === "tool_call")).toHaveLength(1);
     expect(events.after(0, sessionId).map((event) => event.kind)).toContain("tool.denied");
   });
 
@@ -250,8 +266,94 @@ describe("conversation turn", () => {
     expect(run.cancel_intent).toBe("timeout");
     expect(run.settled_at).not.toBeNull();
     const kinds = events.after(0, sessionId).map((event) => event.kind);
-    expect(kinds).toContain("message.aborted");
+    expect(kinds).toContain("turn.response.aborted");
     expect(kinds).toContain("run.interrupted");
+  });
+});
+
+describe("events are first class", () => {
+  test("thinking, the tool call, its result and each paragraph are separate events in order", async () => {
+    const { db, events, sessionId } = setup();
+    let round = 0;
+    const stream: StreamFn = async function* () {
+      round += 1;
+      if (round === 1) {
+        // Two reasoning rounds split by a paragraph, then a tool call, then an answer.
+        yield { type: "reasoning_delta", text: "먼저 " };
+        yield { type: "reasoning_delta", text: "확인한다." };
+        yield { type: "text_delta", text: "확인하겠습니다." };
+        yield { type: "tool_call", id: "c1", name: "echo", arguments: '{"text":"hi"}' };
+        yield { type: "done", finishReason: "tool_calls" };
+        return;
+      }
+      yield { type: "text_delta", text: "완료했습니다." };
+      yield { type: "done", finishReason: "stop" };
+    };
+    const tools = createRegistry([
+      {
+        name: "echo",
+        description: "echo",
+        parameters: { type: "object", properties: { text: { type: "string" } } },
+        action: "read",
+        execute: async (args) => (typeof args["text"] === "string" ? args["text"] : ""),
+      },
+    ]);
+    const result = await runTurn(deps(db, events, stream, { tools }), {
+      sessionId,
+      text: "확인해줘",
+    });
+    expect(result.status).toBe("succeeded");
+
+    const assistant = listEntries(db, sessionId).find((entry) => entry.role === "assistant");
+    const turn = assistant?.events ?? [];
+    expect(turn.map((event) => event.type)).toEqual([
+      "thinking",
+      "text",
+      "tool_call",
+      "tool_result",
+      "text",
+    ]);
+    // The numbering is the position in the turn and never repeats.
+    expect(turn.map((event) => event.id)).toEqual([0, 1, 2, 3, 4]);
+    expect(turn[0]).toEqual({ type: "thinking", id: 0, text: "먼저 확인한다." });
+    // The call and its result answer the same call id, and the paragraph after the
+    // tool round is a new event rather than being glued to the first one.
+    const call = turn[2];
+    const answered = turn[3];
+    expect(call?.type === "tool_call" && call.callId).toBe("c1");
+    expect(answered?.type === "tool_result" && answered.callId).toBe("c1");
+    expect(answered?.type === "tool_result" && answered.detail).toBe("hi");
+    expect(turn[4]).toEqual({ type: "text", id: 4, text: "완료했습니다." });
+    expect(result.text).toBe("확인하겠습니다.완료했습니다.");
+  });
+
+  test("the stored parts of an older record still read as events", () => {
+    const { db, sessionId } = setup();
+    const entry = appendEntry(db, {
+      sessionId,
+      kind: "message",
+      role: "assistant",
+      events: [],
+    });
+    db.query("UPDATE entries SET payload_json = ? WHERE id = ?").run(
+      JSON.stringify({
+        parts: [
+          { type: "reasoning", text: "생각" },
+          { type: "text", text: "답" },
+          { type: "tool_call", id: "x", name: "t", arguments: "{}" },
+          { type: "tool_result", id: "x", name: "t", output: "r", denied: true },
+        ],
+      }),
+      entry.id,
+    );
+    const read = listEntries(db, sessionId).find((candidate) => candidate.id === entry.id);
+    expect(read?.events).toEqual([
+      { type: "thinking", id: 0, text: "생각" },
+      { type: "text", id: 1, text: "답" },
+      { type: "tool_call", id: 2, callId: "x", name: "t", detail: "{}" },
+      { type: "tool_result", id: 3, callId: "x", name: "t", detail: "r", failed: true },
+    ]);
+    db.close();
   });
 });
 

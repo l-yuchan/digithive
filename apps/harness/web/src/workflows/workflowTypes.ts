@@ -12,6 +12,8 @@ export const CAPABILITY_GROUPS = [
   "memory.read",
   "memory.write",
   "mail.read",
+  "mail.send",
+  "account.read",
   "files.read",
 ] as const;
 export const CapabilityGroupSchema = z.enum(CAPABILITY_GROUPS);
@@ -62,12 +64,6 @@ export const WorkflowParamsSchema = z
 
 export const ExecutorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
-  z.object({
-    kind: z.literal("builtin"),
-    name: z.enum(["sync_sources", "briefing"]),
-    accountId: z.string().optional(),
-    sources: z.array(SourceNameSchema).min(1).max(3).optional(),
-  }),
   z.object({
     kind: z.literal("script"),
     path: z.string().min(1).max(500),

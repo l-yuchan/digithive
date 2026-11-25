@@ -83,8 +83,19 @@ TypeScript의 enum, namespace, constructor parameter property 등 non-erasable
 - **실행**: `runs` 행이 `workflow_id`·`workflow_title`·`schedule_id`·`trigger_kind`
   (`schedule`/`manual`/`tool`/`script`/`delegation`)·`params_json` 스냅샷을 함께 가진다.
 
+마이그레이션 v11은 builtin executor를 script로 바꾼다(`migrateBuiltinExecutors`).
+
 마이그레이션 v10은 기존 `schedules` 행을 `wf-<id>` 정의 + 바인딩으로 옮긴다. `schedules` 테이블은
 `schedule_occurrences`의 외래키 때문에 DROP하지 않고 제자리에서 컬럼을 바꾼다.
+
+두 가지 실행 방식만 있다: 에이전트와 스크립트. `연결 자료 수집`(`jobs/collection.ts`)과
+`브리핑 생성`(`jobs/briefing.ts`)은 앱이 실어 보내는 **스크립트 작업**이며, 다른 스크립트와
+실행 방식이 같다 — 경로만 앱이 설치하는 `jobs/` 아래라는 점이 다르다. 설치(매 시작 시 갱신)와
+`kind:"builtin"` 정의의 전환은 `src/jobs/install.ts`·`src/store/job-migration.ts`가 맡는다.
+수집은 저장된 소스 목록을 쓰지 않고 실행 시점에 계정의 켜진 소스(`account.read`)만 읽는다.
+
+`HARNESS_SCRIPTS_ROOT`는 스크립트를 해석하는 루트이자 작업 공간의 루트다. 운영 이미지는
+`/app/jobs`를 쓴다.
 
 도구(대화·작업 공용): `workflow_list`(keyword/regex/bm25 중 하나) · `workflow_detail`(섹션 선택) ·
 `workflow_create` · `workflow_edit` · `workflow_delete` · `workflow_run`(기본 동기 즉시 실행,

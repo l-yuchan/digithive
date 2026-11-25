@@ -11,7 +11,9 @@ import { scheduleTools } from "./tools/schedules";
 import { workflowTools } from "./tools/workflows";
 import { memoryTools } from "./tools/memory";
 import { fileTools } from "./tools/files";
-import { createBuiltinExecutor } from "./scheduler/builtins";
+import { jobTools } from "./tools/jobs";
+import { installJobs } from "./jobs/install";
+import { migrateBuiltinExecutors } from "./store/job-migration";
 import { createRoutingStream, type ProviderRouteConfig } from "./providers/router";
 import { settleExpiredRuns } from "./core/run-state";
 import {
@@ -37,7 +39,6 @@ export type HarnessConfig = {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;
-  /** Optional fallback routes in order; MODEL_PROVIDERS_JSON wins over them. */
   readonly fallbackProviders: readonly ProviderRouteConfig[];
   readonly providerCooldownMs: number;
   readonly providerRetries: number;
@@ -78,7 +79,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .positive()
       .max(100 * 1024 * 1024)
       .parse(env["HARNESS_MAX_UPLOAD_BYTES"] ?? 10 * 1024 * 1024),
-    scriptsRoot: resolve(env["HARNESS_SCRIPTS_ROOT"] ?? join(workspaceRoot, "..", "scripts")),
+    // Where scripts run from. It is also the work space's root, so a file a work run
+    // writes is exactly the file a script path resolves to — the two used to differ by
+    // one directory, and a written script could report success while being unreachable.
+    scriptsRoot: resolve(env["HARNESS_SCRIPTS_ROOT"] ?? workspaceRoot),
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
     model: env["MODEL_NAME"] ?? "mock-model",
@@ -108,7 +112,11 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   if (config.dbPath !== ":memory:") mkdirSync(resolve(config.dbPath, ".."), { recursive: true });
   mkdirSync(config.workspaceRoot, { recursive: true });
   mkdirSync(config.scriptsRoot, { recursive: true });
+  // Jobs are installed before the database migrates, so v11 can see which script
+  // paths this build actually ships.
+  installJobs(config.scriptsRoot);
   const db = openDatabase(config.dbPath);
+  migrateBuiltinExecutors(db, { scriptsRoot: config.scriptsRoot });
   const events = new EventLog(db);
   const primary: ProviderRouteConfig = {
     name: "primary",
@@ -124,18 +132,29 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   // `workflow_run` executes inline and therefore needs the work layer that owns
   // the registry; the getter reads the holder once the runtime object exists.
   const holder: { work: WorkDeps | null } = { work: null };
+  const googleDeps = {
+    db,
+    events,
+    vaultSecret: config.sessionSecret,
+    config: {
+      clientId: config.googleClientId,
+      clientSecret: config.googleClientSecret,
+      redirectUri: config.googleRedirectUri,
+    },
+  };
+  const canvasDeps = {
+    db,
+    events,
+    config: { baseUrl: config.canvasBaseUrl, token: config.canvasToken },
+  };
+  const pushConfig = {
+    publicKey: config.vapidPublicKey,
+    privateKey: config.vapidPrivateKey,
+    subject: config.vapidSubject,
+  };
   const tools = createRegistry([
     ...builtinTools({ root: config.workspaceRoot }),
-    ...personalTools({
-      db,
-      events,
-      vaultSecret: config.sessionSecret,
-      config: {
-        clientId: config.googleClientId,
-        clientSecret: config.googleClientSecret,
-        redirectUri: config.googleRedirectUri,
-      },
-    }),
+    ...personalTools(googleDeps),
     ...workflowTools({
       db,
       events,
@@ -147,10 +166,13 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     ...scheduleTools({ db, events }),
     ...memoryTools(db),
     ...fileTools(db),
+    ...jobTools({ db, events, google: googleDeps, canvas: canvasDeps, push: pushConfig }),
   ]);
   // Scripts are separate processes, so the SDK is a loopback bridge plus a
   // generated module; both exist only while the runtime is alive.
   const sdk = new SdkBridge({ tools });
+  // The app's own jobs are ordinary scripts under the scripts root, refreshed on
+  // every start so an upgraded app never leaves a stale copy behind.
   syncSdkFile(config.scriptsRoot);
   const work: WorkDeps = {
     db,
@@ -168,24 +190,6 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     leaseMs: config.leaseMs,
     sdk,
     scriptsRoot: config.scriptsRoot,
-    scriptExecutor: createBuiltinExecutor({
-      google: {
-        db,
-        events,
-        vaultSecret: config.sessionSecret,
-        config: {
-          clientId: config.googleClientId,
-          clientSecret: config.googleClientSecret,
-          redirectUri: config.googleRedirectUri,
-        },
-      },
-      canvas: { db, events, config: { baseUrl: config.canvasBaseUrl, token: config.canvasToken } },
-      push: {
-        publicKey: config.vapidPublicKey,
-        privateKey: config.vapidPrivateKey,
-        subject: config.vapidSubject,
-      },
-    }),
   };
   holder.work = work;
   return {

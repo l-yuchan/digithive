@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { EntrySchema, type PartSchema, SessionSchema } from "../../src/core/contracts";
+import { EntrySchema, type EventSchema, SessionSchema } from "../../src/core/contracts";
 export { EntrySchema, SessionSchema };
 export type Session = z.infer<typeof SessionSchema>;
-export type Part = z.infer<typeof PartSchema>;
+export type ConversationEvent = z.infer<typeof EventSchema>;
 export type Entry = z.infer<typeof EntrySchema>;
 
 export function apiUrl(path: string): string {

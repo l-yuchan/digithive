@@ -1,8 +1,9 @@
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
 import type { EventLog } from "../events/log";
-import { getAccount, isSourceEnabled } from "../integrations/accounts";
+import { getAccount } from "../integrations/accounts";
 import type { RunExecutor } from "../core/executor";
+import { COLLECTION_SCRIPT } from "../workflows/workflow-store";
 import {
   CreateWorkflowSchema,
   UpdateWorkflowSchema,
@@ -65,18 +66,19 @@ const RequestBody = z.record(z.string(), z.unknown());
 
 /**
  * Saving a collection workflow is where the owner grants use of that account's
- * information, so one that reads a disabled feature is refused here with the
- * reason instead of silently collecting nothing on every run.
+ * information, so one that names an account that no longer exists is refused here
+ * with the reason instead of failing on every run.
+ *
+ * Which sources the run reads is decided by the script from the account's switches at
+ * run time, so there is no stored source list here to go stale: turning a feature off
+ * stops the next run by itself.
  */
 function collectionProblem(db: Database, executor: RunExecutor | undefined): string | null {
-  if (!executor || executor.kind !== "builtin" || executor.name !== "sync_sources") return null;
-  if (!executor.accountId) return "수집 워크플로는 계정을 골라야 합니다.";
-  const account = getAccount(db, executor.accountId);
-  if (!account) return `계정 ${executor.accountId} 이(가) 없습니다.`;
-  for (const source of executor.sources ?? []) {
-    if (!isSourceEnabled(db, account.id, source))
-      return `${account.label} 의 ${source} 정보 사용이 꺼져 있습니다. 연결 탭에서 켜거나 이 정보를 수집에서 제외하세요.`;
-  }
+  if (!executor || executor.kind !== "script" || executor.path !== COLLECTION_SCRIPT) return null;
+  const accountId = executor.args[0];
+  if (!accountId) return "수집 워크플로는 계정 id를 첫 인자로 지정해야 합니다.";
+  const account = getAccount(db, accountId);
+  if (!account) return `계정 ${accountId} 이(가) 없습니다.`;
   return null;
 }
 

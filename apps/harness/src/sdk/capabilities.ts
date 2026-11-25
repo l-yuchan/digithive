@@ -13,6 +13,8 @@ export const CAPABILITY_TOOLS: Readonly<Record<CapabilityGroup, readonly string[
   "memory.read": ["memory_recall"],
   "memory.write": ["memory_note", "memory_correct"],
   "mail.read": ["gmail_search", "personal_data_search"],
+  "mail.send": ["push_send", "briefing_compose"],
+  "account.read": ["account_list", "source_collect"],
   "files.read": ["stored_file_list", "stored_file_read"],
 };
 

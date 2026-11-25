@@ -736,11 +736,10 @@ describe("account API and tools", () => {
     });
   });
 
-  test("a collection workflow that reads a disabled feature is refused with the reason", async () => {
+  test("a saved collection job is refused when its account is gone", async () => {
     const db = fresh();
     const events = new EventLog(db);
-    const a = upsertGoogleAccount(db, { subject: "sub-a", email: "a@example.com" }).id;
-    setSourceEnabled(db, a, "gmail", false);
+    const missing = "11111111-2222-3333-4444-555555555555";
     const deps = { db, events };
     const before = db
       .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM workflows")
@@ -751,7 +750,12 @@ describe("account API and tools", () => {
         body: JSON.stringify({
           title: "메일 수집",
           instruction: "메일을 모읍니다",
-          executor: { kind: "builtin", name: "sync_sources", accountId: a, sources: ["gmail"] },
+          executor: {
+            kind: "script",
+            path: "jobs/collection.ts",
+            args: [missing],
+            capabilities: ["account.read"],
+          },
           timeoutSeconds: 60,
         }),
       }),
@@ -761,11 +765,50 @@ describe("account API and tools", () => {
     expect(refused.status).toBe(422);
     const body = z.object({ error: z.string(), detail: z.string() }).parse(await refused.json());
     expect(body.error).toBe("collection_not_permitted");
-    expect(body.detail).toContain("꺼져 있습니다");
+    expect(body.detail).toContain(missing);
     const after = db
       .query<{ n: number }, SQLQueryBindings[]>("SELECT count(*) AS n FROM workflows")
       .get();
     expect(after).toEqual(before);
+  });
+
+  test("a collection job is accepted without storing any source list", async () => {
+    // The sources come from the account's switches at each run, so a workflow saved
+    // while Gmail was on cannot keep reading Gmail after it is turned off.
+    const db = fresh();
+    const events = new EventLog(db);
+    const a = upsertGoogleAccount(db, { subject: "sub-a", email: "a@example.com" }).id;
+    setSourceEnabled(db, a, "gmail", false);
+    const accepted = await handleWorkflowRequest(
+      new Request("https://local/api/workflows", {
+        method: "POST",
+        body: JSON.stringify({
+          title: "자료 수집",
+          instruction: "켜진 정보를 모읍니다",
+          executor: {
+            kind: "script",
+            path: "jobs/collection.ts",
+            args: [a],
+            capabilities: ["account.read"],
+          },
+          timeoutSeconds: 60,
+        }),
+      }),
+      { db, events },
+    );
+    ok(accepted, "workflow route matched");
+    expect(accepted.status).toBe(201);
+    const row = db
+      .query<{ executor_json: string }, [string]>(
+        "SELECT executor_json FROM workflows WHERE json_extract(executor_json,'$.args[0]') = ?",
+      )
+      .get(a);
+    expect(row === null ? {} : JSON.parse(row.executor_json)).toEqual({
+      kind: "script",
+      path: "jobs/collection.ts",
+      args: [a],
+      capabilities: ["account.read"],
+    });
   });
 
   test("connecting an account grants use and never starts a collection", async () => {

@@ -4,6 +4,7 @@ import { createRuntime, loadConfig } from "../runtime";
 import { createRegistry } from "../tools/registry";
 import { settleExpiredRuns } from "../core/run-state";
 import { reconcileWork } from "../surfaces/work/runner";
+import { ensureCollectionWorkflows } from "../workflows/collection";
 import { createApp, type AppDeps } from "./app";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
 
@@ -107,6 +108,10 @@ if (import.meta.main) {
     const result = reconcileWork(harness.deps.db, harness.deps.events);
     if (result.interrupted > 0) console.log(`reconciled ${result.interrupted} interrupted run(s)`);
   }, 15_000).unref();
+  // Every account needs its collection workflow, including accounts that were
+  // connected while this app was not running.
+  const created = ensureCollectionWorkflows(harness.deps.db, harness.deps.events);
+  if (created > 0) console.log(`created ${created} collection workflow(s)`);
   // A conversation can be silent for longer than any fixed idle limit while a model
   // thinks or a tool runs; a live event stream must outlast that silence.
   const server = Bun.serve({ port: config.port, idleTimeout: 0, fetch: harness.handler });

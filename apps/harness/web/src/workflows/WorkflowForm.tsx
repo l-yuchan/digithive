@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { postJson, sendJson } from "../api";
-import type { Account } from "../connections/accounts";
 import { reportAsync } from "../async";
 import { ErrorMessage } from "./ErrorMessage";
 import { ExecutorFields } from "./WorkflowFields";
@@ -10,13 +9,11 @@ import { WorkflowMutationResponseSchema, WorkflowSchema, type Workflow } from ".
 
 export function WorkflowForm({
   workflow,
-  accounts,
   accountsError,
   onSaved,
   onCancel,
 }: {
   readonly workflow: Workflow | null;
-  readonly accounts: readonly Account[];
   readonly accountsError: string | null;
   readonly onSaved: (id: string, rebound: readonly string[]) => Promise<void>;
   readonly onCancel: () => void;
@@ -115,12 +112,7 @@ export function WorkflowForm({
             </small>
           </label>
         </div>
-        <ExecutorFields
-          draft={draft}
-          accounts={accounts}
-          accountsError={accountsError}
-          onChange={change}
-        />
+        <ExecutorFields draft={draft} accountsError={accountsError} onChange={change} />
         <WorkflowParamsEditor rows={draft.params} onChange={(params) => change("params", params)} />
       </fieldset>
       {error ? (

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../../events/log";
-import { appendEntry, saveEntryParts, updateEntryParts, type Part } from "../../core/sessions";
+import { appendEntry, saveEntryEvents, updateEntryEvents } from "../../core/sessions";
+import { conversationText, type ConversationEvent } from "../../core/contracts";
 import { getLeaf, pathEntries, setLeaf } from "../../core/tree";
 import { buildContext } from "../../core/context";
 import { recallMemories } from "../../knowledge/memory";
@@ -81,9 +82,11 @@ function describeRouting(diagnostic: ProviderDiagnostic): string {
 }
 
 /**
- * One conversation turn: user entry → streamed assistant entry → optional tool
- * rounds → settled run. A deadline abort is recorded as `message.aborted` and
- * the run is settled, never left `running`.
+ * One conversation turn: user entry → streamed assistant events → optional tool
+ * rounds → settled run. Thinking, each paragraph, each tool call and each result is
+ * appended as its own event with its own stream event, so the view never has to
+ * unpack a bundle. A deadline abort is recorded as `turn.response.aborted` and the
+ * run is settled, never left `running`.
  */
 export async function runTurn(
   deps: ConversationDeps,
@@ -134,7 +137,7 @@ export async function runTurn(
       parentId: input.parentId ?? getLeaf(deps.db, input.sessionId),
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: input.text }],
+      events: [{ type: "text", id: 0, text: input.text }],
       now: startedAt,
     });
     userEntryId = userEntry.id;
@@ -145,13 +148,13 @@ export async function runTurn(
     kind: "message",
     role: "assistant",
     status: "streaming",
-    parts: [],
+    events: [],
     parentId: userEntryId,
     now: startedAt,
   });
   setLeaf(deps.db, input.sessionId, assistantEntry.id);
   deps.events.append({
-    kind: "message.started",
+    kind: "turn.response.started",
     runId,
     sessionId: input.sessionId,
     payload: { entryId: assistantEntry.id },
@@ -173,17 +176,24 @@ export async function runTurn(
     limits.totalMs,
     now,
   );
-  const parts: Part[] = [];
+  /** Appends one event and streams it as its own event; the id is its position. */
+  const events: ConversationEvent[] = [];
+  const emit = (event: ConversationEvent) => {
+    events.push(event);
+    savedSince = 0;
+    saveProgress(true);
+    return event;
+  };
   let text = "";
   // Partial text is stored between deltas so a reconnecting or reloading view sees
   // the answer that was already streamed instead of an empty bubble.
-  let deltasSinceSave = 0;
+  let savedSince = 0;
   let savedOnce = false;
   const saveProgress = (force = false) => {
-    if (!force && savedOnce && deltasSinceSave < 8) return;
-    deltasSinceSave = 0;
+    if (!force && savedOnce && savedSince < 8) return;
+    savedSince = 0;
     savedOnce = true;
-    saveEntryParts(deps.db, assistantEntry.id, parts);
+    saveEntryEvents(deps.db, assistantEntry.id, events);
   };
 
   try {
@@ -196,7 +206,7 @@ export async function runTurn(
         now: startedAt,
       }).catch((error: unknown) => {
         const message = `대화 요약 실패: ${reason(error)}`;
-        parts.push({ type: "error", message });
+        emit({ type: "error", id: events.length, detail: message });
         deps.events.append({
           kind: "context.compaction_failed",
           runId,
@@ -215,10 +225,7 @@ export async function runTurn(
       .filter((entry) => !compaction || entry.seq > compaction.coversSeq)
       .map((entry) => ({
         role: entry.role === "user" ? ("user" as const) : ("assistant" as const),
-        content: entry.parts
-          .filter((part): part is { type: "text"; text: string } => part.type === "text")
-          .map((part) => part.text)
-          .join(""),
+        content: conversationText(entry.events),
       }))
       .filter((message) => message.content.length > 0);
     const built = buildContext({
@@ -244,14 +251,37 @@ export async function runTurn(
     while (round < limits.maxToolRounds) {
       round += 1;
       const pending: { id: string; name: string; arguments: string }[] = [];
+      // Deltas extend the event they belong to; any other event closes it, so a
+      // paragraph after a tool result is a new block rather than being glued on.
+      let open: { readonly type: "text" | "thinking"; readonly id: number } | null = null;
       const routing = (diagnostic: ProviderDiagnostic) => {
         const message = describeRouting(diagnostic);
-        parts.push({ type: "error", message });
+        open = null;
+        emit({ type: "error", id: events.length, detail: message });
         deps.events.append({
           kind: diagnostic.kind,
           runId,
           sessionId: input.sessionId,
           payload: { ...diagnostic, message },
+          now: now(),
+        });
+      };
+      const appendDelta = (type: "text" | "thinking", delta: string) => {
+        if (open !== null && open.type === type) {
+          const current = events[open.id];
+          if (current && (current.type === "text" || current.type === "thinking"))
+            events[open.id] = { ...current, text: current.text + delta };
+        } else {
+          const created = emit({ type, id: events.length, text: delta });
+          open = { type, id: created.id };
+        }
+        savedSince += 1;
+        saveProgress();
+        deps.events.append({
+          kind: type === "text" ? "text.delta" : "thinking.delta",
+          runId,
+          sessionId: input.sessionId,
+          payload: { entryId: assistantEntry.id, id: open.id, text: delta },
           now: now(),
         });
       };
@@ -266,33 +296,9 @@ export async function runTurn(
         if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
         if (event.type === "text_delta") {
           text += event.text;
-          const last = parts.at(-1);
-          if (last && last.type === "text")
-            parts[parts.length - 1] = { type: "text", text: last.text + event.text };
-          else parts.push({ type: "text", text: event.text });
-          deltasSinceSave += 1;
-          saveProgress();
-          deps.events.append({
-            kind: "message.delta",
-            runId,
-            sessionId: input.sessionId,
-            payload: { entryId: assistantEntry.id, text: event.text },
-            now: now(),
-          });
+          appendDelta("text", event.text);
         } else if (event.type === "reasoning_delta") {
-          const last = parts.at(-1);
-          if (last && last.type === "reasoning")
-            parts[parts.length - 1] = { type: "reasoning", text: last.text + event.text };
-          else parts.push({ type: "reasoning", text: event.text });
-          deltasSinceSave += 1;
-          saveProgress();
-          deps.events.append({
-            kind: "message.delta",
-            runId,
-            sessionId: input.sessionId,
-            payload: { entryId: assistantEntry.id, reasoning: event.text },
-            now: now(),
-          });
+          appendDelta("thinking", event.text);
         } else if (event.type === "tool_call") {
           pending.push({ id: event.id, name: event.name, arguments: event.arguments });
         } else if (event.type === "usage") {
@@ -307,6 +313,8 @@ export async function runTurn(
       }
 
       if (pending.length === 0) break;
+      // A tool round ends any open paragraph: the next text is its own block.
+      open = null;
       messages.push({ role: "assistant", content: text, toolCalls: pending });
 
       for (const call of pending) {
@@ -320,8 +328,26 @@ export async function runTurn(
         } catch {
           args = {};
         }
-        parts.push({ type: "tool_call", id: call.id, name: call.name, arguments: call.arguments });
-        saveProgress(true);
+        const callEvent = emit({
+          type: "tool_call",
+          id: events.length,
+          callId: call.id,
+          name: call.name,
+          detail: call.arguments,
+        });
+        deps.events.append({
+          kind: "tool_call.started",
+          runId,
+          sessionId: input.sessionId,
+          payload: {
+            entryId: assistantEntry.id,
+            id: callEvent.id,
+            callId: call.id,
+            name: call.name,
+            detail: call.arguments,
+          },
+          now: now(),
+        });
         deps.events.append({
           kind: "tool.started",
           runId,
@@ -336,11 +362,35 @@ export async function runTurn(
               resource: z.string().parse(args["path"] ?? args["command"] ?? "*"),
             })
           : "deny";
+        const recordResult = (output: string, failed: boolean) => {
+          const resultEvent = emit({
+            type: "tool_result",
+            id: events.length,
+            callId: call.id,
+            name: call.name,
+            detail: output,
+            ...(failed ? { failed: true } : {}),
+          });
+          deps.events.append({
+            kind: "tool_result.recorded",
+            runId,
+            sessionId: input.sessionId,
+            payload: {
+              entryId: assistantEntry.id,
+              id: resultEvent.id,
+              callId: call.id,
+              name: call.name,
+              detail: output,
+              ...(failed ? { failed: true } : {}),
+            },
+            now: now(),
+          });
+        };
         if (!tool || decision !== "allow") {
           const output = tool
             ? "정책이 이 호출을 거부했습니다."
             : `알 수 없는 도구입니다: ${call.name}`;
-          parts.push({ type: "tool_result", id: call.id, name: call.name, output, denied: true });
+          recordResult(output, true);
           deps.events.append({
             kind: "tool.denied",
             runId,
@@ -373,8 +423,7 @@ export async function runTurn(
         }
         if (timedOut) {
           output = "도구 실행 시간이 초과되었습니다.";
-          parts.push({ type: "tool_result", id: call.id, name: call.name, output, timeout: true });
-          saveProgress(true);
+          recordResult(output, true);
           deps.events.append({
             kind: "tool.timeout",
             runId,
@@ -383,8 +432,7 @@ export async function runTurn(
             now: now(),
           });
         } else {
-          parts.push({ type: "tool_result", id: call.id, name: call.name, output });
-          saveProgress(true);
+          recordResult(output, output.startsWith("도구 실행 실패"));
           deps.events.append({
             kind: "tool.result",
             runId,
@@ -398,16 +446,16 @@ export async function runTurn(
     }
 
     if (!ownsLease(deps.db, runId, "conversation", now())) throw new Error("lease_lost");
-    updateEntryParts(deps.db, assistantEntry.id, parts, "complete", input.sessionId);
+    updateEntryEvents(deps.db, assistantEntry.id, events, "complete", input.sessionId);
     deps.events.append({
-      kind: "message.completed",
+      kind: "turn.response.completed",
       runId,
       sessionId: input.sessionId,
       payload: { entryId: assistantEntry.id },
       now: now(),
     });
     deps.events.append({
-      kind: "turn.settled",
+      kind: "turn.done",
       runId,
       sessionId: input.sessionId,
       payload: { entryId: assistantEntry.id },
@@ -429,19 +477,20 @@ export async function runTurn(
     const interrupted = controller.signal.aborted;
     if (!ownsLease(deps.db, runId, "conversation", now()))
       return { runId, entryId: assistantEntry.id, status: "aborted", text };
-    parts.push({
+    emit({
       type: "error",
-      message: interrupted ? `실행 중단: ${reason(controller.signal.reason)}` : kind,
+      id: events.length,
+      detail: interrupted ? `실행 중단: ${reason(controller.signal.reason)}` : kind,
     });
-    updateEntryParts(
+    updateEntryEvents(
       deps.db,
       assistantEntry.id,
-      parts,
+      events,
       interrupted ? "aborted" : "failed",
       input.sessionId,
     );
     deps.events.append({
-      kind: "message.aborted",
+      kind: "turn.response.aborted",
       runId,
       sessionId: input.sessionId,
       payload: { entryId: assistantEntry.id, reason: interrupted ? "timeout" : kind },

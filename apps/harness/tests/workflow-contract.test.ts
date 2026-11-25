@@ -54,7 +54,9 @@ describe("workflow definition contract", () => {
     expect(
       RunExecutorSchema.safeParse({ kind: "script", path: "x.ts", capabilities: ["root"] }).success,
     ).toBe(false);
-    expect(CAPABILITY_GROUPS).toHaveLength(8);
+    expect(CAPABILITY_GROUPS).toHaveLength(10);
+    expect(CAPABILITY_GROUPS).toContain("account.read");
+    expect(CAPABILITY_GROUPS).toContain("mail.send");
   });
 
   test("parameter declarations reject duplicate, malformed and mistyped entries", () => {

@@ -12,6 +12,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 COPY --from=build /app/src ./src
 COPY --from=build /app/scripts ./scripts
+COPY --from=build /app/jobs ./jobs
 COPY --from=build /app/web/dist ./web/dist
 COPY --from=build /app/tsconfig.json ./
 EXPOSE 4318

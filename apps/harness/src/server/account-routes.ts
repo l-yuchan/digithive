@@ -23,7 +23,7 @@ import {
   type GoogleDeps,
 } from "../integrations/google";
 import { z } from "zod";
-import { ensureCollectionWorkflow, removeAccountWorkflows } from "../scheduler/collection";
+import { ensureCollectionWorkflow, removeAccountWorkflows } from "../workflows/collection";
 
 /** The same object shape the app already assembles for Google and Canvas. */
 export type AccountRouteDeps = {

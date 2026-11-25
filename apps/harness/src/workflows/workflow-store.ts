@@ -17,6 +17,13 @@ import { resolveWorkflowParams } from "./workflow-params";
 import { valueMatchesParamType } from "./workflow-types";
 import { listBindings, parseArgs } from "../scheduler/schedule-types";
 
+/**
+ * The app's own jobs, installed under `<scriptsRoot>/jobs` at every start. A job is
+ * not a kind of workflow: it is a script whose path happens to belong to the app.
+ */
+export const COLLECTION_SCRIPT = "jobs/collection.ts";
+export const BRIEFING_SCRIPT = "jobs/briefing.ts";
+
 /** A refusal a tool or route can turn into an answer, with the facts attached. */
 export class WorkflowError extends Error {
   readonly code: string;

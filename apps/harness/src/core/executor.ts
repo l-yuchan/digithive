@@ -13,30 +13,27 @@ export const CAPABILITY_GROUPS = [
   "memory.read",
   "memory.write",
   "mail.read",
+  "mail.send",
+  "account.read",
   "files.read",
 ] as const;
 
 export const CapabilityGroupSchema = z.enum(CAPABILITY_GROUPS);
 export type CapabilityGroup = z.infer<typeof CapabilityGroupSchema>;
 
-/** A data source a collection run may read. */
+/** A data source one account keeps. A job reads only the ones the owner left on. */
 export const SourceNameSchema = z.enum(["calendar", "gmail", "canvas"]);
 export type ExecutorSource = z.infer<typeof SourceNameSchema>;
 
-/** Execution mechanism only; instructions, deadline and state belong to the run. */
+/**
+ * Execution mechanism only; instructions, deadline and state belong to the run.
+ *
+ * There are two kinds on purpose: the model, and a script file. The collection and
+ * briefing jobs the app ships are ordinary scripts whose path happens to point at
+ * `jobs/`, so a job is not a special kind of workflow — only its path is unusual.
+ */
 export const RunExecutorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent") }),
-  z.object({
-    kind: z.literal("builtin"),
-    name: z.enum(["sync_sources", "briefing"]),
-    accountId: z.string().optional(),
-    /**
-     * Collection only: the account and the sources it reads. Collection is an
-     * ordinary schedule, so what it reads is written down here rather than
-     * triggered by connecting an account.
-     */
-    sources: z.array(SourceNameSchema).min(1).max(3).optional(),
-  }),
   z.object({
     kind: z.literal("script"),
     path: z.string().min(1).max(500),

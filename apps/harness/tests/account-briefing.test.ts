@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { openDatabase } from "../src/store/db";
-import { composeBriefing, runBriefing } from "../src/scheduler/compose";
+import { composeBriefing, runBriefing } from "../src/jobs/briefing";
 import { EventLog } from "../src/events/log";
 
 test("briefings exclude disabled account sources and attribute identical item IDs to their account", () => {

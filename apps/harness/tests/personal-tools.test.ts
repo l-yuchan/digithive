@@ -96,7 +96,7 @@ test("a createHarness conversation offers and executes gmail_search over the Goo
     const assistant = listEntries(harness.deps.db, session.id).find(
       (entry) => entry.role === "assistant",
     );
-    expect(assistant?.parts.find((part) => part.type === "tool_result")).toMatchObject({
+    expect(assistant?.events.find((part) => part.type === "tool_result")).toMatchObject({
       type: "tool_result",
       name: "gmail_search",
     });

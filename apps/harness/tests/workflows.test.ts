@@ -318,6 +318,7 @@ function workDeps(
     stream: scripted(steps),
     tools: createRegistry(builtinTools({ root })),
     policy: WORK_POLICY,
+    scriptsRoot: root,
     limits: {
       firstTokenMs: 5_000,
       idleMs: 5_000,
@@ -332,27 +333,24 @@ function workDeps(
 }
 
 describe("inline execution", () => {
-  test("a builtin workflow returns its result inside the same call", async () => {
+  test("a script job returns its result inside the same call", async () => {
     const { db, events, root } = fresh();
-    let callbacks = 0;
-    const deps = workDeps(db, events, root, [], {
-      scriptExecutor: async () => {
-        callbacks += 1;
-        return JSON.stringify({ collected: 2 });
-      },
-    });
+    await Bun.write(
+      join(root, "jobs", "count.ts"),
+      "console.log(JSON.stringify({ collected: 2 }));\n",
+    );
+    const deps = workDeps(db, events, root, []);
     const workflow = createWorkflow(
       db,
       {
         title: "수집",
         instruction: "수집한다",
-        executor: { kind: "builtin", name: "sync_sources", accountId: "acct-a" },
+        executor: { kind: "script", path: "jobs/count.ts", args: [] },
       },
       BASE,
       events,
     );
     const result = await runWorkflowInline(deps, { workflowId: workflow.id, triggerKind: "tool" });
-    expect(callbacks).toBe(1);
     expect(result.status).toBe("succeeded");
     expect(z.object({ text: z.string() }).parse(result.result).text).toContain("collected");
     const stored = getRun(db, result.runId);
@@ -400,6 +398,10 @@ describe("inline execution", () => {
 
   test("the caller's abort stops the inline child and the caller's budget bounds it", async () => {
     const { db, events, root } = fresh();
+    await Bun.write(
+      join(root, "jobs", "slow.ts"),
+      "await Bun.sleep(150);\nconsole.log('늦게 끝남');\n",
+    );
     const deps = workDeps(db, events, root, [], {
       limits: {
         firstTokenMs: 5_000,
@@ -409,18 +411,13 @@ describe("inline execution", () => {
         maxToolRounds: 3,
         totalMs: 60,
       },
-      scriptExecutor: async (_executor, context) => {
-        await Bun.sleep(150);
-        context.signal.throwIfAborted();
-        return "늦게 끝남";
-      },
     });
     const workflow = createWorkflow(
       db,
       {
         title: "느린 수집",
         instruction: "느리게",
-        executor: { kind: "builtin", name: "sync_sources", accountId: "a" },
+        executor: { kind: "script", path: "jobs/slow.ts", args: [] },
         timeoutSeconds: 60,
       },
       BASE,

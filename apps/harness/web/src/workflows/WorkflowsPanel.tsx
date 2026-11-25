@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getJson } from "../api";
 import { reportAsync } from "../async";
-import { AccountsResponseSchema, type Account } from "../connections/accounts";
+import { AccountsResponseSchema } from "../connections/accounts";
 import { ErrorMessage } from "./ErrorMessage";
 import { WorkflowDetail } from "./WorkflowDetail";
 import { WorkflowForm } from "./WorkflowForm";
@@ -34,7 +34,6 @@ export function WorkflowsPanel() {
   const [workflows, setWorkflows] = useState<WorkflowView[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [editor, setEditor] = useState<Workflow | null | "new">(null);
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<SearchMode>("keyword");
@@ -62,11 +61,12 @@ export function WorkflowsPanel() {
       .catch((error: unknown) => setLoadError(String(error)));
   }, [search]);
 
+  // The form no longer needs the account list; it only reports whether the filter
+  // check for a collection job could reach it.
   const loadAccounts = useCallback(
     () =>
       getJson("/api/accounts", AccountsResponseSchema)
-        .then((body) => {
-          setAccounts(body.accounts);
+        .then(() => {
           setAccountsError(null);
         })
         .catch((error: unknown) => setAccountsError(String(error))),
@@ -248,7 +248,6 @@ export function WorkflowsPanel() {
         <WorkflowForm
           key={editor === "new" ? "new" : editor.id}
           workflow={editor === "new" ? null : editor}
-          accounts={accounts}
           accountsError={accountsError}
           onSaved={saved}
           onCancel={() => setEditor(null)}
@@ -273,7 +272,6 @@ export function WorkflowsPanel() {
               workflow={currentDetail.workflow}
               schedules={currentDetail.schedules}
               runs={currentDetail.runs}
-              accounts={accounts}
               onEdit={() => setEditor(currentDetail.workflow)}
               onChanged={async () => {
                 await Promise.all([loadList(), loadDetail()]);

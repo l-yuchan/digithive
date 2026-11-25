@@ -32,10 +32,6 @@ export type WorkDeps = {
   readonly leaseMs?: number;
   /** Issues the run-scoped SDK bridge ticket a script needs; absent means no SDK. */
   readonly sdk?: ScriptTicketIssuer;
-  /** Injected by main for builtin executors; scripts run locally via scriptsRoot. */ readonly scriptExecutor?: (
-    executor: Extract<RunExecutor, { kind: "builtin" }>,
-    context: { readonly runId: string; readonly signal: AbortSignal },
-  ) => Promise<string>;
   readonly scriptsRoot?: string;
   /** Provider routing decisions (retry, fallback, exhausted) for the execution log. */
   readonly streamDiagnostics?: (diagnostics: readonly ProviderDiagnostic[]) => void;

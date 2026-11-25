@@ -1,7 +1,7 @@
 import { formatDateTime, runStatusLabel } from "../format";
 import type { ScheduleBinding, WorkflowView } from "./workflowTypes";
 
-const EXECUTOR_LABELS = { agent: "에이전트", builtin: "내장", script: "스크립트" } as const;
+const EXECUTOR_LABELS = { agent: "에이전트", script: "스크립트" } as const;
 
 function nextRun(schedules: readonly ScheduleBinding[]): string | null {
   const upcoming = schedules

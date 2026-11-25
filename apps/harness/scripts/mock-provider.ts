@@ -15,12 +15,19 @@ const encoder = new TextEncoder();
 const frame = (payload: unknown): Uint8Array =>
   encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
 
-function sse(parts: string[], finish = "stop"): Response {
+function sse(parts: string[], finish = "stop", reasoning: string[] = []): Response {
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       controller.enqueue(
         frame({ choices: [{ delta: { role: "assistant" }, finish_reason: null }] }),
       );
+      // Reasoning first, so a local run shows the thinking block before any text.
+      for (const part of reasoning) {
+        controller.enqueue(
+          frame({ choices: [{ delta: { reasoning_content: part }, finish_reason: null }] }),
+        );
+        await Bun.sleep(15);
+      }
       for (const part of parts) {
         controller.enqueue(frame({ choices: [{ delta: { content: part }, finish_reason: null }] }));
         await Bun.sleep(15);
@@ -105,7 +112,7 @@ const server = Bun.serve({
       return toolCall("external_action", { summary: `메일 발송: ${prompt.slice(0, 40)}` });
     }
     const reply = `요청을 받았습니다: ${prompt.slice(0, 60)}. 스트리밍 응답입니다.`;
-    return sse(Array.from(reply));
+    return sse(Array.from(reply), "stop", Array.from("이 요청에 무엇을 답할지 살펴보는 중입니다."));
   },
 });
 

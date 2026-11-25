@@ -68,7 +68,7 @@ describe("compaction", () => {
       sessionId: session.id,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "짧은 질문" }],
+      events: [{ type: "text", id: 0, text: "짧은 질문" }],
     });
     const result = await maybeCompact({
       db: database,
@@ -90,7 +90,7 @@ describe("compaction", () => {
         parentId,
         kind: "message",
         role: index % 2 === 0 ? "user" : "assistant",
-        parts: [{ type: "text", text: `메시지 ${index} `.padEnd(60, "가") }],
+        events: [{ type: "text", id: 0, text: `메시지 ${index} `.padEnd(60, "가") }],
       });
       parentId = entry.id;
       setLeaf(database, session.id, entry.id);
@@ -131,7 +131,7 @@ describe("compaction", () => {
         parentId,
         kind: "message",
         role: index % 2 === 0 ? "user" : "assistant",
-        parts: [{ type: "text", text: `반복 메시지 ${index} `.padEnd(60, "나") }],
+        events: [{ type: "text", id: 0, text: `반복 메시지 ${index} `.padEnd(60, "나") }],
       });
       parentId = entry.id;
       setLeaf(database, session.id, entry.id);
@@ -166,7 +166,7 @@ test("editing an earlier message excludes the abandoned branch and its compactio
         parentId,
         kind: "message",
         role: index % 2 === 0 ? "user" : "assistant",
-        parts: [{ type: "text", text: `abandoned-${index} `.repeat(10) }],
+        events: [{ type: "text", id: 0, text: `abandoned-${index} `.repeat(10) }],
       });
       firstId ||= entry.id;
       parentId = entry.id;

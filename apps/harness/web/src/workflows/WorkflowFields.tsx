@@ -1,7 +1,6 @@
-import { PROVIDER_LABELS, SOURCE_LABELS, type Account } from "../connections/accounts";
 import { ErrorMessage } from "./ErrorMessage";
 import type { WorkflowDraft } from "./workflowDraft";
-import type { CapabilityGroup, Executor, SourceName } from "./workflowTypes";
+import type { CapabilityGroup } from "./workflowTypes";
 
 export type ChangeWorkflowDraft = <K extends keyof WorkflowDraft>(
   key: K,
@@ -10,7 +9,6 @@ export type ChangeWorkflowDraft = <K extends keyof WorkflowDraft>(
 
 type Props = {
   readonly draft: WorkflowDraft;
-  readonly accounts: readonly Account[];
   readonly accountsError: string | null;
   readonly onChange: ChangeWorkflowDraft;
 };
@@ -20,25 +18,38 @@ const CAPABILITIES: readonly { id: CapabilityGroup; label: string; access: strin
   { id: "memory.read", label: "기억 읽기", access: "읽기" },
   { id: "mail.read", label: "메일 읽기", access: "읽기" },
   { id: "files.read", label: "파일 읽기", access: "읽기" },
+  { id: "account.read", label: "계정·켜진 정보 읽기", access: "읽기" },
+  { id: "mail.send", label: "알림 보내기·브리핑 만들기", access: "쓰기" },
   { id: "workflow.write", label: "워크플로 쓰기", access: "쓰기" },
   { id: "memory.write", label: "기억 쓰기", access: "쓰기" },
   { id: "schedule.write", label: "스케줄 쓰기", access: "쓰기" },
   { id: "workflow.run", label: "워크플로 실행", access: "실행" },
 ];
 
-function executorKind(value: string): Executor["kind"] {
-  if (value === "agent" || value === "builtin" || value === "script") return value;
+/** The app's own jobs: ordinary scripts whose path belongs to the app. */
+const SHIPPED_JOBS: readonly { path: string; label: string; capabilities: CapabilityGroup[] }[] = [
+  { path: "jobs/collection.ts", label: "연결 자료 수집", capabilities: ["account.read"] },
+  {
+    path: "jobs/briefing.ts",
+    label: "브리핑 생성",
+    capabilities: ["account.read", "mail.send"],
+  },
+];
+
+function executorKind(value: string): "agent" | "script" {
+  if (value === "agent" || value === "script") return value;
   throw new Error("알 수 없는 실행 방식입니다.");
 }
 
-export function ExecutorFields({ draft, accounts, accountsError, onChange }: Props) {
-  const account = accounts.find((candidate) => candidate.id === draft.accountId);
-  const accountMissing = draft.accountId && !account;
-  const toggleSource = (source: SourceName, checked: boolean) =>
-    onChange(
-      "sources",
-      checked ? [...draft.sources, source] : draft.sources.filter((item) => item !== source),
-    );
+export function ExecutorFields({ draft, accountsError, onChange }: Props) {
+  const shipped = SHIPPED_JOBS.find((job) => job.path === draft.scriptPath);
+  const chooseJob = (path: string) => {
+    const job = SHIPPED_JOBS.find((candidate) => candidate.path === path);
+    if (job) {
+      onChange("scriptPath", job.path);
+      onChange("capabilities", job.capabilities);
+    }
+  };
   const toggleCapability = (capability: CapabilityGroup, checked: boolean) =>
     onChange(
       "capabilities",
@@ -57,70 +68,29 @@ export function ExecutorFields({ draft, accounts, accountsError, onChange }: Pro
           data-testid="workflow-executor-kind"
         >
           <option value="agent">에이전트</option>
-          <option value="builtin">내장 작업</option>
           <option value="script">스크립트</option>
         </select>
       </label>
-      {draft.executorKind === "builtin" ? (
+      {draft.executorKind === "script" ? (
         <>
-          <label className="field">
-            <span>내장 작업</span>
+          <label className="field field-wide">
+            <span>앱이 제공하는 작업 (선택)</span>
             <select
-              value={draft.builtinName}
-              onChange={(event) =>
-                onChange(
-                  "builtinName",
-                  event.target.value === "briefing" ? "briefing" : "sync_sources",
-                )
-              }
+              value={shipped ? draft.scriptPath : ""}
+              onChange={(event) => chooseJob(event.target.value)}
+              data-testid="workflow-job"
             >
-              <option value="sync_sources">연결 자료 수집</option>
-              <option value="briefing">브리핑 생성</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>{draft.builtinName === "sync_sources" ? "수집 계정" : "계정 범위(선택)"}</span>
-            <select
-              value={draft.accountId}
-              onChange={(event) => onChange("accountId", event.target.value)}
-            >
-              {draft.builtinName === "briefing" ? (
-                <option value="">모든 계정</option>
-              ) : (
-                <option value="">계정 선택</option>
-              )}
-              {accountMissing ? (
-                <option value={draft.accountId}>{draft.accountId} · 목록에 없음</option>
-              ) : null}
-              {accounts.map((item) => (
-                <option value={item.id} key={item.id}>
-                  {item.label} · {PROVIDER_LABELS[item.provider]}
-                  {item.email ? ` · ${item.email}` : ""}
+              <option value="">직접 입력</option>
+              {SHIPPED_JOBS.map((job) => (
+                <option value={job.path} key={job.path}>
+                  {job.label} · {job.path}
                 </option>
               ))}
             </select>
+            <small>
+              앱이 실어 보내는 작업도 다른 스크립트와 같은 방식으로 실행됩니다. 경로만 다릅니다.
+            </small>
           </label>
-          {draft.builtinName === "sync_sources" ? (
-            <fieldset className="field field-wide source-picker">
-              <legend>수집할 정보</legend>
-              {!account ? <small>계정을 선택하면 제공 정보를 고를 수 있습니다.</small> : null}
-              {account?.sources.map((source) => (
-                <label key={source.source} className="source-toggle">
-                  <input
-                    type="checkbox"
-                    checked={draft.sources.includes(source.source)}
-                    onChange={(event) => toggleSource(source.source, event.target.checked)}
-                  />
-                  {SOURCE_LABELS[source.source]}
-                  {source.enabled ? "" : " · 기능 꺼짐"}
-                </label>
-              ))}
-            </fieldset>
-          ) : null}
-        </>
-      ) : null}
-      {draft.executorKind === "script" ? (
-        <>
           <label className="field field-wide">
             <span>스크립트 파일 경로</span>
             <input
@@ -138,6 +108,9 @@ export function ExecutorFields({ draft, accounts, accountsError, onChange }: Pro
               value={draft.scriptArgs}
               onChange={(event) => onChange("scriptArgs", event.target.value)}
             />
+            {shipped?.path === "jobs/collection.ts" ? (
+              <small>첫 인자는 수집할 계정 id입니다. 연결 탭에서 계정 id를 확인하세요.</small>
+            ) : null}
           </label>
           <fieldset className="capability-picker field-wide">
             <legend>스크립트 권한</legend>
@@ -166,9 +139,9 @@ export function ExecutorFields({ draft, accounts, accountsError, onChange }: Pro
           </fieldset>
         </>
       ) : null}
-      {accountsError && draft.executorKind === "builtin" ? (
+      {accountsError && draft.executorKind === "script" ? (
         <div className="field-wide">
-          <ErrorMessage title="계정 선택 정보를 불러오지 못했습니다." error={accountsError} />
+          <ErrorMessage title="계정 정보를 불러오지 못했습니다." error={accountsError} />
         </div>
       ) : null}
     </div>

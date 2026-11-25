@@ -1,7 +1,13 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../events/log";
-import { BRIEFING_SLOTS, TIMEZONE } from "./briefing";
 import { z } from "zod";
+
+/** Briefing slots in local hours; 07:30 and 21:00 by default. */
+export const BRIEFING_SLOTS: readonly { hour: number; minute: number }[] = [
+  { hour: 7, minute: 30 },
+  { hour: 21, minute: 0 },
+];
+export const TIMEZONE = "Asia/Seoul";
 
 const BriefingItemSchema = z.object({
   id: z.string(),
@@ -22,6 +28,10 @@ const BriefingContentSchema = z.object({
 });
 type BriefingItem = Readonly<z.infer<typeof BriefingItemSchema>>;
 export type BriefingContent = Readonly<z.infer<typeof BriefingContentSchema>>;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
 
 function kstDay(now: number): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -210,18 +220,66 @@ export type BriefingDeps = {
   readonly accountId?: string;
   readonly db: Database;
   readonly events: EventLog;
+  /**
+   * The push path of a scheduled run. A script job sends through the SDK instead
+   * and passes the sizes, so the composition stays here and only delivery differs.
+   */
   readonly push?: (payload: {
     title: string;
     body: string;
   }) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * The title and body a push should carry, when the caller decides them instead of
+   * the default `digithive 브리핑 <slot>`. The script job passes the sizes it computed.
+   */
+  readonly prompt?: { readonly title: string; readonly body: string };
   readonly now?: () => number;
 };
+
+/** Composes, stores (once per slot per day) and pushes one briefing. */
+export async function composeStoredBriefing(input: {
+  readonly db: Database;
+  readonly events: EventLog;
+  /** The run that made it, when that run has a row; the briefing row links it. */
+  readonly runId: string | null;
+  readonly now: number;
+}): Promise<{
+  slot: string;
+  stored: boolean;
+  pushed: boolean;
+  prompt: { readonly title: string; readonly body: string } | null;
+  text: string | null;
+}> {
+  const content = composeBriefing(input.db, input.now, {
+    slot: `${pad2(kstParts(input.now).hour)}:${pad2(kstParts(input.now).minute)}`,
+  });
+  const withRun = input.runId === null ? content : { ...content, runId: input.runId };
+  const stored = storeBriefing(input.db, withRun, input.now);
+  if (stored.duplicate)
+    return { slot: content.slot, stored: false, pushed: false, prompt: null, text: null };
+  const prompt = {
+    title: `digithive 브리핑 ${content.slot}`,
+    body: content.text.slice(0, 180),
+  };
+  input.events.append({
+    kind: "briefing.stored",
+    payload: { slot: content.slot, briefingId: stored.id, pushed: false, error: null },
+    now: input.now,
+  });
+  return { slot: content.slot, stored: true, pushed: false, prompt, text: content.text };
+}
 
 /** Composes, stores (once per slot per day) and pushes one briefing. */
 export async function runBriefing(
   deps: BriefingDeps,
   force = false,
-): Promise<{ slot: string; stored: boolean; pushed: boolean; error: string | null }> {
+): Promise<{
+  slot: string;
+  stored: boolean;
+  pushed: boolean;
+  error: string | null;
+  prompt: { readonly title: string; readonly body: string } | null;
+}> {
   const now = (deps.now ?? Date.now)();
   const local = kstParts(now);
   const due = force
@@ -232,25 +290,28 @@ export async function runBriefing(
         day: kstDay(now),
       }
     : dueSlot(now);
-  if (!due) return { slot: "none", stored: false, pushed: false, error: null };
+  if (!due) return { slot: "none", stored: false, pushed: false, error: null, prompt: null };
 
-  const content = {
-    ...composeBriefing(deps.db, now, {
-      slot: due.slot,
-      ...(deps.accountId ? { accountId: deps.accountId } : {}),
-    }),
-    ...(deps.runId ? { runId: deps.runId } : {}),
-  };
-  const stored = storeBriefing(deps.db, content, now);
-  if (stored.duplicate) return { slot: due.slot, stored: false, pushed: false, error: null };
+  const content = composeBriefing(deps.db, now, {
+    slot: due.slot,
+    ...(deps.accountId ? { accountId: deps.accountId } : {}),
+  });
+  const stored = storeBriefing(
+    deps.db,
+    deps.runId ? { ...content, runId: deps.runId } : content,
+    now,
+  );
+  if (stored.duplicate)
+    return { slot: due.slot, stored: false, pushed: false, error: null, prompt: null };
 
   let pushed = false;
   let error: string | null = null;
+  const prompt = deps.prompt ?? {
+    title: `digithive 브리핑 ${due.slot}`,
+    body: content.text.slice(0, 180),
+  };
   if (deps.push) {
-    const result = await deps.push({
-      title: `digithive 브리핑 ${due.slot}`,
-      body: content.text.slice(0, 180),
-    });
+    const result = await deps.push(prompt);
     pushed = result.ok;
     error = result.ok ? null : (result.error ?? "push_failed");
   }
@@ -259,5 +320,5 @@ export async function runBriefing(
     payload: { slot: due.slot, briefingId: stored.id, pushed, error },
     now,
   });
-  return { slot: due.slot, stored: true, pushed, error };
+  return { slot: due.slot, stored: true, pushed, error, prompt };
 }

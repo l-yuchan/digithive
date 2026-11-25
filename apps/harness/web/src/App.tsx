@@ -7,8 +7,8 @@ import {
   getJson,
   postJson,
   sendJson,
+  type ConversationEvent,
   type Entry,
-  type Part,
   type Session,
 } from "./api";
 import { Composer } from "./composer/Composer";
@@ -19,8 +19,16 @@ import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { hasOAuthResult } from "./connections/oauth";
 import { Login } from "./auth/Login";
-import { MessageParts } from "./MessageParts";
+import { ConversationEventList } from "./MessageParts";
 import { watchBuild } from "./buildCheck";
+
+/** The user's words in a turn; tool chatter never becomes an editable prompt. */
+function conversationText(events: readonly ConversationEvent[]): string {
+  return events
+    .filter((event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text")
+    .map((event) => event.text)
+    .join("\n");
+}
 
 type State = {
   readonly sessions: Session[];
@@ -37,7 +45,14 @@ type Action =
   | { type: "active"; id: string }
   | { type: "entries"; entries: Entry[] }
   | { type: "started"; entryId: string }
-  | { type: "delta"; entryId: string; text: string; reasoning?: boolean }
+  | {
+      type: "delta";
+      entryId: string;
+      eventId: number;
+      kind: "text" | "thinking";
+      text: string;
+    }
+  | { type: "event"; entryId: string; event: ConversationEvent }
   | { type: "status"; entryId: string; status: string }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
@@ -52,17 +67,10 @@ const initial: State = {
   error: null,
 };
 
-function appendText(parts: Part[], text: string, reasoning = false): Part[] {
-  const type = reasoning ? "reasoning" : "text";
-  const last = parts.at(-1);
-  if (last && last.type === type) return [...parts.slice(0, -1), { type, text: last.text + text }];
-  return [...parts, { type, text }];
-}
-
-function textSize(parts: readonly Part[]): number {
-  return parts.reduce(
-    (total, part) =>
-      total + (part.type === "text" || part.type === "reasoning" ? part.text.length : 0),
+function textSize(events: readonly ConversationEvent[]): number {
+  return events.reduce(
+    (total, event) =>
+      total + (event.type === "text" || event.type === "thinking" ? event.text.length : 0),
     0,
   );
 }
@@ -80,9 +88,9 @@ function mergeSnapshot(local: readonly Entry[], incoming: readonly Entry[]): Ent
       current &&
       current.status === "streaming" &&
       entry.status === "streaming" &&
-      textSize(current.parts) > textSize(entry.parts)
+      textSize(current.events) > textSize(entry.events)
     )
-      return { ...entry, parts: current.parts };
+      return { ...entry, events: current.events };
     return entry;
   });
   const known = new Set(merged.map((entry) => entry.id));
@@ -119,13 +127,26 @@ function reducer(state: State, action: Action): State {
             kind: "message",
             role: "assistant",
             status: "streaming",
-            parts: [],
+            events: [],
             createdAt: new Date().toISOString(),
             seq: Number.MAX_SAFE_INTEGER,
           },
         ],
       };
     case "delta": {
+      const delta = (events: readonly ConversationEvent[]): ConversationEvent[] => {
+        const open = events.find((event) => event.id === action.eventId);
+        if (open && (open.type === "text" || open.type === "thinking"))
+          return events.map((event) =>
+            event.id === action.eventId && (event.type === "text" || event.type === "thinking")
+              ? { ...event, text: event.text + action.text }
+              : event,
+          );
+        return [
+          ...events.filter((event) => event.id !== action.eventId),
+          { type: action.kind, id: action.eventId, text: action.text },
+        ].toSorted((left, right) => left.id - right.id);
+      };
       const exists = state.entries.some((entry) => entry.id === action.entryId);
       if (!exists) {
         return {
@@ -138,7 +159,7 @@ function reducer(state: State, action: Action): State {
               kind: "message",
               role: "assistant",
               status: "streaming",
-              parts: [{ type: action.reasoning ? "reasoning" : "text", text: action.text }],
+              events: [{ type: action.kind, id: action.eventId, text: action.text }],
               createdAt: new Date().toISOString(),
               seq: Number.MAX_SAFE_INTEGER,
             },
@@ -148,8 +169,23 @@ function reducer(state: State, action: Action): State {
       return {
         ...state,
         entries: state.entries.map((entry) =>
+          entry.id === action.entryId ? { ...entry, events: delta(entry.events) } : entry,
+        ),
+      };
+    }
+    case "event": {
+      if (!state.entries.some((entry) => entry.id === action.entryId)) return state;
+      return {
+        ...state,
+        entries: state.entries.map((entry) =>
           entry.id === action.entryId
-            ? { ...entry, parts: appendText(entry.parts, action.text, action.reasoning) }
+            ? {
+                ...entry,
+                events: [
+                  ...entry.events.filter((event) => event.id !== action.event.id),
+                  action.event,
+                ].toSorted((left, right) => left.id - right.id),
+              }
             : entry,
         ),
       };
@@ -285,29 +321,74 @@ export function App() {
       });
     };
     const entryPayload = z.object({ entryId: z.string() });
-    on("message.started", entryPayload, (payload) =>
+    const eventPayload = entryPayload.extend({
+      id: z.number(),
+      callId: z.string().optional(),
+      name: z.string().optional(),
+      detail: z.string().optional(),
+      failed: z.boolean().optional(),
+    });
+    on("turn.response.started", entryPayload, (payload) =>
       dispatch({ type: "started", entryId: payload.entryId }),
     );
-    on(
-      "message.delta",
-      entryPayload.extend({ text: z.string().optional(), reasoning: z.string().optional() }),
-      (payload) =>
-        dispatch({
-          type: "delta",
-          entryId: payload.entryId,
-          text: payload.text ?? payload.reasoning ?? "",
-          reasoning: payload.reasoning !== undefined,
-        }),
-    );
-    on("message.completed", entryPayload, (payload) => {
+    // Each kind is a different event in the turn, not a different key of one blob.
+    const delta = (kind: "text" | "thinking") =>
+      on(
+        kind === "text" ? "text.delta" : "thinking.delta",
+        entryPayload.extend({ id: z.number(), text: z.string() }),
+        (payload) =>
+          dispatch({
+            type: "delta",
+            entryId: payload.entryId,
+            eventId: payload.id,
+            kind,
+            text: payload.text,
+          }),
+      );
+    delta("text");
+    delta("thinking");
+    on("tool_call.started", eventPayload, (payload) => {
+      if (payload.callId === undefined || payload.name === undefined) return;
+      dispatch({
+        type: "event",
+        entryId: payload.entryId,
+        event: {
+          type: "tool_call",
+          id: payload.id,
+          callId: payload.callId,
+          name: payload.name,
+          detail: payload.detail ?? "",
+        },
+      });
+    });
+    on("tool_result.recorded", eventPayload, (payload) => {
+      if (payload.callId === undefined || payload.name === undefined) return;
+      dispatch({
+        type: "event",
+        entryId: payload.entryId,
+        event: {
+          type: "tool_result",
+          id: payload.id,
+          callId: payload.callId,
+          name: payload.name,
+          detail: payload.detail ?? "",
+          ...(payload.failed ? { failed: true } : {}),
+        },
+      });
+    });
+    on("turn.response.completed", entryPayload, (payload) => {
       dispatch({ type: "status", entryId: payload.entryId, status: "complete" });
       if (!cancelled) reloadEntries(id).catch(reportError);
     });
-    on("message.aborted", entryPayload.extend({ reason: z.string().optional() }), (payload) => {
-      dispatch({ type: "status", entryId: payload.entryId, status: "aborted" });
-      dispatch({ type: "error", message: payload.reason ?? "응답 생성이 중단되었습니다." });
-      if (!cancelled) reloadEntries(id).catch(reportError);
-    });
+    on(
+      "turn.response.aborted",
+      entryPayload.extend({ reason: z.string().optional() }),
+      (payload) => {
+        dispatch({ type: "status", entryId: payload.entryId, status: "aborted" });
+        dispatch({ type: "error", message: payload.reason ?? "응답 생성이 중단되었습니다." });
+        if (!cancelled) reloadEntries(id).catch(reportError);
+      },
+    );
     on("session.renamed", z.unknown(), () => {
       if (!cancelled) onSessionRenamed();
     });
@@ -535,113 +616,126 @@ export function App() {
             <ol className="messages" data-testid="messages" aria-live="polite">
               {state.entries
                 .filter((entry) => entry.kind === "message")
-                .map((entry) => (
-                  <li
-                    key={entry.id}
-                    className={`bubble ${entry.role ?? "assistant"} ${entry.status ?? ""}`}
-                    data-testid={`entry-${entry.role ?? "assistant"}`}
-                    data-entry-id={entry.id}
-                  >
-                    <span className="author">
-                      {entry.role === "user" ? "나" : "비서"}
-                      {(entry.siblingCount ?? 1) > 1 ? (
-                        <span className="branches">
-                          <button
-                            type="button"
-                            className="icon"
-                            data-testid="branch-prev"
-                            onClick={() => void switchBranch(entry.id, -1)}
-                          >
-                            ‹
-                          </button>
-                          <span data-testid="branch-index">
-                            {entry.siblingIndex}/{entry.siblingCount}
+                .map((entry, _index, visible) =>
+                  entry.role === "user" ? (
+                    <li
+                      key={entry.id}
+                      className={`turn user ${entry.status ?? ""}`}
+                      data-testid="entry-user"
+                      data-entry-id={entry.id}
+                    >
+                      <span className="author">
+                        나
+                        {(entry.siblingCount ?? 1) > 1 ? (
+                          <span className="branches">
+                            <button
+                              type="button"
+                              className="icon"
+                              data-testid="branch-prev"
+                              onClick={() => void switchBranch(entry.id, -1)}
+                            >
+                              ‹
+                            </button>
+                            <span data-testid="branch-index">
+                              {entry.siblingIndex}/{entry.siblingCount}
+                            </span>
+                            <button
+                              type="button"
+                              className="icon"
+                              data-testid="branch-next"
+                              onClick={() => void switchBranch(entry.id, 1)}
+                            >
+                              ›
+                            </button>
                           </span>
-                          <button
-                            type="button"
-                            className="icon"
-                            data-testid="branch-next"
-                            onClick={() => void switchBranch(entry.id, 1)}
-                          >
-                            ›
-                          </button>
-                        </span>
-                      ) : null}
-                    </span>
-                    {editing?.id === entry.id ? (
-                      <span className="edit-form">
-                        <textarea
-                          data-testid="edit-input"
-                          rows={3}
-                          value={editing.text}
-                          onChange={(event) =>
-                            setEditing({ id: entry.id, text: event.target.value })
-                          }
-                          autoFocus
-                        />
-                        <span className="row">
-                          <button
-                            type="button"
-                            className="primary"
-                            data-testid="edit-save"
-                            onClick={() => void saveEdit()}
-                          >
-                            저장 후 다시 묻기
-                          </button>
-                          <button type="button" onClick={() => setEditing(null)}>
-                            취소
-                          </button>
-                        </span>
+                        ) : null}
                       </span>
-                    ) : (
-                      <MessageParts parts={entry.parts} />
-                    )}
-                    {entry.status === "streaming" && entry.parts.length === 0 ? (
-                      <span className="typing">…</span>
-                    ) : null}
-                    <span className="actions">
-                      {entry.role === "user" ? (
+                      <p className="event text">{conversationText(entry.events)}</p>
+                      <span className="actions">
                         <button
                           type="button"
                           className="link"
                           data-testid="msg-edit"
                           onClick={() =>
-                            setEditing({
-                              id: entry.id,
-                              text: entry.parts
-                                .filter(
-                                  (part): part is { type: "text"; text: string } =>
-                                    part.type === "text",
-                                )
-                                .map((part) => part.text)
-                                .join(""),
-                            })
+                            setEditing({ id: entry.id, text: conversationText(entry.events) })
                           }
                         >
                           수정
                         </button>
-                      ) : (
                         <button
                           type="button"
                           className="link"
-                          data-testid="msg-regenerate"
-                          onClick={() => void regenerate(entry.id)}
+                          data-testid="msg-fork"
+                          onClick={() => void fork(entry.id)}
                         >
-                          재생성
+                          분기
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className="link"
-                        data-testid="msg-fork"
-                        onClick={() => void fork(entry.id)}
-                      >
-                        분기
-                      </button>
-                    </span>
-                  </li>
-                ))}
+                      </span>
+                    </li>
+                  ) : (
+                    <li
+                      key={entry.id}
+                      className={`turn assistant ${entry.status ?? ""}`}
+                      data-testid="entry-assistant"
+                      data-entry-id={entry.id}
+                    >
+                      <span className="author">비서</span>
+                      <div className="events">
+                        <ConversationEventList events={entry.events} />
+                      </div>
+                      {entry.status === "streaming" && entry.events.length === 0 ? (
+                        <span className="typing">…</span>
+                      ) : null}
+                      {/* Actions belong to the turn, not to each event: regenerate
+                          once at the end, fork once, nothing repeated. */}
+                      <span className="actions">
+                        {visible.at(-1)?.id === entry.id ? (
+                          <button
+                            type="button"
+                            className="link"
+                            data-testid="msg-regenerate"
+                            onClick={() => void regenerate(entry.id)}
+                          >
+                            재생성
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="link"
+                          data-testid="msg-fork"
+                          onClick={() => void fork(entry.id)}
+                        >
+                          분기
+                        </button>
+                      </span>
+                    </li>
+                  ),
+                )}
             </ol>
+            {editing ? (
+              <div className="edit-form" data-testid="edit-panel">
+                <textarea
+                  data-testid="edit-input"
+                  rows={3}
+                  value={editing.text}
+                  onChange={(event) => setEditing({ id: editing.id, text: event.target.value })}
+                  autoFocus
+                />
+                <span className="row">
+                  <button
+                    type="button"
+                    className="primary"
+                    data-testid="edit-save"
+                    onClick={() => void saveEdit()}
+                  >
+                    저장 후 다시 묻기
+                  </button>
+                  <button type="button" onClick={() => setEditing(null)}>
+                    취소
+                  </button>
+                </span>
+              </div>
+            ) : null}
             {state.error ? (
               <p className="error" role="alert" data-testid="chat-error">
                 {state.error}

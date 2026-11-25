@@ -8,7 +8,7 @@ import {
   listEntries,
   renameSession,
   softDeleteSession,
-  updateEntryParts,
+  updateEntryEvents,
 } from "../src/core/sessions";
 import {
   forkSession,
@@ -36,14 +36,14 @@ describe("conversation tree", () => {
       sessionId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "회의 일정 알려줘" }],
+      events: [{ type: "text", id: 0, text: "회의 일정 알려줘" }],
     });
     const answer = appendEntry(db, {
       sessionId,
       parentId: first.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "답변" }],
+      events: [{ type: "text", id: 0, text: "답변" }],
     });
     setLeaf(db, sessionId, answer.id);
 
@@ -57,8 +57,8 @@ describe("conversation tree", () => {
     expect(getLeaf(db, sessionId)).toBe(edit.entry.id);
 
     const all = listEntries(db, sessionId);
-    expect(all.find((entry) => entry.id === first.id)?.parts).toEqual([
-      { type: "text", text: "회의 일정 알려줘" },
+    expect(all.find((entry) => entry.id === first.id)?.events).toEqual([
+      { type: "text", id: 0, text: "회의 일정 알려줘" },
     ]);
 
     const path = pathEntries(db, sessionId);
@@ -72,28 +72,28 @@ describe("conversation tree", () => {
       sessionId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "첫 질문" }],
+      events: [{ type: "text", id: 0, text: "첫 질문" }],
     });
     const a1 = appendEntry(db, {
       sessionId,
       parentId: u1.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "첫 답" }],
+      events: [{ type: "text", id: 0, text: "첫 답" }],
     });
     const u2 = appendEntry(db, {
       sessionId,
       parentId: a1.id,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "둘째 질문" }],
+      events: [{ type: "text", id: 0, text: "둘째 질문" }],
     });
     const a2 = appendEntry(db, {
       sessionId,
       parentId: u2.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "둘째 답" }],
+      events: [{ type: "text", id: 0, text: "둘째 답" }],
     });
     setLeaf(db, sessionId, a2.id);
     expect(pathEntries(db, sessionId).map((entry) => entry.id)).toEqual([
@@ -113,14 +113,14 @@ describe("conversation tree", () => {
       sessionId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "다시 답해줘" }],
+      events: [{ type: "text", id: 0, text: "다시 답해줘" }],
     });
     const answer = appendEntry(db, {
       sessionId,
       parentId: user.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "이전 답" }],
+      events: [{ type: "text", id: 0, text: "이전 답" }],
     });
     const point = regeneratePoint(db, { sessionId, entryId: answer.id });
     expect(point.parentId).toBe(user.id);
@@ -135,29 +135,29 @@ describe("conversation tree", () => {
       sessionId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "원본 질문" }],
+      events: [{ type: "text", id: 0, text: "원본 질문" }],
     });
     const a1 = appendEntry(db, {
       sessionId,
       parentId: u1.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "원본 답" }],
+      events: [{ type: "text", id: 0, text: "원본 답" }],
     });
     const u2 = appendEntry(db, {
       sessionId,
       parentId: a1.id,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "이어지는 질문" }],
+      events: [{ type: "text", id: 0, text: "이어지는 질문" }],
     });
 
     const forked = forkSession(db, { sessionId, entryId: a1.id, title: "분기 대화" });
     const copied = pathEntries(db, forked.sessionId);
     expect(copied.map((entry) => entry.role)).toEqual(["user", "assistant"]);
-    expect(copied.map((entry) => entry.parts)).toEqual([
-      [{ type: "text", text: "원본 질문" }],
-      [{ type: "text", text: "원본 답" }],
+    expect(copied.map((entry) => entry.events)).toEqual([
+      [{ type: "text", id: 0, text: "원본 질문" }],
+      [{ type: "text", id: 0, text: "원본 답" }],
     ]);
     expect(copied.some((entry) => entry.id === u2.id)).toBe(false);
     expect(listEntries(db, sessionId)).toHaveLength(3);
@@ -193,28 +193,28 @@ describe("conversation tree", () => {
       sessionId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "원래 질문" }],
+      events: [{ type: "text", id: 0, text: "원래 질문" }],
     });
     const a1 = appendEntry(db, {
       sessionId,
       parentId: u1.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "원래 답" }],
+      events: [{ type: "text", id: 0, text: "원래 답" }],
     });
     const u2 = appendEntry(db, {
       sessionId,
       parentId: u1.parentId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "수정한 질문" }],
+      events: [{ type: "text", id: 0, text: "수정한 질문" }],
     });
     const a2 = appendEntry(db, {
       sessionId,
       parentId: u2.id,
       kind: "message",
       role: "assistant",
-      parts: [{ type: "text", text: "수정한 답" }],
+      events: [{ type: "text", id: 0, text: "수정한 답" }],
     });
     setLeaf(db, sessionId, a2.id);
 
@@ -230,12 +230,12 @@ describe("conversation tree", () => {
       sessionId,
       kind: "message",
       role: "user",
-      parts: [{ type: "text", text: "내일 회의 준비물을 정리해줘" }],
+      events: [{ type: "text", id: 0, text: "내일 회의 준비물을 정리해줘" }],
     });
-    updateEntryParts(
+    updateEntryEvents(
       db,
       user.id,
-      [{ type: "text", text: "내일 회의 준비물을 정리해줘" }],
+      [{ type: "text", id: 0, text: "내일 회의 준비물을 정리해줘" }],
       "complete",
       sessionId,
     );

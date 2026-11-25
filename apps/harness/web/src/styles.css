@@ -129,59 +129,75 @@ body {
   gap: 10px;
 }
 
-.bubble {
+/* A turn is a list of events. The user's turn is one bubble; the assistant's
+   turn publishes each thinking/tool/text event as its own block. */
+.turn {
   max-width: min(760px, 92%);
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.bubble.user {
+.turn.user {
   align-self: flex-end;
   background: var(--user);
+  border-radius: var(--radius);
+  padding: 10px 14px;
 }
 
-.bubble.assistant {
+.turn.assistant {
   align-self: flex-start;
 }
 
-.bubble .author {
+.turn .author {
   display: block;
   font-size: 12px;
   color: var(--muted);
-  margin-bottom: 4px;
 }
 
-.bubble .text {
+.turn.aborted {
+  border: 1px dashed #a05;
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+.events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.event {
+  border-radius: var(--radius);
+}
+
+.event.text {
   margin: 0;
+  padding: 10px 14px;
+  background: var(--panel-2);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.bubble .reasoning {
-  margin: 6px 0 0;
+.event.thinking {
   color: var(--muted);
   font-size: 12px;
+  border-left: 2px solid #2b3444;
+  padding-left: 8px;
 }
 
-.bubble .reasoning summary {
+.event.thinking summary {
   cursor: pointer;
 }
 
-.bubble .reasoning p {
+.event.thinking p {
   margin: 4px 0 0;
   font-style: italic;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.bubble.aborted {
-  border: 1px dashed #a05;
-}
-
-.tool-call,
-.tool-result {
-  margin: 6px 0 0;
+.event.tool {
   font-size: 13px;
   color: var(--muted);
   border: 1px solid #2b3444;
@@ -189,16 +205,43 @@ body {
   padding: 6px 8px;
 }
 
-.tool-result.denied {
+.event.tool > header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.event.tool .tool-name {
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+}
+
+.event.tool .tool-state {
+  font-size: 11px;
+}
+
+.event.tool.running {
+  border-style: dashed;
+}
+
+.event.tool.failed {
   border-color: #7a3a3a;
   color: #ffb3b3;
 }
 
-.tool-call pre,
-.tool-result pre {
+.event.tool pre,
+.event.tool .tool-arguments summary {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: inherit;
+}
+
+.event.tool .tool-output {
+  margin: 4px 0 0;
+}
+
+.event.error {
+  margin: 0;
 }
 
 .typing {
@@ -329,8 +372,7 @@ a.primary[aria-disabled="true"] {
 
 .run-meta,
 .error,
-.tool-result,
-.reasoning {
+.event {
   overflow-wrap: anywhere;
 }
 

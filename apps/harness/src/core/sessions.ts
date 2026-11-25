@@ -1,9 +1,7 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { z } from "zod";
-import { PartSchema } from "./contracts";
+import { parseEntryEvents, type ConversationEvent } from "./contracts";
 import { ok } from "node:assert/strict";
-
-export type Part = z.infer<typeof PartSchema>;
 
 export type Entry = {
   readonly id: string;
@@ -12,7 +10,7 @@ export type Entry = {
   readonly kind: string;
   readonly role: string | null;
   readonly status: string | null;
-  readonly parts: readonly Part[];
+  readonly events: readonly ConversationEvent[];
   readonly createdAt: string;
   readonly seq: number;
 };
@@ -38,10 +36,6 @@ const SessionRow = z.object({
 export type Session = z.infer<typeof SessionRow>;
 
 function toEntry(row: z.infer<typeof EntryRow>): Entry {
-  const payload = z
-    .object({ parts: z.array(PartSchema).default([]) })
-    .safeParse(JSON.parse(row.payload_json));
-  const parts = payload.success ? payload.data.parts : [];
   return {
     id: row.id,
     sessionId: row.session_id,
@@ -49,7 +43,7 @@ function toEntry(row: z.infer<typeof EntryRow>): Entry {
     kind: row.kind,
     role: row.role,
     status: row.status,
-    parts,
+    events: parseEntryEvents(row.payload_json),
     createdAt: row.created_at,
     seq: row.seq,
   };
@@ -138,7 +132,7 @@ export function appendEntry(
     readonly kind: string;
     readonly role?: string | null;
     readonly status?: string | null;
-    readonly parts: readonly Part[];
+    readonly events: readonly ConversationEvent[];
     readonly now?: number;
   },
 ): Entry {
@@ -163,12 +157,12 @@ export function appendEntry(
     input.kind,
     input.role ?? null,
     status,
-    JSON.stringify({ parts: input.parts }),
+    JSON.stringify({ events: input.events }),
     createdAt,
     seqRow.next,
   );
   db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(createdAt, input.sessionId);
-  indexParts(db, id, input.sessionId, input.parts);
+  indexEvents(db, id, input.sessionId, input.events);
   return {
     id,
     sessionId: input.sessionId,
@@ -176,7 +170,7 @@ export function appendEntry(
     kind: input.kind,
     role: input.role ?? null,
     status,
-    parts: input.parts,
+    events: input.events,
     createdAt,
     seq: seqRow.next,
   };
@@ -186,37 +180,41 @@ export function appendEntry(
  * Streaming progress, stored as it arrives so a reconnect or reload can show what
  * the reader already saw. The search index is written once, at completion.
  */
-export function saveEntryParts(db: Database, entryId: string, parts: readonly Part[]): void {
+export function saveEntryEvents(
+  db: Database,
+  entryId: string,
+  events: readonly ConversationEvent[],
+): void {
   db.query("UPDATE entries SET payload_json = ? WHERE id = ?").run(
-    JSON.stringify({ parts }),
+    JSON.stringify({ events }),
     entryId,
   );
 }
 
-export function updateEntryParts(
+export function updateEntryEvents(
   db: Database,
   entryId: string,
-  parts: readonly Part[],
+  events: readonly ConversationEvent[],
   status: "complete" | "aborted" | "failed",
   sessionId?: string,
 ): void {
   db.query("UPDATE entries SET payload_json = ?, status = ? WHERE id = ?").run(
-    JSON.stringify({ parts }),
+    JSON.stringify({ events }),
     status,
     entryId,
   );
-  if (sessionId) indexParts(db, entryId, sessionId, parts);
+  if (sessionId) indexEvents(db, entryId, sessionId, events);
 }
 
-function indexParts(
+function indexEvents(
   db: Database,
   entryId: string,
   sessionId: string,
-  parts: readonly Part[],
+  events: readonly ConversationEvent[],
 ): void {
-  const text = parts
-    .filter((part): part is { type: "text"; text: string } => part.type === "text")
-    .map((part) => part.text)
+  const text = events
+    .filter((event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text")
+    .map((event) => event.text)
     .join("\n")
     .trim();
   try {
@@ -249,9 +247,11 @@ export function historyMessages(
   for (const entry of listEntries(db, sessionId)) {
     if (entry.kind !== "message") continue;
     if (entry.role !== "user" && entry.role !== "assistant") continue;
-    const text = entry.parts
-      .filter((part): part is { type: "text"; text: string } => part.type === "text")
-      .map((part) => part.text)
+    const text = entry.events
+      .filter(
+        (event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text",
+      )
+      .map((event) => event.text)
       .join("");
     if (text.length === 0) continue;
     out.push({ role: entry.role, content: text });

@@ -41,9 +41,10 @@ test("v10 moves definitions into workflows and leaves bindings and history intac
   const schedulesBefore =
     db.query<{ n: number }, []>("SELECT count(*) AS n FROM schedules").get()?.n ?? 0;
 
-  expect(migrate(db)).toBe(1);
+  // v10 and v11: the definition split, then builtin executors become script jobs.
+  expect(migrate(db)).toBe(2);
   expect(db.query<{ user_version: number }, []>("PRAGMA user_version").get()).toEqual({
-    user_version: 10,
+    user_version: 11,
   });
 
   const workflow = db

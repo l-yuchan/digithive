@@ -1,11 +1,14 @@
 import { createRuntime, loadConfig } from "../src/runtime";
 import { claimNext, executeRun, reconcileWork } from "../src/surfaces/work/runner";
 import { dispatchDueSchedules } from "../src/scheduler/schedules";
+import { ensureCollectionWorkflows } from "../src/workflows/collection";
+import { migrateBuiltinExecutors } from "../src/store/job-migration";
 
 /** Definitions only dispatch; every executor shares the leased work queue. */
 const config = loadConfig();
 const runtime = createRuntime(config);
 const { db, events } = runtime.work;
+migrateBuiltinExecutors(db, { scriptsRoot: config.scriptsRoot });
 const owner = `worker-${process.pid}`;
 const stopping = new AbortController();
 const active = new Set<Promise<void>>();
@@ -15,6 +18,7 @@ process.on("SIGTERM", () => stopping.abort(new Error("host_shutdown")));
 console.log(
   `worker ${owner} started (model ${config.model}, max concurrent ${config.maxConcurrent})`,
 );
+ensureCollectionWorkflows(db, events);
 
 try {
   while (!stopping.signal.aborted) {

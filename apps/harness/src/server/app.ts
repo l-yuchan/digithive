@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
+import { latestBriefing, runBriefing } from "../jobs/briefing";
 import {
   createSession,
   getSession,
@@ -12,6 +13,7 @@ import {
   deepestDescendant,
   editUserMessage,
   forkSession,
+  getLeaf,
   pathEntries,
   regeneratePoint,
   searchSessions,
@@ -46,7 +48,6 @@ import { handleScheduleRequest } from "./schedule-routes";
 import { handleWorkflowRequest } from "./workflow-routes";
 import { handleKnowledgeRequest } from "./knowledge-routes";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
-import { latestBriefing, runBriefing } from "../scheduler/compose";
 
 export type AppDeps = {
   readonly db: Database;
@@ -479,6 +480,30 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       } catch (error) {
         return json({ error: error instanceof Error ? error.message : "failed" }, 409);
       }
+    }
+
+    /**
+     * One reply entry can carry edit, regenerate and fork at once. The view asks for
+     * `regenerate` when the reply sits under the newest user message; a reply on an
+     * older point offers fork only, which is what the controls under it should say.
+     */
+    const actionsMatch = /^\/api\/sessions\/([^/]+)\/entries\/([^/]+)\/actions$/.exec(path);
+    if (actionsMatch && request.method === "GET") {
+      const sessionId = actionsMatch[1] ?? "";
+      const entryId = actionsMatch[2] ?? "";
+      if (!getSession(deps.db, sessionId)) return json({ error: "session_not_found" }, 404);
+      const candidates = pathEntries(deps.db, sessionId);
+      const entry = candidates.find((candidate) => candidate.id === entryId);
+      if (!entry) return json({ error: "entry_not_found" }, 404);
+      const leaf = getLeaf(deps.db, sessionId);
+      const onActiveBranch = candidates.some(
+        (candidate) => candidate.id === leaf && candidate.parentId === entry.id,
+      );
+      return json({
+        actions:
+          entry.role === "user" ? ["edit", "regenerate"] : onActiveBranch ? ["regenerate"] : [],
+        canFork: true,
+      });
     }
 
     const forkMatch = /^\/api\/sessions\/([^/]+)\/fork$/.exec(path);

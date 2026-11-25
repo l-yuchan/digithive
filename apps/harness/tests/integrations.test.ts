@@ -19,7 +19,7 @@ import {
   runBriefing,
   storeBriefing,
   latestBriefing,
-} from "../src/scheduler/compose";
+} from "../src/jobs/briefing";
 import { addSubscription, sendPush } from "../src/scheduler/push";
 
 function db(): Database {
