@@ -45,6 +45,20 @@ reproduced red before the fix). Schedules show their refusal reason inline
   cursor, items and a newly added account intact, and the seeded row is an ordinary
   account.
 
+## Collection flow proven end to end (requests 1, 3)
+
+`bun scripts/qa-routing.ts google` served Calendar, Gmail and OAuth stand-ins on
+loopback. With the seeded account's token expired, one collection run for that
+account refreshed the token (`service: oauth`) and then called only the sources the
+schedule named:
+
+- the calendar run fetched `GET /calendar/v3/calendars/primary/events` and stored one item with its cursor
+- a gmail-only run fetched `/gmail/v1/users/me/profile`, `/messages` and `/messages/qa-mail-1`, all `-> 200`, and stored one message
+
+The final run settled `outcome succeeded`, and `qa-5-connections-final.png` shows
+both sources `정상` with `이 정보를 읽는 스케줄: 아침 메일·일정 수집` and the last
+collection time.
+
 ## Schedule workflow (request 4)
 
 `qa-4-collection-schedule.png` (builtin: account and sources), the script case
