@@ -78,7 +78,7 @@ async function gmailDetails(
 }
 
 export async function syncGoogleGmail(deps: GoogleDeps, accountId?: string): Promise<SyncOutcome> {
-  const target = resolveAccountId(deps, accountId);
+  const target = resolveAccountId(accountId);
   if (!isSourceEnabled(deps.db, target, "gmail")) return skippedOutcome(target, "gmail");
   const now = (deps.now ?? Date.now)();
   const fetchImpl = deps.fetchImpl ?? fetch;

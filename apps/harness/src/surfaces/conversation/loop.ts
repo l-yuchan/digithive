@@ -278,7 +278,7 @@ export async function runTurn(
         savedSince += 1;
         saveProgress();
         deps.events.append({
-          kind: type === "text" ? "text.delta" : "thinking.delta",
+          kind: deltaKind(type),
           runId,
           sessionId: input.sessionId,
           payload: { entryId: assistantEntry.id, id: open.id, text: delta },
@@ -526,4 +526,13 @@ export async function runTurn(
   } finally {
     controller.close();
   }
+}
+
+/** The stream event a delta is recorded under; one name per visible kind. */
+function deltaKind(type: "text" | "thinking"): "text.delta" | "thinking.delta" {
+  const names: Record<"text" | "thinking", "text.delta" | "thinking.delta"> = {
+    text: "text.delta",
+    thinking: "thinking.delta",
+  };
+  return names[type];
 }

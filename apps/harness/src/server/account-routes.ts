@@ -176,7 +176,7 @@ async function handleOAuthCallback(request: Request, deps: AccountRouteDeps): Pr
         });
         return redirect(url, { oauth: "error", reason: bound.reason });
       }
-      saveTokens(deps.google.db, deps.google.vaultSecret, tokens, target.id);
+      saveTokens(deps.google.db, deps.google.vaultSecret, target.id, tokens);
       ensureCollectionWorkflow(deps.google.db, target, deps.google.events);
       deps.google.events.append({
         kind: "integration.connected",
@@ -186,13 +186,11 @@ async function handleOAuthCallback(request: Request, deps: AccountRouteDeps): Pr
       return redirect(url, { oauth: "ok", account: target.id });
     }
 
-    // A legacy row may lack the email that makes a verified merge possible.
-    await hydrateGoogleEmail(deps.google);
     const account = upsertGoogleAccount(deps.google.db, {
       subject: identity.subject,
       email: identity.email,
     });
-    saveTokens(deps.google.db, deps.google.vaultSecret, tokens, account.id);
+    saveTokens(deps.google.db, deps.google.vaultSecret, account.id, tokens);
     const recorded = getAccount(deps.google.db, account.id);
     if (recorded) ensureCollectionWorkflow(deps.google.db, recorded, deps.google.events);
     deps.google.events.append({

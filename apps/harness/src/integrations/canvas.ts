@@ -1,4 +1,4 @@
-import type { Database, SQLQueryBindings } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import { DEFAULT_CANVAS_ACCOUNT_ID, isSourceEnabled } from "./accounts";
 import type { NormalizedItem, SyncOutcome } from "./normalize";
@@ -33,7 +33,6 @@ const CanvasTodoSchema = z.object({
     })
     .optional(),
 });
-export type CanvasTodoPayload = z.infer<typeof CanvasTodoSchema>;
 
 export function normalizeCanvasTodo(raw: unknown): NormalizedItem {
   const todo = CanvasTodoSchema.parse(raw);
@@ -119,34 +118,4 @@ export async function syncCanvas(deps: CanvasDeps): Promise<SyncOutcome> {
       error: error instanceof Error ? error.message : "unknown",
     });
   }
-}
-
-export function canvasItemsDueSoon(
-  db: Database,
-  from: number,
-  until: number,
-  limit = 20,
-): NormalizedItem[] {
-  return db
-    .query<
-      {
-        item_id: string;
-        title: string;
-        at: string | null;
-        detail: string | null;
-        url: string | null;
-      },
-      SQLQueryBindings[]
-    >(
-      "SELECT item_id, title, at, detail, url FROM sync_items WHERE source = 'canvas' AND at IS NOT NULL AND at >= ? AND at <= ? ORDER BY at LIMIT ?",
-    )
-    .all(new Date(from).toISOString(), new Date(until).toISOString(), limit)
-    .map((row) => ({
-      id: row["item_id"],
-      source: "canvas" as const,
-      title: row["title"],
-      at: row["at"] === null ? null : row["at"],
-      detail: row["detail"] ?? "",
-      url: row["url"] === null ? null : row["url"],
-    }));
 }

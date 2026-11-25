@@ -26,7 +26,6 @@ export const GmailPayloadSchema = z.object({
   snippet: z.string().optional(),
   payload: GmailPartSchema.optional(),
 });
-export type GmailPayload = z.infer<typeof GmailPayloadSchema>;
 
 function header(headers: GmailPart["headers"], name: string): string {
   return (
@@ -77,7 +76,6 @@ export const CalendarEventPayloadSchema = z.object({
   recurringEventId: z.string().optional(),
   status: z.string().optional(),
 });
-export type CalendarEventPayload = z.infer<typeof CalendarEventPayloadSchema>;
 
 export function normalizeCalendarEvent(raw: unknown): NormalizedItem {
   const event = CalendarEventPayloadSchema.parse(raw);
@@ -100,7 +98,6 @@ const CanvasAssignmentPayloadSchema = z.object({
   course_id: z.union([z.string(), z.number()]).optional(),
   description: z.string().nullish(),
 });
-export type CanvasAssignmentPayload = z.infer<typeof CanvasAssignmentPayloadSchema>;
 
 export function normalizeCanvasAssignment(raw: unknown): NormalizedItem {
   const assignment = CanvasAssignmentPayloadSchema.parse(raw);

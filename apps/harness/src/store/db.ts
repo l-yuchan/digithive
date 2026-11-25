@@ -1,8 +1,6 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { RESET_SCHEMA, RESET_VERSION, TRANSITIONS } from "./migrations";
 
-export type Db = Database;
-
 /**
  * Opens the SQLite database and applies every pending transition.
  * WAL + foreign keys are set once per connection; busy_timeout keeps a

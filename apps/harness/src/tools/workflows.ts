@@ -306,14 +306,3 @@ export function workflowTools(deps: WorkflowToolDeps): ToolRuntime[] {
     },
   ];
 }
-
-export function workflowToolNames(): string[] {
-  return [
-    "workflow_list",
-    "workflow_detail",
-    "workflow_create",
-    "workflow_edit",
-    "workflow_delete",
-    "workflow_run",
-  ];
-}

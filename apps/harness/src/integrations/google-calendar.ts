@@ -14,7 +14,7 @@ export async function syncGoogleCalendar(
   deps: GoogleDeps,
   accountId?: string,
 ): Promise<SyncOutcome> {
-  const target = resolveAccountId(deps, accountId);
+  const target = resolveAccountId(accountId);
   if (!isSourceEnabled(deps.db, target, "calendar")) return skippedOutcome(target, "calendar");
   const now = (deps.now ?? Date.now)();
   const fetchImpl = deps.fetchImpl ?? fetch;

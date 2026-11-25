@@ -116,7 +116,7 @@ function addGoogle(
   refreshToken: string | null = `rt-${email}`,
 ): string {
   const { id } = upsertGoogleAccount(db, { subject, email, label: email });
-  saveTokens(db, SECRET, { accessToken, refreshToken, expiresAt, scope: null }, id);
+  saveTokens(db, SECRET, id, { accessToken, refreshToken, expiresAt, scope: null });
   return id;
 }
 
@@ -482,7 +482,8 @@ describe("verified identity and OAuth challenge", () => {
       deps,
     );
     ok(response, "callback matched");
-    const createdId = new URL(response.headers.get("location") ?? "").searchParams.get("account");
+    const location = new URL(response.headers.get("location") ?? "");
+    const createdId = location.searchParams.get("account");
     ok(createdId, "account id returned");
     expect(getAccount(db, createdId)).toMatchObject({
       provider: "google",
@@ -630,17 +631,12 @@ describe("account API and tools", () => {
     expect(explicit.items).toEqual([]);
     expect(explicit.state).toMatchObject({ accountId: b, enabled: false });
 
-    saveTokens(
-      db,
-      SECRET,
-      {
-        accessToken: "at-a",
-        refreshToken: null,
-        expiresAt: LATER,
-        scope: null,
-      },
-      a,
-    );
+    saveTokens(db, SECRET, a, {
+      accessToken: "at-a",
+      refreshToken: null,
+      expiresAt: LATER,
+      scope: null,
+    });
     const gmailStates = syncStates(db)
       .filter((row) => row.source === "gmail")
       .map((row) => row.accountId);

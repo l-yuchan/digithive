@@ -14,7 +14,6 @@ export type RunStatus = (typeof RUN_STATUSES)[number];
 
 /** Cancellation always records who asked, so recovery never guesses (#11856). */
 export const CANCEL_INTENTS = ["user", "timeout", "host_restart", "policy", "superseded"] as const;
-export type CancelIntent = (typeof CANCEL_INTENTS)[number];
 
 const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   queued: ["running", "cancelled"],
@@ -28,10 +27,6 @@ const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
 
 export function canTransition(from: RunStatus, to: RunStatus): boolean {
   return TRANSITIONS[from].includes(to);
-}
-
-export function isTerminal(status: RunStatus): boolean {
-  return TRANSITIONS[status].length === 0 && status !== "queued";
 }
 
 export const LEASE_MS = 45_000;

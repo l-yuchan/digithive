@@ -123,7 +123,7 @@ describe("describeBrowserInfo", () => {
     expect(
       describeBrowserInfo(
         { userAgent: "Firefox/140", platform: "Linux", languages: ["ko-KR", "en-US"] },
-        "https://digithive.example/app2/",
+        "https://digithive.example/",
         true,
       ),
     ).toEqual({
@@ -131,7 +131,7 @@ describe("describeBrowserInfo", () => {
       platform: "Linux",
       languages: "ko-KR, en-US",
       secureContext: true,
-      href: "https://digithive.example/app2/",
+      href: "https://digithive.example/",
     });
   });
 });

@@ -23,7 +23,6 @@ export type CapabilityGroup = z.infer<typeof CapabilityGroupSchema>;
 
 /** A data source one account keeps. A job reads only the ones the owner left on. */
 export const SourceNameSchema = z.enum(["calendar", "gmail", "canvas"]);
-export type ExecutorSource = z.infer<typeof SourceNameSchema>;
 
 /**
  * Execution mechanism only; instructions, deadline and state belong to the run.

@@ -1,3 +1,6 @@
+# Local secrets (never committed)
+.env
+
 # Agent working state (local evidence, not source)
 .omo/evidence/
 .omo/handoffs/

@@ -89,15 +89,6 @@ export function getAccount(db: Database, id: string): AccountRecord | null {
   return row ? toAccount(row) : null;
 }
 
-export function listAccountRecords(db: Database): AccountRecord[] {
-  return db
-    .query<AccountRow, SQLQueryBindings[]>(
-      "SELECT id,provider,subject,email,label,created_at,updated_at FROM integration_accounts ORDER BY provider, created_at, id",
-    )
-    .all()
-    .map(toAccount);
-}
-
 export function accountSources(db: Database, accountId: string): SourceSummary[] {
   return db
     .query<SourceRow, SQLQueryBindings[]>(

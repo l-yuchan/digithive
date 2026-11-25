@@ -6,6 +6,8 @@ import { saveTokens, syncGoogleCalendar, syncGoogleGmail } from "../src/integrat
 import { z } from "zod";
 
 const databases: Database[] = [];
+/** The account every sync in this file acts for; calls name it explicitly. */
+const ACCOUNT = "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6";
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
@@ -15,7 +17,7 @@ function setup(respond: (url: URL, init?: Parameters<typeof fetch>[1]) => Respon
   databases.push(db);
   migrate(db);
   const now = 1_000_000;
-  saveTokens(db, "secret", {
+  saveTokens(db, "secret", "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", {
     accessToken: "at",
     refreshToken: "rt",
     expiresAt: now + 3600_000,
@@ -57,7 +59,7 @@ test("calendar commits all pages and removes cancelled events before advancing i
       : json({ items: [{ id: "first", summary: "page one" }], nextPageToken: "p2" }),
   );
   seed(deps.db, "calendar", "previous");
-  expect(await syncGoogleCalendar(deps)).toMatchObject({ ok: true, cursor: "next" });
+  expect(await syncGoogleCalendar(deps, ACCOUNT)).toMatchObject({ ok: true, cursor: "next" });
   expect(deps.db.query("SELECT item_id FROM sync_items ORDER BY item_id").all()).toEqual([
     { item_id: "first" },
     { item_id: "second" },
@@ -76,7 +78,7 @@ test("a failing later calendar page preserves the previous snapshot and cursor",
       "UPDATE account_sources SET last_sync_at='2026-11-24T00:00:00.000Z' WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
     )
     .run();
-  expect((await syncGoogleCalendar(deps)).ok).toBe(false);
+  expect((await syncGoogleCalendar(deps, ACCOUNT)).ok).toBe(false);
   expect(
     deps.db
       .query(
@@ -116,14 +118,14 @@ test("expired Google credentials refresh before collection and the replacement i
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer new-access");
     return json({ items: [], nextSyncToken: "next" });
   });
-  saveTokens(deps.db, "secret", {
+  saveTokens(deps.db, "secret", "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", {
     accessToken: "expired",
     refreshToken: "rt",
     expiresAt: 0,
     scope: null,
   });
-  expect((await syncGoogleCalendar(deps)).ok).toBe(true);
-  expect((await syncGoogleCalendar(deps)).ok).toBe(true);
+  expect((await syncGoogleCalendar(deps, ACCOUNT)).ok).toBe(true);
+  expect((await syncGoogleCalendar(deps, ACCOUNT)).ok).toBe(true);
   expect(refreshes).toBe(1);
 });
 
@@ -134,7 +136,7 @@ test("full calendar resync replaces obsolete rows only when the replacement succ
       : json({ items: [{ id: "new", summary: "replacement" }], nextSyncToken: "fresh" }),
   );
   seed(deps.db, "calendar", "expired");
-  expect((await syncGoogleCalendar(deps)).ok).toBe(true);
+  expect((await syncGoogleCalendar(deps, ACCOUNT)).ok).toBe(true);
   expect(deps.db.query("SELECT item_id FROM sync_items").all()).toEqual([{ item_id: "new" }]);
 });
 
@@ -157,7 +159,11 @@ test("gmail consumes more than 25 additions across every history page", async ()
     return json({ id: url.pathname.split("/").at(-1), snippet: "mail" });
   });
   seed(deps.db, "gmail", "previous");
-  expect(await syncGoogleGmail(deps)).toMatchObject({ ok: true, cursor: "next", count: 27 });
+  expect(await syncGoogleGmail(deps, ACCOUNT)).toMatchObject({
+    ok: true,
+    cursor: "next",
+    count: 27,
+  });
   expect(
     deps.db
       .query(
@@ -179,7 +185,7 @@ test("a failed gmail detail does not advance history or partially commit message
     return url.pathname.endsWith("/bad") ? json({}, 500) : json({ id: "ok", snippet: "mail" });
   });
   seed(deps.db, "gmail", "previous");
-  expect((await syncGoogleGmail(deps)).ok).toBe(false);
+  expect((await syncGoogleGmail(deps, ACCOUNT)).ok).toBe(false);
   expect(
     deps.db
       .query(
@@ -208,5 +214,9 @@ test("gmail full sync follows list pages and retains a cursor from before collec
     }
     return json({ id: url.pathname.split("/").at(-1), snippet: "mail" });
   });
-  expect(await syncGoogleGmail(deps)).toMatchObject({ ok: true, count: 2, cursor: "baseline" });
+  expect(await syncGoogleGmail(deps, ACCOUNT)).toMatchObject({
+    ok: true,
+    count: 2,
+    cursor: "baseline",
+  });
 });

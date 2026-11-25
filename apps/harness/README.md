@@ -1,6 +1,9 @@
-# digithive harness (신규)
+# digithive harness
 
-계획: `.omo/plans/digithive-harness-rewrite.md` (W0·W1 구현 상태)
+브라우저에서 대화하고 작업을 맡기는 개인용 에이전트 하네스. 서버(`src/server`)와 실행 워커(`scripts/worker.ts`)가
+같은 SQLite 파일을 열고, 웹 클라이언트(`web/`)는 `web/dist`로 빌드된다. 라이브: https://digithive.chanoil.com/
+
+계획과 배경: `.omo/plans/digithive-harness-rewrite.md`.
 
 ## 실행
 
@@ -12,7 +15,26 @@ bun run mock                            # (선택) 로컬 목 제공자 :8798
 PORT=8799 MODEL_BASE_URL=http://127.0.0.1:8798/v1 MODEL_NAME=mock-model bun run start
 ```
 
-환경 변수: `PORT`(기본 8799), `HARNESS_DB`(기본 `apps/harness/data/harness.db`), `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME`.
+환경 변수: `PORT`(기본 8799), `HARNESS_DB`(기본 `apps/harness/data/harness.db`),
+`HARNESS_WORKSPACE`, `HARNESS_SCRIPTS_ROOT`(기본은 작업 공간), `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME`.
+연동 변수는 아래 표를 본다.
+
+## 스키마와 마이그레이션
+
+이 프로젝트는 프로덕션 상태가 아니며, 규칙은 둘이다(2026-11-25, 소유자 결정).
+
+1. 레거시 DB는 **항상 최신 스키마로 마이그레이션**한다. 데이터도 최신 형태로 정규화한다
+   (예: 옛 `parts`로 저장된 엔트리는 `events`로 다시 쓴다).
+2. 마이그레이션 코드는 **최대 2회 전이만** 보존한다. v100이면 v98→v99, v99→v100만 가진다.
+   스키마가 바뀔 때마다 가장 오래된 전이를 버리고 새 전이를 더한다.
+
+`src/store/migrations.ts`가 그 두 가지를 담는다: `RESET_SCHEMA`(새 DB의 출발점), `TRANSITIONS`(최대 2단계),
+`RESET_VERSION`(열 수 있는 가장 오래된 버전). 새 DB는 `RESET_SCHEMA`에서 시작하고, 레거시 DB는 기록된
+`user_version` 위의 전이를 순서대로 적용한다. 두 경로는 같은 스키마에 도착하며 `tests/schema-upgrade.test.ts`가
+그 같음을 검사한다. 리셋보다 오래된 DB는 반쯤 올리지 않고 `openDatabase`에서 거부한다.
+
+전이는 SQL만으로 표현할 수 없을 때 `run(db)`으로 행 단위 재작성을 가질 수 있고, 같은 트랜잭션 안에서
+버전 기록과 함께 커밋된다. 출하된 전이는 수정하지 않고, 다음 전이를 더한다.
 
 ## 모델 공급자 라우팅
 
@@ -37,20 +59,16 @@ MODEL_COOLDOWN_MS=900000 MODEL_RETRIES=1 bun run start
 라우팅 결정(재시도·전환·전체 소진)은 대화의 응답 근처와 실행 로그(`provider.retry`,
 `provider.fallback`, `provider.exhausted` 이벤트)에 공급자명, 사유, 업스트림 응답 본문과
 함께 남는다. HTTP 200으로 오는 오류 봉투와 내용 없는 스트림도 실패로 처리한다.
-`bun scripts/qa-providers.ts`는 quota 공급자와 정상 공급자를 로컬에 띄워 이 경로를
-무료로 재현한다.
+`tests/provider-routing.test.ts`와 `scripts/qa-routing.ts`의 `providers` 모드가 이 경로를 로컬에서 재현한다.
 
 ## 검증
 
 ```bash
-bun run verify
+bun run verify     # lint + typecheck + build:web + test
 bun run fmt:check
 ```
 
-`apps/harness`에서 실행한다. `verify`는 타입 기반 lint, TypeScript 검사,
-웹 빌드, 전체 테스트를 순서대로 실행한다. `fmt:check`는 파일을 수정하지 않고
-포맷만 확인하며, `bun run fmt`는 포맷을 적용한다. 개별 검사는 `lint`,
-`typecheck`, `build:web`, `test`로 실행할 수 있다. 자동 CI나 배포는 연결하지 않는다.
+`apps/harness`에서 실행한다. `.github/workflows/ci.yml`이 같은 순서(plus `fmt:check`와 이미지 빌드)를 돌린다.
 
 Oxlint 1.95.0, oxlint-tsgolint 7.0.2008, Oxfmt 0.80.0을 lockfile과 함께 고정한다.
 correctness/suspicious 규칙과 unsafe 연산, 미처리 Promise, 잘못된 async 사용,
@@ -72,97 +90,44 @@ TypeScript의 enum, namespace, constructor parameter property 등 non-erasable
 `tests/`는 저장소·이벤트·상태·정책·모델 프로토콜·동기화·대화 분기와
 프로세스 간 실행을 다룬다. 외부 모델 호출 없이 돈다.
 
-## 워크플로와 스케줄 (v10)
+## 워크플로와 스케줄
 
 정의와 자동 실행을 분리했다.
 
-- **워크플로**: 재사용 가능한 정의. `title`, `instruction`, `executor`(agent/builtin/script),
+- **워크플로**: 재사용 가능한 정의. `title`, `instruction`, `executor`(`agent`/`script`),
   `params`(선언된 입력), `timeoutSeconds`. trigger는 없다.
 - **스케줄**: 정의 하나를 자동 실행하는 바인딩. `trigger`, `enabled`, `args`(바인딩된 파라미터 값),
   `next_run_at`. 스케줄을 지워도 정의와 실행 기록은 남는다.
 - **실행**: `runs` 행이 `workflow_id`·`workflow_title`·`schedule_id`·`trigger_kind`
   (`schedule`/`manual`/`tool`/`script`/`delegation`)·`params_json` 스냅샷을 함께 가진다.
 
-마이그레이션 v11은 builtin executor를 script로 바꾼다(`migrateBuiltinExecutors`).
+### 실행 방식은 둘뿐이다
 
-마이그레이션 v10은 기존 `schedules` 행을 `wf-<id>` 정의 + 바인딩으로 옮긴다. `schedules` 테이블은
-`schedule_occurrences`의 외래키 때문에 DROP하지 않고 제자리에서 컬럼을 바꾼다.
+| 방식     | 실행되는 것              | 특별한 점                       |
+| -------- | ------------------------ | ------------------------------- |
+| `agent`  | 모델 + 도구              | 없음                            |
+| `script` | `scriptsRoot`의 스크립트 | SDK 브리지로만 앱 기능에 닿는다 |
 
-두 가지 실행 방식만 있다: 에이전트와 스크립트. `연결 자료 수집`(`jobs/collection.ts`)과
-`브리핑 생성`(`jobs/briefing.ts`)은 앱이 실어 보내는 **스크립트 작업**이며, 다른 스크립트와
-실행 방식이 같다 — 경로만 앱이 설치하는 `jobs/` 아래라는 점이 다르다. 설치(매 시작 시 갱신)와
-`kind:"builtin"` 정의의 전환은 `src/jobs/install.ts`·`src/store/job-migration.ts`가 맡는다.
-수집은 저장된 소스 목록을 쓰지 않고 실행 시점에 계정의 켜진 소스(`account.read`)만 읽는다.
+앱이 실어 보내는 작업(`연결 자료 수집` = `jobs/collection.ts`, `브리핑 생성` = `jobs/briefing.ts`)도 같은
+`script` 방식이다. `jobs/`는 **제품 파일**이며 서버 코드(`src/`)가 아니다: 컨테이너는 `jobs/`를 `/app/jobs`로
+복사하고 `HARNESS_SCRIPTS_ROOT=/app/jobs`로 실행하므로, 스크립트의 `../.digithive/sdk.ts` import가 그대로 SDK를
+가리킨다. 그래서 서버는 평소 작업 파일을 설치하지 않고, 개발/테스트처럼 스크립트 루트가 체크아웃의 `jobs/`와
+다른 경우에만 원본 그대로 복사한다(`src/jobs/install.ts`). 수집은 저장된 소스 목록을 쓰지 않고 실행 시점에
+계정의 켜진 소스(`account.read`)만 읽는다.
 
-`HARNESS_SCRIPTS_ROOT`는 스크립트를 해석하는 루트이자 작업 공간의 루트다. 운영 이미지는
-`/app/jobs`를 쓴다.
+스크립트 SDK: [docs/workflow-sdk.md](../../docs/workflow-sdk.md), 예제 `scripts/jobs/example-workflow.ts`.
 
 도구(대화·작업 공용): `workflow_list`(keyword/regex/bm25 중 하나) · `workflow_detail`(섹션 선택) ·
 `workflow_create` · `workflow_edit` · `workflow_delete` · `workflow_run`(기본 동기 즉시 실행,
 `async:true`면 큐 적재) · `schedule_list/detail/create/edit/delete`.
 
-스크립트 SDK: [docs/workflow-sdk.md](../../docs/workflow-sdk.md), 예제
-`scripts/jobs/example-workflow.ts`.
-
-## 현재 범위 (W0·W1)
-
-- 세션·엔트리·part·run·tool_call·approval·event 스키마와 마이그레이션
-- 전역 seq 이벤트 로그, 커서 재생, 라이브 SSE(+15초 ping), 스냅샷 프레임
-- run 상태 기계, 리스 만료 정산, 취소 의도 기록
-- 정책 단일 판정 지점(allow/ask/deny, 저장 승인이 deny를 이길 수 없음)
-- OpenAI 호환 스트리밍 어댑터(오류 분류, 잘림=실패)
-- 대화 턴: 델타 저장·스트리밍, 도구 왕복, 거부=도구 결과, 턴·도구 데드라인
-- React 클라이언트: 세션 목록, 스트리밍 렌더, Enter/Shift+Enter, 한글 조합 Enter 무시
-
-W2(대화 관리)·W3(맥락·압축)·W4(작업 계층)·W5(위임)·W6(이전)·W7(절단)은 아직 없다.
-
-## 알려진 한계
-
-- 도구 레지스트리가 비어 있다(승인 게이트·실행 경계는 W4에서 도구와 함께 채운다).
-- SSE 재연결은 EventSource 기본 동작(`Last-Event-ID`)에 의존한다. 서버는 스냅샷을 먼저 보내므로 화면 복원은 안전하다.
-- 대화 삭제·제목 변경·편집·분기는 W2.
-
 ## 배포 (mini, https://digithive.chanoil.com/)
 
-```bash
-# 서버에서
-cd ~/digithive-harness/deploy
-# .env: HARNESS_PASSPHRASE, HARNESS_SESSION_SECRET, MODEL_BASE_URL, MODEL_API_KEY, MODEL_NAME, HARNESS_MODEL_HEADERS
-docker compose up -d --build
-```
-
-- 두 서비스: `harness`(웹, 4318, caddy_expose) + `harness-worker`(실행 계층).
-- Caddy는 `handle /app2*`로 308 리다이렉트 후 `/`를 `harness:4318`으로 프록시한다.
-- 인증: `HARNESS_PASSPHRASE`(빈 값이면 로컬 개발용으로 인증 비활성), `HARNESS_SESSION_SECRET`으로 서명한 HttpOnly 쿠키.
-- 되돌림: `~/caddy/Caddyfile.bak-*`를 `docker exec -i caddy_proxy sh -c 'cat > /etc/caddy/Caddyfile'`로 복원 후 `caddy reload`. (파일 bind-mount라 sed -i 금지)
-
-## CI/CD (GitHub Actions)
-
-| 워크플로 | 트리거                | 하는 일                                                                                                                               |
-| -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci`     | `main` push, PR, 수동 | `apps/harness`에서 `bun install --frozen-lockfile` → lint → typecheck → build:web → test → fmt:check, 그리고 push 없이 `docker build` |
-| `cd`     | `main` push, 수동     | `ghcr.io/<owner>/digithive-harness:<sha>`·`:latest` 발행 → mini 러너에서 배포                                                         |
-
-배포 job은 `runs-on: [self-hosted, mini]`에서 돈다(서버가 LAN에 있어
-GitHub 호스티드 러너가 직접 닿지 못한다). 순서:
-
-1. `deploy/compose.yml`을 `~/digithive-harness/deploy/compose.yml`로 동기화
-2. 현재 이미지를 `deploy/.harness_image`에 기록
-3. job 한정 `DOCKER_CONFIG`로 GHCR 로그인 후 `docker compose pull`
-4. `docker compose up -d --no-build`
-5. `https://digithive.chanoil.com/api/session`이 60초 안에 응답하는지 확인
-6. 실패하면 기록해 둔 직전 이미지로 되돌리고 job 실패
-
-러너는 mini의 컨테이너 `digithive-runner`(이름 `mini-digithive`, 라벨 `mini`)로 돈다.
-이미지는 `ghcr.io/actions/actions-runner:latest`이고 `--restart unless-stopped`라서
-dockerd가 부팅 때 함께 살린다. 러너 파일과 등록 상태는 호스트
-`~/runner-container`(컨테이너 `/home/runner`)에 있고, 컨테이너에는 도커 소켓,
-호스트 `docker`/compose 플러그인, `~/digithive-harness`가 마운트된다. libicu가
-이미지 안에 있어 이전의 `LD_LIBRARY_PATH` 꼼수는 필요 없다. 이전 호스트 설치
-`~/actions-runner`와 `~/.config/systemd/user/actions-runner.service` 유닛은
-쓰지 않는 채로 남아 있다. 재등록 절차는 `docs/ci-cd.md`에 있다.
-
-- 운영 DB는 볼륨 `deploy_harness-data`(/data). v2 데이터는 `bun scripts/migrate-v2.ts --from <v2.db> --to /data/harness.db`로 옮긴다.
+배포는 GitHub Actions CD가 한다: `main` push → CI → 이미지 발행 → mini 러너에서 배포. 서버에서 손으로 하는
+절차는 만들지 않는다. 러너 구성, 롤백(`workflow_dispatch`에 직전 이미지 태그 고정), 볼륨·네트워크는
+`docs/ci-cd.md`가 정본이다. 운영 DB는 볼륨 `deploy_harness-data`(`/data/harness.db`)이고, 스키마·데이터
+정규화는 위의 마이그레이션 규칙대로 **서버 시작 시 자동**으로 일어난다. 배포 전 DB 스냅샷은
+`docker exec`로 `VACUUM INTO '/data/pre-v<NN>-deploy-<date>.db'`를 실행해 남긴다.
 
 ## 연동 환경변수
 
@@ -175,7 +140,4 @@ dockerd가 부팅 때 함께 살린다. 러너 파일과 등록 상태는 호스
 | VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY    | (없음)                                                  | Web Push VAPID 키. 없으면 전송은 `push_unconfigured`     |
 | VAPID_SUBJECT                           | mailto:owner@digithive.local                            | VAPID subject                                            |
 
-- 연결 상태: `GET /api/connections` → { googleConnected, canvasConfigured, pushConfigured, states[] }
-- 수동 동기화: `POST /api/connections/sync` → 소스별 {ok,count,cursor,error}
-- Google 연결: `GET /api/oauth/google/start`가 돌려준 URL로 1회 동의하면 콜백이 토큰을 암호화 저장하고 즉시 1회 동기화한다.
-- 알림: 브라우저에서 구독하면 `POST /api/push/subscribe`로 저장되고, 브리핑 발행 시 전송된다. 점검은 `POST /api/push/test`.
+연결은 화면에서 한다: 사이드바 **연결** 탭에서 Google 동의, 계정별 소스 스위치, 동기화, 알림 구독을 관리한다.

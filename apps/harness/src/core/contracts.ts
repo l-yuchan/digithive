@@ -30,7 +30,6 @@ export const EventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("error"), id: z.number().int(), detail: z.string() }),
 ]);
 export type ConversationEvent = z.infer<typeof EventSchema>;
-export type EventType = ConversationEvent["type"];
 
 export function conversationText(events: readonly ConversationEvent[]): string {
   return events

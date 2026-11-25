@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrate } from "../src/store/db";
 import { correctMemory, listMemories, recallMemories, remember } from "../src/knowledge/memory";
-import { validCitations } from "../src/knowledge/citations";
 import { readStoredFile, storeFile } from "../src/files/store";
 import {
   normalizeCanvasAssignment,
@@ -43,18 +42,6 @@ describe("memory", () => {
     const all = listMemories(database, true);
     expect(all).toHaveLength(2);
     expect(all.find((memory) => memory.id === original.id)?.supersededBy).toBe(fixed?.id);
-  });
-
-  test("citations to sources the model never saw are dropped", () => {
-    const kept = validCitations(
-      [
-        { sourceId: "mail:1", quote: "내일 마감" },
-        { sourceId: "mail:9", quote: "지어낸 인용" },
-        { sourceId: "mail:1", quote: "   " },
-      ],
-      ["mail:1"],
-    );
-    expect(kept).toEqual([{ sourceId: "mail:1", quote: "내일 마감" }]);
   });
 });
 

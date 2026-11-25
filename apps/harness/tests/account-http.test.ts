@@ -78,7 +78,7 @@ test("Google callbacks require a valid single-use challenge while account contro
 test("reconnecting an unidentified migrated account verifies its old mailbox before replacing tokens", async () => {
   const { harness, cleanup } = setup();
   try {
-    saveTokens(harness.deps.db, "test-secret", {
+    saveTokens(harness.deps.db, "test-secret", "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", {
       accessToken: "old-token",
       refreshToken: "old-refresh",
       expiresAt: Date.now() + 3_600_000,
@@ -118,7 +118,10 @@ test("reconnecting an unidentified migrated account verifies its old mailbox bef
     expect(new URL(response.headers.get("location") ?? "").searchParams.get("reason")).toBe(
       "identity_mismatch",
     );
-    expect(loadTokens(harness.deps.db, "test-secret")?.accessToken).toBe("old-token");
+    expect(
+      loadTokens(harness.deps.db, "test-secret", "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6")
+        ?.accessToken,
+    ).toBe("old-token");
     expect(
       harness.deps.db
         .query(

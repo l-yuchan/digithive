@@ -77,7 +77,7 @@ describe("google oauth + sync", () => {
   function googleDeps(fetchImpl: typeof fetch, now = 10_000_000): GoogleDeps {
     const database = db();
     const events = new EventLog(database);
-    saveTokens(database, "vault", {
+    saveTokens(database, "vault", "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", {
       accessToken: "at",
       refreshToken: "rt",
       expiresAt: now + 3_600_000,
@@ -85,6 +85,9 @@ describe("google oauth + sync", () => {
     });
     return { db: database, events, config, vaultSecret: "vault", fetchImpl, now: () => now };
   }
+
+  /** The account every sync in this file acts for; calls name it explicitly. */
+  const ACCOUNT = "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6";
 
   test("calendar sync stores items and its own syncToken cursor", async () => {
     const calls: string[] = [];
@@ -99,7 +102,7 @@ describe("google oauth + sync", () => {
       { preconnect: fetch.preconnect },
     );
     const deps = googleDeps(fetchImpl);
-    const outcome = await syncGoogleCalendar(deps);
+    const outcome = await syncGoogleCalendar(deps, ACCOUNT);
     expect(outcome).toMatchObject({ ok: true, count: 1, cursor: "st-1" });
     const item = deps.db
       .query<{ title: string; at: string }, SQLQueryBindings[]>(
@@ -117,7 +120,7 @@ describe("google oauth + sync", () => {
     expect(state).toEqual({ cursor: "st-1", ok: 1 });
 
     // the next sync must send the stored cursor
-    await syncGoogleCalendar(deps);
+    await syncGoogleCalendar(deps, ACCOUNT);
     expect(calls.at(-1)).toContain("syncToken=st-1");
   });
 
@@ -137,7 +140,7 @@ describe("google oauth + sync", () => {
         "UPDATE account_sources SET cursor='st-old', ok=1 WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
       )
       .run();
-    const outcome = await syncGoogleCalendar(deps);
+    const outcome = await syncGoogleCalendar(deps, ACCOUNT);
     expect(outcome.ok).toBe(true);
     expect(calls[0]).toContain("syncToken=st-old");
     expect(calls[0]).not.toContain("timeMin=");
@@ -162,7 +165,7 @@ describe("google oauth + sync", () => {
         "UPDATE account_sources SET cursor='st-bad', ok=1 WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
       )
       .run();
-    const outcome = await syncGoogleCalendar(deps);
+    const outcome = await syncGoogleCalendar(deps, ACCOUNT);
     expect(outcome).toMatchObject({ ok: true, error: "full_resync_after_400", cursor: "st-fresh" });
     expect(calls[1]).not.toContain("syncToken=");
     expect(calls[1]).toContain("timeMin=");
@@ -179,7 +182,7 @@ describe("google oauth + sync", () => {
         { preconnect: fetch.preconnect },
       ),
     );
-    const first = await syncGoogleCalendar(deps);
+    const first = await syncGoogleCalendar(deps, ACCOUNT);
     expect(first.ok).toBe(true);
     // seed a cursor, then force the 410 path
     deps.db
@@ -187,7 +190,7 @@ describe("google oauth + sync", () => {
         "UPDATE account_sources SET cursor = 'old' WHERE account_id = '6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source = 'calendar'",
       )
       .run();
-    const second = await syncGoogleCalendar(deps);
+    const second = await syncGoogleCalendar(deps, ACCOUNT);
     expect(second).toMatchObject({ ok: true, error: "full_resync_after_410", cursor: "st-2" });
   });
 
@@ -213,7 +216,7 @@ describe("google oauth + sync", () => {
         "UPDATE account_sources SET cursor='old-history', ok=1 WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
       )
       .run();
-    const outcome = await syncGoogleGmail(deps);
+    const outcome = await syncGoogleGmail(deps, ACCOUNT);
     expect(outcome).toMatchObject({ ok: true, cursor: "h-9", error: "full_resync" });
     expect(outcome.count).toBe(1);
   });
@@ -235,8 +238,8 @@ describe("google oauth + sync", () => {
         "UPDATE account_sources SET cursor='mail-0', ok=1 WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
       )
       .run();
-    await syncGoogleCalendar(deps);
-    await syncGoogleGmail(deps);
+    await syncGoogleCalendar(deps, ACCOUNT);
+    await syncGoogleGmail(deps, ACCOUNT);
     const rows = deps.db
       .query<{ source: string; cursor: string }, SQLQueryBindings[]>(
         "SELECT source, cursor FROM account_sources WHERE account_id = '6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' ORDER BY source",

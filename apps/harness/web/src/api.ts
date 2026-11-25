@@ -6,8 +6,7 @@ export type ConversationEvent = z.infer<typeof EventSchema>;
 export type Entry = z.infer<typeof EntrySchema>;
 
 export function apiUrl(path: string): string {
-  const base = window.location.pathname.startsWith("/app2") ? "/app2" : "";
-  return `${base}${path}`;
+  return path;
 }
 
 export async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<T> {

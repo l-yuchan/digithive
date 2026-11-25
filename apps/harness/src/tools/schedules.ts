@@ -165,13 +165,3 @@ export function scheduleTools(deps: ScheduleToolDeps): ToolRuntime[] {
     },
   ];
 }
-
-export function scheduleToolNames(): string[] {
-  return [
-    "schedule_list",
-    "schedule_detail",
-    "schedule_create",
-    "schedule_edit",
-    "schedule_delete",
-  ];
-}

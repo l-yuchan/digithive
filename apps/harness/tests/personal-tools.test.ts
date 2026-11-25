@@ -62,7 +62,7 @@ test("a createHarness conversation offers and executes gmail_search over the Goo
   const { root, cleanup } = temporaryRoot();
   const harness = harnessAt(root, model.url);
   try {
-    saveTokens(harness.deps.db, SECRET, {
+    saveTokens(harness.deps.db, SECRET, "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", {
       accessToken: "fake-access-token",
       refreshToken: null,
       expiresAt: Date.now() + 3_600_000,

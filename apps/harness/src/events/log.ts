@@ -7,15 +7,9 @@ export const EVENT_KINDS = [
   "session.renamed",
   "session.deleted",
   "turn.started",
-  "turn.settled",
   "turn.aborted",
-  "message.started",
   "message.delta",
-  "message.part",
-  "message.completed",
-  "message.aborted",
   "tool.started",
-  "tool.progress",
   "tool.result",
   "tool.denied",
   "tool.timeout",
@@ -29,10 +23,8 @@ export const EVENT_KINDS = [
   "run.failed",
   "run.interrupted",
   "run.cancelled",
-  "context.compacted",
   "context.edited",
   "usage.recorded",
-  "budget.threshold",
   "provider.retry",
   "provider.fallback",
   "integration.sync_state",
@@ -40,16 +32,26 @@ export const EVENT_KINDS = [
   "workflow.updated",
   "workflow.deleted",
   "workflow.run",
-  "sdk.capability",
-  // Legacy kinds written before v10; kept readable, never emitted again.
   "schedule.created",
   "schedule.updated",
   "schedule.deleted",
+  // Legacy kinds: stored rows stay readable, but nothing emits these any more.
+  // `message.*` and `turn.settled` ended with the event-per-part stream;
+  // `context.compacted` was superseded by the `compaction` entry and `context.edited`;
+  // `schedule.run`/`schedule.enabled` ended with v10; `budget.threshold`,
+  // `tool.progress` and `sdk.capability` were declared but never emitted.
+  "turn.settled",
+  "message.started",
+  "message.part",
+  "message.completed",
+  "message.aborted",
+  "tool.progress",
+  "context.compacted",
+  "budget.threshold",
+  "sdk.capability",
   "schedule.run",
   "schedule.enabled",
 ] as const;
-
-export type EventKind = (typeof EVENT_KINDS)[number];
 
 const EventRow = z.object({
   seq: z.number(),

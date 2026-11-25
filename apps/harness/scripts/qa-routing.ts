@@ -162,17 +162,12 @@ async function seed(path: string): Promise<void> {
   const { upsertGoogleAccount } = await import("../src/integrations/accounts");
   // A verified identity, but the token is expired: collection must refresh first.
   const account = upsertGoogleAccount(db, { subject: "qa-subject-1", email: "owner@example.com" });
-  saveTokens(
-    db,
-    secret,
-    {
-      accessToken: "expired-token",
-      refreshToken: "qa-refresh",
-      expiresAt: 0,
-      scope: "openid email",
-    },
-    account.id,
-  );
+  saveTokens(db, secret, account.id, {
+    accessToken: "expired-token",
+    refreshToken: "qa-refresh",
+    expiresAt: 0,
+    scope: "openid email",
+  });
   const now = new Date().toISOString();
   const runId = "qa-run-provider-failure";
   db.query(

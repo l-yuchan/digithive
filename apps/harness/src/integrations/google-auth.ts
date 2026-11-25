@@ -1,7 +1,7 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { EventLog } from "../events/log";
 import { seal, open } from "../core/vault";
-import { applyAccountEmail, DEFAULT_GOOGLE_ACCOUNT_ID, getAccount } from "./account-store";
+import { applyAccountEmail, getAccount } from "./account-store";
 import { z } from "zod";
 
 export type GoogleConfig = {
@@ -128,8 +128,8 @@ export async function refreshTokens(
 export function saveTokens(
   db: Database,
   secret: string,
+  accountId: string,
   tokens: GoogleTokens,
-  accountId = DEFAULT_GOOGLE_ACCOUNT_ID,
 ): void {
   if (!getAccount(db, accountId)) throw new Error(`account_not_found:${accountId}`);
   const previous = loadTokens(db, secret, accountId);
@@ -148,11 +148,7 @@ export function saveTokens(
   );
 }
 
-export function loadTokens(
-  db: Database,
-  secret: string,
-  accountId = DEFAULT_GOOGLE_ACCOUNT_ID,
-): GoogleTokens | null {
+export function loadTokens(db: Database, secret: string, accountId: string): GoogleTokens | null {
   const row = db
     .query<{ payload: string }, SQLQueryBindings[]>(
       "SELECT payload FROM oauth_tokens WHERE account_id = ?",
@@ -176,17 +172,21 @@ export type GoogleDeps = {
   readonly vaultSecret: string;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
-  /** Default target for callers that have not been moved to explicit accounts yet. */
-  readonly accountId?: string;
 };
 
-export function resolveAccountId(deps: GoogleDeps, accountId: string | undefined): string {
-  return accountId ?? deps.accountId ?? DEFAULT_GOOGLE_ACCOUNT_ID;
+/**
+ * The account a call acts for. There is no default account: picking one by
+ * convention is how a multi-account server writes to the wrong mailbox.
+ */
+export function resolveAccountId(accountId: string | undefined): string {
+  if (accountId === undefined || accountId.length === 0)
+    throw new Error("account_required: this call has no Google account");
+  return accountId;
 }
 
 /** Returns a live access token for one account, refreshing only that account. */
 export async function accessToken(deps: GoogleDeps, accountId?: string): Promise<string> {
-  const target = resolveAccountId(deps, accountId);
+  const target = resolveAccountId(accountId);
   const tokens = loadTokens(deps.db, deps.vaultSecret, target);
   if (!tokens) throw new Error("google_not_connected");
   const now = (deps.now ?? Date.now)();
@@ -198,7 +198,7 @@ export async function accessToken(deps: GoogleDeps, accountId?: string): Promise
     deps.fetchImpl ?? fetch,
     now,
   );
-  saveTokens(deps.db, deps.vaultSecret, refreshed, target);
+  saveTokens(deps.db, deps.vaultSecret, target, refreshed);
   return refreshed.accessToken;
 }
 
@@ -232,12 +232,15 @@ export async function fetchGoogleIdentity(
   return { subject: body.sub, email: verified && body.email ? body.email : null };
 }
 
-/** Best-effort legacy email hydration from the connected Gmail profile. */
+/**
+ * Best-effort legacy email hydration for one bound account, from its Gmail profile.
+ * Called only when a target account is known; there is no implicit account here.
+ */
 export async function hydrateGoogleEmail(
   deps: GoogleDeps,
-  accountId?: string,
+  accountId: string,
 ): Promise<string | null> {
-  const target = resolveAccountId(deps, accountId);
+  const target = resolveAccountId(accountId);
   const account = getAccount(deps.db, target);
   if (!account || account.email) return account?.email ?? null;
   const tokens = loadTokens(deps.db, deps.vaultSecret, target);
