@@ -51,13 +51,32 @@
 
 | 검사 | 결과 |
 | --- | --- |
-| `bun test` | 241 pass / 0 fail (36 files) |
-| `bunx oxlint --type-aware src tests scripts` | 0 error |
+| `bun test` | 245 pass / 0 fail (38 files) |
+| `bunx oxlint --type-aware --deny-warnings src tests scripts web/src web/sw.js lint` | 0 error |
 | `bun run typecheck` (서버) | 0 error |
+| `bun run build:web` | 성공 |
 | 마이그레이션 v9→v10 | `tests/workflow-migration.test.ts` 3 pass, FTS·트리거·FK 가드 포함 |
 | 스냅샷 검사 스크립트 | `scripts/qa-workflow-migration.ts` (mismatch=0일 때 exit 0) |
+| 라이브 스냅샷 변환 | v9 5 schedules/75 runs/60 occurrences → v10 workflows 5, bindings 5, orphan 0, unmatched 0, fkErrors 0 |
 | SDK 실제 자식 프로세스 | `tests/workflow-sdk.test.ts` — 자식이 브리지로 `memory_recall` 호출 |
 | 인라인 예산/취소 | `tests/workflows.test.ts` — 60ms 예산에서 `interrupted` |
+| 웹 스키마 ↔ 실제 응답 | `tests/workflow-web-schema.test.ts` — 4가지 검색 모드 모두 파싱 |
+| 빌드 감시자 | `tests/build-watch.test.ts` — 불일치가 지속되어도 재로드는 1회 |
+| 화면 (1280px) | 목록 6건, 상세(실행 ID·정의·파라미터·스케줄·실행 기록), 가로 넘침 0 |
+| 화면 (390px) | 한 열로 쌓이고 가로 넘침 0 |
+| 실행 대화상자 | "실행을 큐에 넣었습니다" + 실행 ID + "서버가 실행 완료를 기다린 것은 아닙니다" |
+
+### 검증 중 발견해 고친 결함
+
+1. **목록 스키마가 실제 응답을 거부했다** — 서버는 keyword/regex/전체 목록에서 `score: null`을
+   보내는데 웹 스키마가 `number`만 받아, 탭 전체가 "목록을 불러오지 못했습니다"가 되었다.
+   스키마를 nullable로 바꾸고, 서버가 실제로 보내는 네 가지 응답을 파싱하는 테스트를 붙였다.
+2. **검색 입력 오류가 500으로 나갔다** — 짧은 BM25 질의와 잘못된 정규식이 `Error`였기 때문이다.
+   `WorkflowError`(`search_query_too_short`·`search_invalid_regex`·`search_invalid_bm25`)로 바꿔 422.
+3. **실행 엔드포인트가 `async`를 무시했다** — 항상 큐에 넣으면서 `async:false`를 조용히 삼켰다.
+   이 HTTP 표면은 큐 적재 전용이므로 `async:false`는 `run_not_inline` 422로 거부한다.
+4. **탭이 초당 수십 번 새로고침됐다** — `watchBuild`가 불일치일 때마다 reload해서, 재빌드 뒤
+   서버를 재시작하지 않으면 reload 루프가 됐다(4초에 93회 navigation 측정). 페이지 수명당 1회로 제한.
 
 ## 6. 남은 위험과 대응
 
