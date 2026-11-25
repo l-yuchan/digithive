@@ -27,13 +27,32 @@ const EntryRow = z.object({
   seq: z.number(),
 });
 
-const SessionRow = z.object({
+export const SessionRow = z.object({
   id: z.string(),
   title: z.string(),
+  title_source: z.enum(["initial", "auto", "user"]).default("initial"),
   created_at: z.string(),
   updated_at: z.string(),
 });
-export type Session = z.infer<typeof SessionRow>;
+export type Session = {
+  readonly id: string;
+  readonly title: string;
+  /** Whether the title is the default, named by the app, or named by the owner. */
+  readonly titleSource: "initial" | "auto" | "user";
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+/** Public so a session query written elsewhere maps rows the same way. */
+export function toSession(row: z.infer<typeof SessionRow>): Session {
+  return {
+    id: row.id,
+    title: row.title,
+    titleSource: row.title_source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function toEntry(row: z.infer<typeof EntryRow>): Entry {
   return {
@@ -49,34 +68,51 @@ function toEntry(row: z.infer<typeof EntryRow>): Entry {
   };
 }
 
+const SESSION_COLUMNS = "id, title, title_source, created_at, updated_at";
+
 export function createSession(db: Database, title: string, now = Date.now()): Session {
   const id = crypto.randomUUID();
   const iso = new Date(now).toISOString();
+  const finalTitle = title.slice(0, 200) || "새 대화";
   db.query("INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)").run(
     id,
-    title.slice(0, 200) || "새 대화",
+    finalTitle,
     iso,
     iso,
   );
-  return { id, title: title.slice(0, 200) || "새 대화", created_at: iso, updated_at: iso };
+  return { id, title: finalTitle, titleSource: "initial", createdAt: iso, updatedAt: iso };
 }
 
 export function getSession(db: Database, id: string): Session | null {
   const row = db
-    .query(
-      "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ? AND deleted_at IS NULL",
-    )
+    .query(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE id = ? AND deleted_at IS NULL`)
     .get(id);
-  return row ? SessionRow.parse(row) : null;
+  return row ? toSession(SessionRow.parse(row)) : null;
 }
 
 export function listSessions(db: Database): Session[] {
   return db
     .query(
-      "SELECT id, title, created_at, updated_at FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC",
+      `SELECT ${SESSION_COLUMNS} FROM sessions WHERE deleted_at IS NULL ORDER BY updated_at DESC`,
     )
     .all()
-    .map((row) => SessionRow.parse(row));
+    .map((row) => toSession(SessionRow.parse(row)));
+}
+
+/**
+ * A name the app picked from the conversation itself. It applies only while the
+ * title is still the default, so a name the owner typed is never replaced; the
+ * return value says whether this call wrote it.
+ */
+export function applyAutoTitle(db: Database, id: string, title: string, now = Date.now()): boolean {
+  const trimmed = title.trim().slice(0, 200);
+  if (trimmed.length === 0) return false;
+  const changed = db
+    .query(
+      "UPDATE sessions SET title = ?, title_source = 'auto', updated_at = ? WHERE id = ? AND title_source = 'initial' AND deleted_at IS NULL",
+    )
+    .run(trimmed, new Date(now).toISOString(), id);
+  return changed.changes > 0;
 }
 
 export function renameSession(
@@ -87,11 +123,9 @@ export function renameSession(
 ): Session | null {
   const trimmed = title.trim().slice(0, 200);
   if (trimmed.length === 0) return null;
-  db.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL").run(
-    trimmed,
-    new Date(now).toISOString(),
-    id,
-  );
+  db.query(
+    "UPDATE sessions SET title = ?, title_source = 'user', updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+  ).run(trimmed, new Date(now).toISOString(), id);
   return getSession(db, id);
 }
 

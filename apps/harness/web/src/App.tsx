@@ -11,24 +11,15 @@ import {
   type Entry,
   type Session,
 } from "./api";
-import { Composer } from "./composer/Composer";
-import { ConversationSidebar, type RenameTarget } from "./sidebar/ConversationSidebar";
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
-import { hasOAuthResult } from "./connections/oauth";
 import { Login } from "./auth/Login";
-import { ConversationEventList } from "./MessageParts";
 import { watchBuild } from "./buildCheck";
-
-/** The user's words in a turn; tool chatter never becomes an editable prompt. */
-function conversationText(events: readonly ConversationEvent[]): string {
-  return events
-    .filter((event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text")
-    .map((event) => event.text)
-    .join("\n");
-}
+import { TAB_PATHS, routeOf, tabPath, type Tab } from "./routes";
+import { ChatView, cancelQueued, resumeQueue, useQueue } from "./chat/ChatView";
+import type { RenameTarget } from "./sidebar/ConversationSidebar";
 
 type State = {
   readonly sessions: Session[];
@@ -42,7 +33,7 @@ type State = {
 type Action =
   | { type: "snapshot"; sessions: Session[]; entries: Entry[]; lastSeq: number }
   | { type: "sessions"; sessions: Session[] }
-  | { type: "active"; id: string }
+  | { type: "active"; id: string | null }
   | { type: "entries"; entries: Entry[] }
   | { type: "started"; entryId: string }
   | {
@@ -210,18 +201,56 @@ function reducer(state: State, action: Action): State {
   }
 }
 
+/**
+ * The tab comes from the address, so a reload or a shared link opens the same screen and
+ * back/forward move between tabs. A static host (a file:// preview, an `/assets/` shell)
+ * cannot route paths, so there the address is a `?tab=` query instead; the app uses
+ * whichever form its own location already uses.
+ */
+function readLocation(): { tab: Tab; sessionId: string | null } {
+  const base = document.baseURI;
+  const path = decodeURIComponent(new URL(window.location.href).pathname);
+  const prefix = new URL(base).pathname.replace(/[^/]*$/, "");
+  if (path.startsWith(prefix)) return routeOf(`/${path.slice(prefix.length)}`);
+  const query = new URLSearchParams(window.location.search);
+  if (query.get("oauth") !== null) return { tab: "connections", sessionId: null };
+  const tab = query.get("tab");
+  const known: readonly Tab[] = ["chat", "work", "workflows", "connections", "knowledge"];
+  const found = known.find((candidate) => candidate === tab);
+  return { tab: found ?? "chat", sessionId: query.get("session") };
+}
+
+function locationUsingQuery(): boolean {
+  const path = decodeURIComponent(new URL(window.location.href).pathname);
+  const prefix = new URL(document.baseURI).pathname.replace(/[^/]*$/, "");
+  return !path.startsWith(prefix) && new URLSearchParams(window.location.search).has("tab");
+}
+
+function addressFor(tab: Tab, sessionId: string | null): string {
+  const target = tabPath(tab, tab === "chat" ? sessionId : null);
+  if (locationUsingQuery()) {
+    const query = new URLSearchParams();
+    if (tab !== "chat") query.set("tab", tab);
+    if (tab === "chat" && sessionId) query.set("session", sessionId);
+    const suffix = query.toString();
+    return `${document.baseURI.replace(/[^/]*$/, "")}${suffix.length > 0 ? `?${suffix}` : ""}`;
+  }
+  const prefix = new URL(document.baseURI).pathname.replace(/[^/]*$/, "");
+  return `${window.location.origin}${prefix}${target}`;
+}
+
 export function App() {
   const [state, dispatch] = useReducer(reducer, initial);
+  const [route, setRoute] = useState(readLocation);
   const [sending, setSending] = useState(false);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"chat" | "work" | "connections" | "workflows" | "knowledge">(
-    () => (hasOAuthResult(window.location.search) ? "connections" : "chat"),
-  );
   const [authed, setAuthed] = useState<boolean | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const [queueRevision, setQueueRevision] = useState(0);
+  const queue = useQueue(state.activeId, queueRevision);
 
   useEffect(() => {
     if (authed !== true) return undefined;
@@ -233,6 +262,7 @@ export function App() {
       .then((body) => setAuthed(body.authenticated))
       .catch(() => setAuthed(false));
   }, []);
+
   const reloadSessions = useCallback(async (q?: string) => {
     const suffix = q && q.trim().length > 0 ? `?q=${encodeURIComponent(q.trim())}` : "";
     const body = await getJson(
@@ -258,13 +288,39 @@ export function App() {
     reloadSessions(query).catch(reportError);
   });
 
+  /** Moves to a tab (and conversation) and records it in the address. */
+  const go = useCallback((tab: Tab, sessionId: string | null, replace = false) => {
+    const address = addressFor(tab, sessionId);
+    if (window.location.href !== address)
+      window.history[replace ? "replaceState" : "pushState"](null, "", address);
+    setRoute({ tab, sessionId });
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => setRoute(readLocation());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // The chat tab owns the conversation; opening another tab keeps it in memory.
+  const routeSession = route.tab === "chat" ? route.sessionId : null;
+  useEffect(() => {
+    if (routeSession) dispatch({ type: "active", id: routeSession });
+  }, [routeSession]);
+
+  // Loaded once: later navigation is driven by the address and the list, so the
+  // first conversation the address names is the only one this effect picks.
+  const initialSession = useState(() => readLocation().sessionId)[0];
   useEffect(() => {
     if (authed !== true) return undefined;
     let cancelled = false;
     void (async () => {
       const sessions = await reloadSessions();
       if (cancelled) return;
-      const first = sessions[0];
+      const fromRoute = initialSession
+        ? sessions.find((session) => session.id === initialSession)
+        : undefined;
+      const first = fromRoute ?? sessions[0];
       if (first) dispatch({ type: "active", id: first.id });
       else {
         const created = await postJson("/api/sessions", { title: "첫 대화" }, SessionSchema);
@@ -275,7 +331,9 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [authed, reloadSessions]);
+    // Only the first authenticated load picks a conversation; later navigations are
+    // driven by the address and the list.
+  }, [authed, reloadSessions, initialSession]);
 
   useEffect(() => {
     if (authed !== true) return undefined;
@@ -378,7 +436,10 @@ export function App() {
     });
     on("turn.response.completed", entryPayload, (payload) => {
       dispatch({ type: "status", entryId: payload.entryId, status: "complete" });
-      if (!cancelled) reloadEntries(id).catch(reportError);
+      if (!cancelled) {
+        reloadEntries(id).catch(reportError);
+        setQueueRevision((value) => value + 1);
+      }
     });
     on(
       "turn.response.aborted",
@@ -386,12 +447,24 @@ export function App() {
       (payload) => {
         dispatch({ type: "status", entryId: payload.entryId, status: "aborted" });
         dispatch({ type: "error", message: payload.reason ?? "응답 생성이 중단되었습니다." });
-        if (!cancelled) reloadEntries(id).catch(reportError);
+        if (!cancelled) {
+          reloadEntries(id).catch(reportError);
+          setQueueRevision((value) => value + 1);
+        }
       },
     );
-    on("session.renamed", z.unknown(), () => {
-      if (!cancelled) onSessionRenamed();
-    });
+    // Anything that changes the queue (another tab, a drain, a pause) is read again.
+    for (const kind of [
+      "queue.enqueued",
+      "queue.dequeued",
+      "queue.cancelled",
+      "queue.paused",
+      "session.renamed",
+    ])
+      on(kind, z.unknown(), () => {
+        setQueueRevision((value) => value + 1);
+        if (kind === "session.renamed" && !cancelled) onSessionRenamed();
+      });
     source.addEventListener("error", () => dispatch({ type: "connected", value: false }));
     return () => {
       cancelled = true;
@@ -406,7 +479,9 @@ export function App() {
     dispatch({ type: "error", message: null });
     try {
       await postJson(`/api/sessions/${id}/messages`, { text });
-      await reloadEntries(id);
+      // A queued question deliberately does not touch the transcript; refreshing it
+      // would show the same conversation as if nothing had happened.
+      setQueueRevision((value) => value + 1);
     } catch (error) {
       dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
     } finally {
@@ -418,7 +493,8 @@ export function App() {
     const created = await postJson("/api/sessions", { title: "새 대화" }, SessionSchema);
     await reloadSessions();
     dispatch({ type: "active", id: created.id });
-    setSidebarOpen(false);
+    setListOpen(false);
+    go("chat", created.id);
   };
 
   const saveRename = async () => {
@@ -438,8 +514,13 @@ export function App() {
       setConfirmDelete(null);
       const sessions = await reloadSessions(query);
       const next = sessions[0];
-      if (next) dispatch({ type: "active", id: next.id });
-      else dispatch({ type: "active", id: "" });
+      if (next) {
+        dispatch({ type: "active", id: next.id });
+        go("chat", next.id, true);
+      } else {
+        dispatch({ type: "active", id: null });
+        go("chat", null, true);
+      }
     } catch (error) {
       dispatch({ type: "error", message: String(error) });
     }
@@ -492,6 +573,7 @@ export function App() {
       );
       await reloadSessions();
       dispatch({ type: "active", id: created.sessionId });
+      go("chat", created.sessionId);
     } catch (error) {
       dispatch({ type: "error", message: String(error) });
     }
@@ -514,237 +596,108 @@ export function App() {
     );
   if (!authed) return <Login onDone={() => setAuthed(true)} />;
 
+  const active = state.sessions.find((session) => session.id === state.activeId) ?? null;
+  const tabs: readonly { tab: Tab; label: string; testId: string }[] = [
+    { tab: "chat", label: "대화", testId: "tab-chat" },
+    { tab: "work", label: "실행 로그", testId: "tab-work" },
+    { tab: "workflows", label: "워크플로", testId: "tab-workflows" },
+    { tab: "connections", label: "연결", testId: "tab-connections" },
+    { tab: "knowledge", label: "기억", testId: "tab-knowledge" },
+  ];
+
   return (
-    <div className={`shell${sidebarOpen ? " sidebar-open" : ""}`}>
-      <ConversationSidebar
-        sessions={state.sessions}
-        activeId={state.activeId}
-        connected={state.connected}
-        open={sidebarOpen}
-        query={query}
-        renaming={renaming}
-        confirmDelete={confirmDelete}
-        onToggle={() => setSidebarOpen(!sidebarOpen)}
-        onClose={() => setSidebarOpen(false)}
-        onNew={() => void newSession()}
-        onSearch={(value) => void search(value)}
-        onSelect={(id) => {
-          dispatch({ type: "active", id });
-          setSidebarOpen(false);
-        }}
-        onRenameStart={(session) => setRenaming({ id: session.id, title: session.title })}
-        onRenameChange={(title) =>
-          setRenaming((current) => (current ? { id: current.id, title } : current))
-        }
-        onRenameSave={() => void saveRename()}
-        onRenameCancel={() => setRenaming(null)}
-        onDeleteStart={(id) => setConfirmDelete(id)}
-        onDelete={(id) => void removeSession(id)}
-        onDeleteCancel={() => setConfirmDelete(null)}
-      />
-      <main
-        className="conversation"
-        aria-label={
-          view === "chat"
-            ? "대화"
-            : view === "work"
-              ? "작업"
-              : view === "workflows"
-                ? "워크플로"
-                : view === "knowledge"
-                  ? "기억과 파일"
-                  : "연결"
-        }
-      >
-        <nav className="tabs" role="tablist">
-          <button
-            type="button"
+    <div className="shell">
+      <nav className="tabs" role="tablist" aria-label="화면">
+        {/* Real links: the address is the state, so a tab can be opened in a new tab. */}
+        {tabs.map(({ tab, label, testId }) => (
+          <a
+            key={tab}
             role="tab"
-            aria-selected={view === "chat"}
-            data-testid="tab-chat"
-            onClick={() => setView("chat")}
+            href={TAB_PATHS[tab]}
+            aria-selected={route.tab === tab}
+            data-testid={testId}
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+              event.preventDefault();
+              go(tab, tab === "chat" ? state.activeId : null);
+            }}
           >
-            대화
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "work"}
-            data-testid="tab-work"
-            onClick={() => setView("work")}
-          >
-            실행 로그
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "workflows"}
-            data-testid="tab-workflows"
-            onClick={() => setView("workflows")}
-          >
-            워크플로
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "connections"}
-            data-testid="tab-connections"
-            onClick={() => setView("connections")}
-          >
-            연결
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "knowledge"}
-            data-testid="tab-knowledge"
-            onClick={() => setView("knowledge")}
-          >
-            기억
-          </button>
-        </nav>
-        {view === "work" ? (
+            {label}
+          </a>
+        ))}
+      </nav>
+      <main className="conversation" aria-label={tabs.find(({ tab }) => tab === route.tab)?.label}>
+        {route.tab === "work" ? (
           <WorkPanel />
-        ) : view === "workflows" ? (
+        ) : route.tab === "workflows" ? (
           <WorkflowsPanel />
-        ) : view === "connections" ? (
+        ) : route.tab === "connections" ? (
           <ConnectionsPanel />
-        ) : view === "knowledge" ? (
+        ) : route.tab === "knowledge" ? (
           <KnowledgePanel />
         ) : (
-          <>
-            <ol className="messages" data-testid="messages" aria-live="polite">
-              {state.entries
-                .filter((entry) => entry.kind === "message")
-                .map((entry, _index, visible) =>
-                  entry.role === "user" ? (
-                    <li
-                      key={entry.id}
-                      className={`turn user ${entry.status ?? ""}`}
-                      data-testid="entry-user"
-                      data-entry-id={entry.id}
-                    >
-                      <span className="author">
-                        나
-                        {(entry.siblingCount ?? 1) > 1 ? (
-                          <span className="branches">
-                            <button
-                              type="button"
-                              className="icon"
-                              data-testid="branch-prev"
-                              onClick={() => void switchBranch(entry.id, -1)}
-                            >
-                              ‹
-                            </button>
-                            <span data-testid="branch-index">
-                              {entry.siblingIndex}/{entry.siblingCount}
-                            </span>
-                            <button
-                              type="button"
-                              className="icon"
-                              data-testid="branch-next"
-                              onClick={() => void switchBranch(entry.id, 1)}
-                            >
-                              ›
-                            </button>
-                          </span>
-                        ) : null}
-                      </span>
-                      <p className="event text">{conversationText(entry.events)}</p>
-                      <span className="actions">
-                        <button
-                          type="button"
-                          className="link"
-                          data-testid="msg-edit"
-                          onClick={() =>
-                            setEditing({ id: entry.id, text: conversationText(entry.events) })
-                          }
-                        >
-                          수정
-                        </button>
-                        <button
-                          type="button"
-                          className="link"
-                          data-testid="msg-fork"
-                          onClick={() => void fork(entry.id)}
-                        >
-                          분기
-                        </button>
-                      </span>
-                    </li>
-                  ) : (
-                    <li
-                      key={entry.id}
-                      className={`turn assistant ${entry.status ?? ""}`}
-                      data-testid="entry-assistant"
-                      data-entry-id={entry.id}
-                    >
-                      <span className="author">비서</span>
-                      <div className="events">
-                        <ConversationEventList events={entry.events} />
-                      </div>
-                      {entry.status === "streaming" && entry.events.length === 0 ? (
-                        <span className="typing">…</span>
-                      ) : null}
-                      {/* Actions belong to the turn, not to each event: regenerate
-                          once at the end, fork once, nothing repeated. */}
-                      <span className="actions">
-                        {visible.at(-1)?.id === entry.id ? (
-                          <button
-                            type="button"
-                            className="link"
-                            data-testid="msg-regenerate"
-                            onClick={() => void regenerate(entry.id)}
-                          >
-                            재생성
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          className="link"
-                          data-testid="msg-fork"
-                          onClick={() => void fork(entry.id)}
-                        >
-                          분기
-                        </button>
-                      </span>
-                    </li>
-                  ),
-                )}
-            </ol>
-            {editing ? (
-              <div className="edit-form" data-testid="edit-panel">
-                <textarea
-                  data-testid="edit-input"
-                  rows={3}
-                  value={editing.text}
-                  onChange={(event) => setEditing({ id: editing.id, text: event.target.value })}
-                  autoFocus
-                />
-                <span className="row">
-                  <button
-                    type="button"
-                    className="primary"
-                    data-testid="edit-save"
-                    onClick={() => void saveEdit()}
-                  >
-                    저장 후 다시 묻기
-                  </button>
-                  <button type="button" onClick={() => setEditing(null)}>
-                    취소
-                  </button>
-                </span>
-              </div>
-            ) : null}
-            {state.error ? (
-              <p className="error" role="alert" data-testid="chat-error">
-                {state.error}
-              </p>
-            ) : null}
-            <Composer disabled={sending} onSend={(text) => void send(text)} />
-          </>
+          <ChatView
+            sessions={state.sessions}
+            active={active}
+            entries={state.entries}
+            error={state.error}
+            connected={state.connected}
+            query={query}
+            listOpen={listOpen}
+            renaming={renaming}
+            confirmDelete={confirmDelete}
+            editing={editing}
+            queue={queue}
+            onOpenList={() => setListOpen(true)}
+            onCloseList={() => setListOpen(false)}
+            onNew={() => void newSession()}
+            onSearch={(value) => void search(value)}
+            onSelect={(id) => {
+              dispatch({ type: "active", id });
+              setListOpen(false);
+              go("chat", id);
+            }}
+            onRenameStart={(session) => setRenaming({ id: session.id, title: session.title })}
+            onRenameChange={(title) =>
+              setRenaming((current) => (current ? { id: current.id, title } : current))
+            }
+            onRenameSave={() => void saveRename()}
+            onRenameCancel={() => setRenaming(null)}
+            onDeleteStart={(id) => setConfirmDelete(id)}
+            onDelete={(id) => void removeSession(id)}
+            onDeleteCancel={() => setConfirmDelete(null)}
+            onSend={(text) => void send(text)}
+            onQueueCancel={(queueId) => {
+              const id = state.activeId;
+              if (!id) return;
+              void cancelQueued(id, queueId)
+                .catch(reportError)
+                .finally(() => setQueueRevision((value) => value + 1));
+            }}
+            onQueueResume={() => {
+              const id = state.activeId;
+              if (!id) return;
+              void resumeQueue(id)
+                .catch(reportError)
+                .finally(() => setQueueRevision((value) => value + 1));
+            }}
+            onEditStart={(id, text) => setEditing({ id, text })}
+            onEditChange={(text) =>
+              setEditing((current) => (current ? { id: current.id, text } : current))
+            }
+            onEditSave={() => void saveEdit()}
+            onEditCancel={() => setEditing(null)}
+            onRegenerate={(entryId) => void regenerate(entryId)}
+            onFork={(entryId) => void fork(entryId)}
+            onBranch={(entryId, direction) => void switchBranch(entryId, direction)}
+          />
         )}
       </main>
+      {/* `sending` only blocks a second submit of the same box; a running answer never
+          removes the invitation to type. */}
+      <span className="visually-hidden" data-testid="sending" aria-live="polite">
+        {sending ? "전송 중" : ""}
+      </span>
     </div>
   );
 }

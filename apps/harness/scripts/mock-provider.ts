@@ -4,7 +4,10 @@
  *
  * Modes, chosen by the last user message:
  *   contains "파일"  -> tool_call workspace_write, then a final text on the next request
+ *   contains "도구"  -> tool_call stored_file_list (a JSON result), then a final text
  *   contains "메일"  -> tool_call external_action (approval path), then final text
+ *   contains "마크다운" -> a markdown answer with a table, a list, code and refused inputs
+ *   looks like the app's naming instruction -> one JSON title ("긴" asks for a bad reply)
  *   otherwise        -> plain streamed echo
  */
 import { z } from "zod";
@@ -108,8 +111,44 @@ const server = Bun.serve({
         text: `요약: ${prompt.slice(0, 80)}`,
       });
     }
+    // "도구" asks for a search-like tool whose result is JSON, the case the collapsible
+    // card pretty-prints; the account list is a read tool with a JSON answer.
+    if (!hasToolResult && prompt.includes("도구")) {
+      return toolCall("stored_file_list", {});
+    }
     if (!hasToolResult && prompt.includes("메일")) {
       return toolCall("external_action", { summary: `메일 발송: ${prompt.slice(0, 40)}` });
+    }
+    // A naming run is recognized by its instruction, so the app's auto-title path can be
+    // exercised offline like any other conversation. "긴" asks for an unusable reply.
+    if (prompt.includes("너는 대화에 붙일 이름을 짓는다")) {
+      const reply = prompt.includes("긴")
+        ? "이 답변은 제목이 아니라 문장입니다."
+        : '{"title": "오프라인 모의 제목"}';
+      return sse(Array.from(reply));
+    }
+    // "마크다운" asks for every construct the renderer must handle, including two inputs
+    // it must refuse: raw HTML and a script URL.
+    if (prompt.includes("마크다운")) {
+      const reply = [
+        "## 정리",
+        "",
+        "| 항목 | 값 |",
+        "| --- | --- |",
+        "| 상태 | 좋음 |",
+        "",
+        "- 첫째",
+        "- 둘째",
+        "",
+        "`inline code` 그리고 [링크](https://example.com).",
+        "",
+        "```js",
+        "const x = 1;",
+        "```",
+        "",
+        "<script>alert(1)</script> 그리고 [위험](javascript:alert(1))",
+      ].join("\n");
+      return sse(Array.from(reply));
     }
     const reply = `요청을 받았습니다: ${prompt.slice(0, 60)}. 스트리밍 응답입니다.`;
     return sse(Array.from(reply), "stop", Array.from("이 요청에 무엇을 답할지 살펴보는 중입니다."));

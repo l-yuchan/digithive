@@ -36,37 +36,55 @@ function userVersion(db: Database): number {
   );
 }
 
+/** One statement, nothing queued after it: the form whose result is kept. */
+function writeVersion(db: Database, version: number): void {
+  db.exec(`PRAGMA user_version = ${version}`);
+}
+
 /**
- * A new database gets the reset schema; an existing one gets every transition above
- * its recorded `user_version`, one transaction each. The version is read again
- * inside the transaction: the server and the worker open the same file and can both
- * decide to migrate at startup, and only the one that still sees the old version
- * may run the step. A database ahead of this build applies nothing.
+ * Runs the kept steps from `version` up, each in its own transaction, oldest first.
  *
- * A database between the old chain's last version (v10) and the reset (v11) is the
- * live server of the build that shipped v10: it carries that schema already and only
- * needs the kept transitions.
+ * Two things are measured rather than assumed (Bun 1.4.5, Windows):
+ * - while a write transaction is open, a `PRAGMA user_version` read on the same
+ *   connection can still return the value chosen before the transaction began, so a
+ *   step never re-reads the version inside its own transaction: the version travels
+ *   as a parameter, and the recorded value is written after the last step commits.
+ * - `db.transaction(fn)` does not reliably pass the callback value back, so whether
+ *   a step ran is decided by the caller and reported from here.
  */
-export function migrate(db: Database): number {
-  let applied = 0;
-  if (userVersion(db) === 0) {
-    const reset = db.transaction((): boolean => {
-      if (userVersion(db) !== 0) return false;
-      db.exec(RESET_SCHEMA);
-      db.exec(`PRAGMA user_version = ${RESET_VERSION}`);
-      return true;
-    });
-    if (reset()) applied += 1;
-  }
+function runSteps(db: Database, version: number): number {
+  let recorded = version;
   for (const transition of TRANSITIONS) {
-    const run = db.transaction((): boolean => {
-      if (userVersion(db) >= transition.version) return false;
+    if (recorded >= transition.version) continue;
+    const run = db.transaction((): void => {
       db.exec(transition.sql);
       transition.run?.(db);
-      db.exec(`PRAGMA user_version = ${transition.version}`);
-      return true;
     });
-    if (run()) applied += 1;
+    run();
+    recorded = transition.version;
   }
-  return applied;
+  if (recorded !== version) writeVersion(db, recorded);
+  return recorded;
+}
+
+/**
+ * A new database gets the reset schema and is then stepped through the kept
+ * transitions, so both kinds of database end up at the same shape; an existing one
+ * is stepped from its recorded version. Returns how many steps this call ran.
+ *
+ * A database between the old chain's last version (v10) and the reset (v11) carries
+ * that schema already and only needs the kept transitions.
+ */
+export function migrate(db: Database): number {
+  const before = userVersion(db);
+  let version: number;
+  if (before === 0) {
+    db.exec(RESET_SCHEMA);
+    version = RESET_VERSION;
+  } else {
+    version = before;
+  }
+  const after = runSteps(db, version);
+  // Every step on a fresh database is one the reset did not do, plus the reset itself.
+  return before === 0 ? after - RESET_VERSION : after - before;
 }

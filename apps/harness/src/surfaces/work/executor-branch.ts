@@ -17,7 +17,16 @@ function cancelledOutcome(
 ): RunOutcome | null {
   const reason = abortMessage(lease.signal);
   if (reason !== "run_cancelled" && !dbCancelled(deps.db, run.id)) return null;
-  settle(deps.db, deps.events, run, "cancelled", { error: "cancelled" }, now);
+  settle(
+    deps.db,
+    deps.events,
+    run,
+    "cancelled",
+    { error: "cancelled" },
+    now,
+    undefined,
+    deps.hooks,
+  );
   return "cancelled";
 }
 
@@ -66,6 +75,8 @@ export async function executeNonAgent(
           truncated: result.truncated,
         },
         now,
+        undefined,
+        deps.hooks,
       );
       return "failed";
     }
@@ -82,6 +93,8 @@ export async function executeNonAgent(
         truncated: result.truncated,
       },
       now,
+      undefined,
+      deps.hooks,
     );
     return "succeeded";
   } catch (error) {
@@ -93,7 +106,16 @@ export async function executeNonAgent(
         deps.db
           .query("UPDATE runs SET cancel_intent=? WHERE id=?")
           .run(reason === "host_restart" ? "host_restart" : "timeout", run.id);
-      settle(deps.db, deps.events, run, "interrupted", { error: reason }, now);
+      settle(
+        deps.db,
+        deps.events,
+        run,
+        "interrupted",
+        { error: reason },
+        now,
+        undefined,
+        deps.hooks,
+      );
       return "interrupted";
     }
     settle(
@@ -103,6 +125,8 @@ export async function executeNonAgent(
       "failed",
       { error: error instanceof Error ? error.message : "unknown" },
       now,
+      undefined,
+      deps.hooks,
     );
     return "failed";
   }

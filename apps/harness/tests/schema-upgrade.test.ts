@@ -57,7 +57,7 @@ test("a legacy database upgrades to exactly the schema a fresh database starts w
   migrate(fresh);
   expect(upgraded).toEqual(shape(fresh));
   expect(legacy.query<{ user_version: number }, []>("PRAGMA user_version").get()).toEqual({
-    user_version: 12,
+    user_version: 13,
   });
   legacy.close();
   fresh.close();

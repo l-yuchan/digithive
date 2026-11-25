@@ -57,10 +57,16 @@ export function readCookie(header: string | null, name = COOKIE_NAME): string | 
   return null;
 }
 
+/** The tab routes the shell answers, mirrored from app.ts to keep the gate list honest. */
+export const TAB_ROUTE = /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge)\/?$/;
+
 /** Routes that must work before login so the client can render its gate. */
 export function isPublicRoute(path: string, method: string): boolean {
   if (path === "/" || path === "/index.html" || path === "/main.js" || path === "/styles.css")
     return true;
+  // The tab routes (see app.ts TAB_ROUTE) are the client's own: the shell behind them
+  // carries the login gate, exactly like "/". Nothing else becomes public for this.
+  if (TAB_ROUTE.test(path)) return true;
   if (path === "/api/session") return true;
   if (path === "/api/login" && method === "POST") return true;
   if (path === "/api/logout" && method === "POST") return true;

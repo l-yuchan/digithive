@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate, openDatabase, OLDEST_OPENABLE } from "../src/store/db";
-import { LATEST, RESET_VERSION, V12 } from "../src/store/migrations";
+import { LATEST, RESET_VERSION, V13 } from "../src/store/migrations";
 
 function memoryDb(): Database {
   const db = new Database(":memory:");
@@ -94,46 +94,62 @@ describe("store migrations", () => {
   });
 });
 
-describe("a transition is one transaction", () => {
-  /** A database at the latest schema with one entry stored in the pre-event form. */
-  function withLegacyEntry(): Database {
+describe("the kept schema steps", () => {
+  /** A database the reset built, with one entry stored in the pre-event form. */
+  function fresh(): Database {
     const db = new Database(":memory:");
     db.exec("PRAGMA foreign_keys = ON");
     migrate(db);
+    return db;
+  }
+
+  test("a fresh database ends at the latest version and reports the steps it ran", () => {
+    // The count reports the kept steps that ran; the reset is not a transition.
+    const db = new Database(":memory:");
+    expect(migrate(db)).toBe(2);
+    // Each kept step ran on top of the reset, and v13's queue table is in the result.
+    expect(version(db)).toBe(LATEST);
+    expect(
+      db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),
+    ).toEqual({ n: 1 });
+  });
+
+  test("a database one version behind runs exactly the step it lacks", () => {
+    const db = fresh();
+    db.exec(`PRAGMA user_version = ${V13.version - 1}`);
+    expect(migrate(db)).toBe(1);
+    expect(version(db)).toBe(LATEST);
+  });
+
+  test("the v12 step rewrites a stored payload in one call", () => {
+    const db = fresh();
     db.query(
       "INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','kept','now','now')",
     ).run();
     db.query(
       "INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user',?,'now',1)",
     ).run(JSON.stringify({ parts: [{ type: "text", text: "original" }] }));
-    db.exec(`PRAGMA user_version = ${V12.version - 1}`);
-    return db;
-  }
-
-  test("the version bump and the payload rewrite commit together", () => {
-    const db = withLegacyEntry();
-    try {
-      expect(migrate(db)).toBe(1);
-      expect(version(db)).toBe(LATEST);
-      expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
-        payload_json: JSON.stringify({ events: [{ type: "text", id: 0, text: "original" }] }),
-      });
-    } finally {
-      db.close();
-    }
+    // What the build before v12 lacks is only the version; its payload form is the legacy one.
+    db.exec("DROP TABLE session_queue");
+    db.exec(`PRAGMA user_version = ${V13.version - 2}`);
+    expect(migrate(db)).toBe(2);
+    expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
+      payload_json: JSON.stringify({ events: [{ type: "text", id: 0, text: "original" }] }),
+    });
   });
 
-  test("a rewrite that throws leaves the rows and the version untouched", () => {
-    const db = withLegacyEntry();
-    try {
-      db.exec("CREATE TRIGGER boom BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT,'boom'); END");
-      expect(() => migrate(db)).toThrow("boom");
-      expect(version(db)).toBe(V12.version - 1);
-      expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
-        payload_json: JSON.stringify({ parts: [{ type: "text", text: "original" }] }),
-      });
-    } finally {
-      db.close();
-    }
+  test("v13 gives an older database the queue table it lacks", () => {
+    const db = fresh();
+    db.exec("DROP TABLE session_queue");
+    db.exec(`PRAGMA user_version = ${V13.version - 1}`);
+    // OUTSIDE the transaction: whether a step runs is decided by the version read
+    // here, so a no-op body cannot satisfy a step whose schema is missing.
+    const ran = migrate(db);
+    expect(ran).toBe(1);
+    expect(
+      db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),
+    ).toEqual({
+      n: 1,
+    });
   });
 });

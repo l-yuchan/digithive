@@ -43,6 +43,12 @@ export type ConversationDeps = {
   /** Optional: enables threshold compaction of older turns. */
   readonly summarize?: (transcript: string) => Promise<string>;
   readonly maxChars?: number;
+  /**
+   * Called once this turn has settled, before it returns. The app drains the
+   * conversation queue here, so a message typed mid-answer runs next instead of
+   * racing this turn. Absent in tests that only drive one turn.
+   */
+  readonly onSettled?: (input: { sessionId: string; result: TurnResult }) => void;
 };
 
 export type TurnResult = {
@@ -88,23 +94,28 @@ function describeRouting(diagnostic: ProviderDiagnostic): string {
  * unpack a bundle. A deadline abort is recorded as `turn.response.aborted` and the
  * run is settled, never left `running`.
  */
-export async function runTurn(
-  deps: ConversationDeps,
-  input: {
-    readonly sessionId: string;
-    readonly text: string;
-    /** false when the user entry already exists (edit or regenerate). */
-    readonly appendUser?: boolean;
-    /** parent for the assistant entry; defaults to the leaf. */
-    readonly parentId?: string | null;
-  },
-): Promise<TurnResult> {
+/**
+ * A hook failure must never turn a settled turn into a failed one: the answer is
+ * already stored, and the queue has its own pause path.
+ */
+function notifySettled(deps: ConversationDeps, sessionId: string, result: TurnResult): void {
+  try {
+    deps.onSettled?.({ sessionId, result });
+  } catch (error) {
+    console.error("onSettled failed", error);
+  }
+}
+
+/**
+ * Writes the run row and the turn's first entries without calling the model, so a turn
+ * can be claimed by this process and executed separately (`startTurn`). Returns the
+ * run to execute; its status is already `running` under this process's ownership.
+ */
+export function prepareTurn(deps: ConversationDeps, input: TurnInput): { runId: string } {
   const now = deps.now ?? Date.now;
   const limits = deps.limits ?? DEFAULT_LIMITS;
-  const policy = deps.policy ?? BASE_POLICY;
   const startedAt = now();
   const runId = crypto.randomUUID();
-
   deps.db
     .query(
       `INSERT INTO runs (id, session_id, origin, goal, status, lease_owner, lease_expires_at, budget_json, created_at)
@@ -125,7 +136,33 @@ export async function runTurn(
     payload: { runId },
     now: startedAt,
   });
+  return { runId };
+}
 
+export type TurnInput = {
+  readonly sessionId: string;
+  readonly text: string;
+  /** false when the user entry already exists (edit or regenerate). */
+  readonly appendUser?: boolean;
+  /** parent for the assistant entry; defaults to the leaf. */
+  readonly parentId?: string | null;
+};
+
+export async function runTurn(deps: ConversationDeps, input: TurnInput): Promise<TurnResult> {
+  const prepared = prepareTurn(deps, input);
+  return executeTurn(deps, input, prepared.runId);
+}
+
+/** The model call, entries and settlement for a run `prepareTurn` already wrote. */
+export async function executeTurn(
+  deps: ConversationDeps,
+  input: TurnInput,
+  runId: string,
+): Promise<TurnResult> {
+  const now = deps.now ?? Date.now;
+  const limits = deps.limits ?? DEFAULT_LIMITS;
+  const policy = deps.policy ?? BASE_POLICY;
+  const startedAt = now();
   let userEntryId: string;
   if (input.appendUser === false) {
     userEntryId = input.parentId ?? getLeaf(deps.db, input.sessionId) ?? "";
@@ -471,7 +508,14 @@ export async function runTurn(
       payload: { status: "succeeded" },
       now: now(),
     });
-    return { runId, entryId: assistantEntry.id, status: "succeeded", text };
+    const result: TurnResult = {
+      runId,
+      entryId: assistantEntry.id,
+      status: "succeeded",
+      text,
+    };
+    notifySettled(deps, input.sessionId, result);
+    return result;
   } catch (error) {
     const kind = reason(error);
     const interrupted = controller.signal.aborted;
@@ -522,7 +566,14 @@ export async function runTurn(
       payload: { reason: kind },
       now: now(),
     });
-    return { runId, entryId: assistantEntry.id, status: interrupted ? "aborted" : "failed", text };
+    const result: TurnResult = {
+      runId,
+      entryId: assistantEntry.id,
+      status: interrupted ? "aborted" : "failed",
+      text,
+    };
+    notifySettled(deps, input.sessionId, result);
+    return result;
   } finally {
     controller.close();
   }

@@ -9,6 +9,7 @@ import type { StreamFn } from "../../providers/openai";
 import type { ProviderDiagnostic } from "../../providers/router";
 import { ok } from "node:assert/strict";
 import { getRun, type RunRow } from "./record";
+import type { SettleHooks } from "./settle";
 export { executeRun } from "./execution";
 export { getRun, listRuns, withApprovals, type RunRow, type RunView } from "./record";
 export { reconcileWork } from "./reconcile";
@@ -35,6 +36,8 @@ export type WorkDeps = {
   readonly scriptsRoot?: string;
   /** Provider routing decisions (retry, fallback, exhausted) for the execution log. */
   readonly streamDiagnostics?: (diagnostics: readonly ProviderDiagnostic[]) => void;
+  /** Told when any run settles; the app attaches its queue drain and title run. */
+  readonly hooks?: SettleHooks;
   /** Worker SIGTERM/SIGINT: aborts in-flight executors as host_restart. */
   readonly shutdownSignal?: AbortSignal;
 };

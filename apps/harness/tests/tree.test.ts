@@ -241,8 +241,8 @@ describe("conversation tree", () => {
     );
     const found = searchSessions(db, "회의");
     expect(found.map((row) => row.id)).toContain(sessionId);
-    expect(typeof found[0]?.created_at).toBe("string");
-    expect(typeof found[0]?.updated_at).toBe("string");
+    expect(typeof found[0]?.createdAt).toBe("string");
+    expect(typeof found[0]?.updatedAt).toBe("string");
     expect(searchSessions(db, "준비물").map((row) => row.id)).toContain(sessionId);
     expect(searchSessions(db, "없는단어")).toHaveLength(0);
     db.query("UPDATE sessions SET title='뉴스레터 자료' WHERE id=?").run(sessionId);

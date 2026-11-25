@@ -20,6 +20,8 @@ export type EnqueueWorkflowOptions = {
   /** `inline` turns a policy "ask" into a refusal: no approver is present. */
   readonly permissionProfile?: "inline";
   readonly now?: number;
+  /** Overrides the definition instruction as the run goal (the app's own runs only). */
+  readonly goal?: string;
 };
 
 export type PreparedRun = {
@@ -71,7 +73,7 @@ export function enqueueWorkflowRun(
     throw new WorkflowError("workflow_depth_exceeded", { depth: MAX_WORKFLOW_DEPTH });
   }
   const run = enqueueRun(deps.db, deps.events, {
-    goal: workflow.instruction,
+    goal: options.goal ?? workflow.instruction,
     origin: "work",
     executor: workflow.executor,
     timeoutSeconds: workflow.timeoutSeconds,

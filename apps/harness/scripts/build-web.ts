@@ -26,10 +26,25 @@ if (!result.success) {
   process.exit(1);
 }
 
+/**
+ * The shell is also served behind every tab route ("/chat/<id>", "/workflows"), where a
+ * relative asset path resolves inside the route and loads nothing, so web/index.html
+ * references its assets from the server root. A preview opened from a different mount
+ * rewrites those two references back to relative ones.
+ */
 await Bun.write(
   resolve(outdir, "index.html"),
   await Bun.file(resolve(root, "web/index.html")).text(),
 );
+if (process.env["PREVIEW_ASSETS"] === "1") {
+  const shell = await Bun.file(resolve(outdir, "index.html")).text();
+  await Bun.write(
+    resolve(outdir, "index.html"),
+    shell
+      .replace('href="/styles.css"', 'href="./styles.css"')
+      .replace('src="/main.js"', 'src="./main.js"'),
+  );
+}
 await Bun.write(
   resolve(outdir, "styles.css"),
   await Bun.file(resolve(root, "web/src/styles.css")).text(),

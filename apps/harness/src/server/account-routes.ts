@@ -103,8 +103,13 @@ function parseSource(value: string): SourceName | null {
   return SOURCE_NAMES.find((source) => source === value) ?? null;
 }
 
+/**
+ * Sends the browser back to the screen the consent started from. Connecting a Google
+ * account is the 연결 tab's job, so the result (and its reason) is shown there rather
+ * than on the chat tab the root now opens.
+ */
 function redirect(url: URL, query: Record<string, string>): Response {
-  const target = new URL("/", url.origin);
+  const target = new URL("/connections", url.origin);
   for (const [key, value] of Object.entries(query)) target.searchParams.set(key, value);
   return new Response(null, {
     status: 302,

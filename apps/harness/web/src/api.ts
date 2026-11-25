@@ -2,6 +2,8 @@ import { z } from "zod";
 import { EntrySchema, type EventSchema, SessionSchema } from "../../src/core/contracts";
 export { EntrySchema, SessionSchema };
 export type Session = z.infer<typeof SessionSchema>;
+/** Who named a conversation: the default, the app, or the owner. */
+export type TitleSource = NonNullable<Session["titleSource"]>;
 export type ConversationEvent = z.infer<typeof EventSchema>;
 export type Entry = z.infer<typeof EntrySchema>;
 

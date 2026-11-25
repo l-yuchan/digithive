@@ -18,6 +18,19 @@ export function dbCancelled(db: Database, runId: string): boolean {
   return row?.status === "cancelled" || row?.cancel_intent === "user";
 }
 
+/**
+ * Who gets told that a run settled. The app attaches the conversation queue drain
+ * and the conversation-title run here, because every executor ends through this
+ * one path.
+ */
+export type SettleHooks = {
+  readonly onSettled?: (
+    run: RunRow,
+    status: Exclude<RunOutcome, "paused">,
+    payload: Record<string, unknown>,
+  ) => void;
+};
+
 /** Single settlement path for agent, builtin and script executors. */
 export function settle(
   db: Database,
@@ -27,6 +40,7 @@ export function settle(
   payload: Record<string, unknown>,
   now: number,
   detail?: string,
+  hooks?: SettleHooks,
 ): void {
   if (status === "cancelled") {
     const changed = db
@@ -59,6 +73,13 @@ export function settle(
     payload: detail === undefined ? payload : { ...payload, detail },
     now,
   });
+  if (hooks?.onSettled) {
+    try {
+      hooks.onSettled(run, status, payload);
+    } catch (error) {
+      console.error("settle hook failed", error);
+    }
+  }
   if (run.parentRunId) {
     events.append({
       kind: "run.progress",

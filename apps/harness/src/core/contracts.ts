@@ -114,8 +114,10 @@ export function parseEntryEvents(payloadJson: string): ConversationEvent[] {
 export const SessionSchema = z.object({
   id: z.string(),
   title: z.string(),
-  created_at: z.string(),
-  updated_at: z.string(),
+  /* Who named it: still the default, named by the app, or named by the owner. */
+  titleSource: z.enum(["initial", "auto", "user"]).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
 export const EntrySchema = z.object({
   id: z.string(),

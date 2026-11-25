@@ -70,7 +70,7 @@ test("a createHarness conversation offers and executes gmail_search over the Goo
     });
     const session = createSession(harness.deps.db, "뉴스레터");
 
-    const result = await runTurn(harness.deps.conversation, {
+    const result = await runTurn(harness.conversationDeps(), {
       sessionId: session.id,
       text: "지난주 뉴스레터 찾아줘",
     });
@@ -115,7 +115,7 @@ test("gmail_search without stored Google tokens returns an actionable error to t
   const harness = harnessAt(root, model.url);
   try {
     const session = createSession(harness.deps.db, "연결 안 됨");
-    const result = await runTurn(harness.deps.conversation, {
+    const result = await runTurn(harness.conversationDeps(), {
       sessionId: session.id,
       text: "메일 찾아줘",
     });
@@ -233,7 +233,7 @@ test("a createHarness conversation runs personal_data_search from the runtime re
     );
 
     const session = createSession(harness.deps.db, "캐시 검색");
-    const result = await runTurn(harness.deps.conversation, {
+    const result = await runTurn(harness.conversationDeps(), {
       sessionId: session.id,
       text: "저장된 메일에서 회의 찾아줘",
     });

@@ -20,8 +20,7 @@ import {
   setLeaf,
   siblings,
 } from "../core/tree";
-import { runTurn } from "../surfaces/conversation/loop";
-import type { ConversationDeps } from "../surfaces/conversation/loop";
+import type { Conversation } from "../surfaces/conversation/surface";
 import {
   decideApproval,
   enqueueRun,
@@ -52,7 +51,7 @@ import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../s
 export type AppDeps = {
   readonly db: Database;
   readonly events: EventLog;
-  readonly conversation: ConversationDeps;
+  readonly conversation: Conversation;
   readonly work: WorkDeps;
   readonly google: GoogleDeps;
   readonly canvas: {
@@ -161,17 +160,20 @@ function withBranches(db: Database, sessionId: string) {
   });
 }
 
-async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
-  const file = pathname === "/" || pathname === "" ? "index.html" : pathname.replace(/^\/+/, "");
-  if (file.includes("..")) return new Response("not found", { status: 404 });
+/**
+ * The five tab paths are the client's own routes: the shell is served for them so a
+ * reload or a shared link lands on the same tab. The list lives here because the
+ * server must not depend on the web build to know its own routes; web/src/routes.ts
+ * mirrors it and tests/router-contract.test.ts keeps the two equal.
+ */
+import { TAB_ROUTE } from "./auth";
+export { TAB_ROUTE };
+const PAGES = "text/html; charset=utf-8";
+
+async function serveFile(deps: AppDeps, file: string, type: string): Promise<Response | null> {
   for (const root of [deps.webRoot, `${deps.webRoot}/assets`]) {
     const handle = Bun.file(`${root}/${file}`);
-    if (await handle.exists()) {
-      const type = file.endsWith(".js")
-        ? "text/javascript; charset=utf-8"
-        : file.endsWith(".css")
-          ? "text/css; charset=utf-8"
-          : "text/html; charset=utf-8";
+    if (await handle.exists())
       return new Response(handle, {
         // The shell is never stored: a browser always asks which build is current.
         headers: {
@@ -179,22 +181,25 @@ async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
           "cache-control": file === "index.html" ? "no-store" : "no-cache",
         },
       });
-    }
   }
+  return null;
+}
+
+async function serveStatic(deps: AppDeps, pathname: string): Promise<Response> {
+  const page = pathname === "/" || TAB_ROUTE.test(pathname);
+  const file = page ? "index.html" : pathname.replace(/^\/+/, "");
+  if (file.includes("..")) return new Response("not found", { status: 404 });
+  const type = file.endsWith(".js")
+    ? "text/javascript; charset=utf-8"
+    : file.endsWith(".css")
+      ? "text/css; charset=utf-8"
+      : PAGES;
+  const served = await serveFile(deps, file, type);
+  if (served) return served;
   return new Response("client build missing: run `bun run build:web`", { status: 404 });
 }
 
 export function createApp(deps: AppDeps): (request: Request) => Promise<Response> {
-  const start = (
-    sessionId: string,
-    text: string,
-    extra: { appendUser?: boolean; parentId?: string | null } = {},
-  ) => {
-    void runTurn(deps.conversation, { sessionId, text, ...extra }).catch((error: unknown) => {
-      console.error("turn failed", error);
-    });
-  };
-
   return async (request) => {
     const url = new URL(request.url);
     const path = url.pathname;
@@ -238,6 +243,13 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
         readCookie(request.headers.get("cookie"), COOKIE_NAME),
       );
       if (!authenticated) return json({ error: "unauthenticated" }, 401);
+    }
+
+    if (path === "/") {
+      return new Response(null, {
+        status: 302,
+        headers: { location: "/chat", "cache-control": "no-store" },
+      });
     }
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
@@ -460,12 +472,18 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
             sessionId,
             payload: { entryId: result.entry.id, replaced: entryId },
           });
-          start(sessionId, text, { appendUser: false, parentId: result.entry.id });
+          deps.conversation.send(sessionId, text, {
+            appendUser: false,
+            parentId: result.entry.id,
+          });
           return json({ entryId: result.entry.id }, 202);
         }
         if (action === "regenerate") {
           const point = regeneratePoint(deps.db, { sessionId, entryId });
-          start(sessionId, point.userText, { appendUser: false, parentId: point.parentId });
+          deps.conversation.send(sessionId, point.userText, {
+            appendUser: false,
+            parentId: point.parentId,
+          });
           return json({ parentId: point.parentId }, 202);
         }
         const raw = z
@@ -531,6 +549,30 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       }
     }
 
+    /**
+     * The conversation queue: what was typed while a turn was answering. It is read
+     * and edited apart from the transcript, so a queued message never looks answered.
+     */
+    const queueMatch = /^\/api\/sessions\/([^/]+)\/queue(?:\/([^/]+)|\/(resume))?$/.exec(path);
+    if (queueMatch) {
+      const sessionId = queueMatch[1] ?? "";
+      if (!getSession(deps.db, sessionId)) return json({ error: "session_not_found" }, 404);
+      const queueId = queueMatch[2];
+      if (queueId === undefined && queueMatch[3] === undefined && request.method === "GET") {
+        return json(deps.conversation.queue(sessionId));
+      }
+      if (queueMatch[3] === "resume" && request.method === "POST") {
+        const outcome = deps.conversation.resume(sessionId);
+        return json({ resumed: true, ...outcome }, outcome.drained ? 202 : 200);
+      }
+      if (queueId !== undefined && request.method === "DELETE") {
+        const removed = deps.conversation.cancelQueued(sessionId, queueId);
+        if (!removed) return json({ error: "queue_item_not_found" }, 404);
+        return json({ cancelled: true });
+      }
+      return json({ error: "method_not_allowed" }, 405);
+    }
+
     const sessionMatch = /^\/api\/sessions\/([^/]+)(?:\/(entries|messages))?$/.exec(path);
     if (sessionMatch) {
       const id = sessionMatch[1] ?? "";
@@ -547,8 +589,8 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
           .parse(await request.json().catch(() => null));
         const text = typeof raw?.text === "string" ? raw.text.trim() : "";
         if (text.length === 0 || text.length > 8_000) return json({ error: "invalid_text" }, 422);
-        start(id, text);
-        return json({ accepted: true }, 202);
+        const outcome = deps.conversation.send(id, text);
+        return json(outcome, 202);
       }
       if (sessionMatch[2] === undefined && request.method === "PATCH") {
         const raw = z
@@ -567,6 +609,7 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
       }
       if (sessionMatch[2] === undefined && request.method === "DELETE") {
         const result = softDeleteSession(deps.db, id);
+        deps.conversation.discard(id);
         deps.events.append({
           kind: "session.deleted",
           sessionId: id,

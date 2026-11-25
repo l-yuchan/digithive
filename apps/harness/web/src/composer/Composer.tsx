@@ -1,12 +1,18 @@
 import { useRef, useState } from "react";
 import { shouldSubmit } from "./submit";
 
+/**
+ * The message box. It never disables itself for a running answer: what the owner types
+ * while the assistant is answering becomes a queued message, shown above the box until
+ * it runs. Only a turn that has been submitted and not yet accepted is held back by
+ * `busy`, which is a network state, not a reason to stop typing.
+ */
 export function Composer({
-  disabled,
+  busy = false,
   onSend,
 }: {
-  disabled: boolean;
-  onSend: (text: string) => void;
+  readonly busy?: boolean;
+  readonly onSend: (text: string) => void;
 }) {
   const [text, setText] = useState("");
   const composing = useRef(false);
@@ -35,7 +41,7 @@ export function Composer({
         data-testid="chat-input"
         rows={2}
         value={text}
-        placeholder="무엇을 도와드릴까요? (Enter 전송, Shift+Enter 줄바꿈)"
+        placeholder="무엇을 도와드릴까요? 응답 중에 보내면 차례로 실행됩니다."
         onChange={(event) => setText(event.target.value)}
         onCompositionStart={() => {
           composing.current = true;
@@ -59,7 +65,7 @@ export function Composer({
           submit();
         }}
       />
-      <button className="primary" type="submit" data-testid="chat-send" disabled={disabled}>
+      <button className="primary" type="submit" data-testid="chat-send" disabled={busy}>
         보내기
       </button>
     </form>

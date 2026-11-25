@@ -6,6 +6,8 @@ import { settleExpiredRuns } from "../core/run-state";
 import { reconcileWork } from "../surfaces/work/runner";
 import { ensureCollectionWorkflows } from "../workflows/collection";
 import { createApp, type AppDeps } from "./app";
+import { createConversation } from "../surfaces/conversation/surface";
+import { startTitleRun, titleHooks } from "../workflows/title-run";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
 
 export type HarnessConfig = ReturnType<typeof loadConfig>;
@@ -31,6 +33,7 @@ export function createHarness(config: HarnessConfig): {
   handler: (request: Request) => Promise<Response>;
   close: () => void;
   work: AppDeps["work"];
+  conversationDeps: () => ConversationDeps;
 } {
   const runtime = createRuntime(config);
   const { db, events, stream } = runtime.work;
@@ -54,7 +57,7 @@ export function createHarness(config: HarnessConfig): {
     return summary;
   };
 
-  const conversation: ConversationDeps = {
+  const conversationDeps: ConversationDeps = {
     db,
     events,
     stream,
@@ -62,12 +65,22 @@ export function createHarness(config: HarnessConfig): {
     summarize,
     maxChars: config.maxChars,
   };
+  const titleDeps = { db, events };
+  const conversation = createConversation({
+    db,
+    events,
+    turnDeps: () => conversationDeps,
+    startTitle: (sessionId) => startTitleRun(titleDeps, deps.work, sessionId),
+  });
 
   const deps: AppDeps = {
     db,
     events,
     conversation,
-    work: runtime.work,
+    work: {
+      ...runtime.work,
+      hooks: titleHooks(titleDeps),
+    },
     google: {
       db,
       events,
@@ -90,7 +103,17 @@ export function createHarness(config: HarnessConfig): {
     maxUploadBytes: config.maxUploadBytes,
     auth: { passphrase: config.passphrase, secret: config.sessionSecret },
   };
-  return { deps, handler: createApp(deps), close: runtime.close, work: runtime.work };
+  return {
+    deps,
+    handler: createApp(deps),
+    close: () => {
+      conversation.close();
+      runtime.close();
+    },
+    work: deps.work,
+    /** The turn dependencies without the app's settle hook: what a single turn needs. */
+    conversationDeps: () => conversationDeps,
+  };
 }
 
 if (import.meta.main) {

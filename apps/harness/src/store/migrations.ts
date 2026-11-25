@@ -49,7 +49,18 @@ CREATE TABLE sessions (
   archived_at TEXT,
   deleted_at TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}',
-  leaf_id TEXT
+  leaf_id TEXT,
+  title_source TEXT NOT NULL DEFAULT 'initial',
+  queue_paused INTEGER NOT NULL DEFAULT 0
+);
+
+-- Words the owner typed while a turn was already answering. The queue outlives
+-- the process, so a restart resumes it instead of silently dropping the text.
+CREATE TABLE session_queue (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE entries (
@@ -392,11 +403,44 @@ export const V12: Transition = {
   },
 };
 
-/** The newest version this build writes. */
-export const LATEST = V12.version;
+/**
+ * v13 — the conversation queue and who owns a title.
+ *
+ * `session_queue` holds what the owner said while an answer was still arriving, so
+ * turns run one after another instead of racing on the same leaf. `title_source`
+ * records whether a title is still the default (`initial`), was named by the app
+ * (`auto`) or by the owner (`user`), so automatic naming never overwrites a name
+ * someone typed. `queue_paused` stops the queue after a failed turn until the owner
+ * resumes it. Those three columns were built v11..v12, so this step only adds the
+ * empty queue table there.
+ */
+export const V13: Transition = {
+  version: 13,
+  sql: `
+CREATE TABLE IF NOT EXISTS session_queue (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`,
+  run: (db) => {
+    const columns = db
+      .query<{ name: string }, []>("SELECT name FROM pragma_table_info('sessions')")
+      .all()
+      .map((column) => column.name);
+    if (!columns.includes("title_source"))
+      db.run("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'initial'");
+    if (!columns.includes("queue_paused"))
+      db.run("ALTER TABLE sessions ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0");
+  },
+};
 
-/** At most two steps, as the rule requires. */
-export const TRANSITIONS: readonly Transition[] = [V11, V12];
+/** The newest version this build writes. */
+export const LATEST = V13.version;
+
+/** At most two steps, as the rule requires (v11 is retired), oldest first. */
+export const TRANSITIONS: readonly Transition[] = [V12, V13];
 
 /** The executor a shipped job carries: the path, the account, the grant. */
 export function shippedExecutor(

@@ -63,6 +63,8 @@ test("Google callbacks require a valid single-use challenge while account contro
     expect(new URL(replay.headers.get("location") ?? "").searchParams.get("reason")).toBe(
       "state_invalid",
     );
+    // The consent was started from the 연결 tab, so the outcome lands there, not on "/".
+    expect(new URL(expired.headers.get("location") ?? "").pathname).toBe("/connections");
     expect(
       harness.deps.db
         .query(

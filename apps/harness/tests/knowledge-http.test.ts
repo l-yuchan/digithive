@@ -99,7 +99,7 @@ test("a conversation receives live relevant memories but not corrected content",
   let system = "";
   await runTurn(
     {
-      ...harness.deps.conversation,
+      ...harness.conversationDeps(),
       stream: async function* (messages) {
         system = messages.find((message) => message.role === "system")?.content ?? "";
         yield { type: "text_delta", text: "확인" };

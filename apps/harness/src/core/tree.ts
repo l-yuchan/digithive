@@ -1,5 +1,10 @@
+import type { z } from "zod";
+
+/** One row of the session query, as the session mapper reads it. */
+type InferSessionRow = z.infer<typeof SessionRow>;
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { appendEntry, listEntries, type Entry, type Session } from "./sessions";
+import { appendEntry, listEntries, toSession } from "./sessions";
+import type { Entry, Session, SessionRow } from "./sessions";
 import { conversationText } from "./contracts";
 
 function entryById(db: Database, sessionId: string, entryId: string): Entry | null {
@@ -163,27 +168,30 @@ export function forkSession(
 export function searchSessions(db: Database, query: string, limit = 20): Session[] {
   const trimmed = query.trim();
   if (trimmed.length === 0) return [];
+  const columns = "s.id,s.title,s.title_source,s.created_at,s.updated_at";
   try {
     if (trimmed.length >= 3) {
       return db
-        .query<Session, SQLQueryBindings[]>(
-          `SELECT s.id,s.title,s.created_at,s.updated_at FROM sessions s
+        .query<InferSessionRow, SQLQueryBindings[]>(
+          `SELECT ${columns} FROM sessions s
            WHERE s.deleted_at IS NULL AND (s.title LIKE ? OR s.id IN
              (SELECT session_id FROM entries_fts WHERE entries_fts MATCH ?))
            LIMIT ?`,
         )
-        .all(`%${trimmed}%`, `"${trimmed.replace(/"/g, '""')}"`, limit);
+        .all(`%${trimmed}%`, `"${trimmed.replace(/"/g, '""')}"`, limit)
+        .map(toSession);
     }
   } catch {
     // fall through to LIKE for short or unparsable queries
   }
   const like = `%${trimmed}%`;
   return db
-    .query<Session, SQLQueryBindings[]>(
-      `SELECT DISTINCT s.id,s.title,s.created_at,s.updated_at FROM sessions s
+    .query<z.infer<typeof SessionRow>, SQLQueryBindings[]>(
+      `SELECT DISTINCT ${columns} FROM sessions s
        LEFT JOIN entries e ON e.session_id = s.id
        WHERE s.deleted_at IS NULL AND (s.title LIKE ? OR e.payload_json LIKE ?)
        LIMIT ?`,
     )
-    .all(like, like, limit);
+    .all(like, like, limit)
+    .map(toSession);
 }

@@ -7,6 +7,7 @@ import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { createRegistry } from "../src/tools/registry";
 import { createApp, type AppDeps } from "../src/server/app";
+import { createConversation } from "../src/surfaces/conversation/surface";
 import {
   COOKIE_NAME,
   checkPassphrase,
@@ -16,14 +17,15 @@ import {
   verifyCookie,
 } from "../src/server/auth";
 import type { StreamFn } from "../src/providers/openai";
-import type { ConversationDeps } from "../src/surfaces/conversation/loop";
+
 import { enqueueRun, type WorkDeps } from "../src/surfaces/work/runner";
 
 const auth = { passphrase: "correct horse", secret: "test-secret-value" };
 const idle: StreamFn = async function* () {};
-const resources: { db: Database; webRoot: string }[] = [];
+const resources: { db: Database; webRoot: string; close: () => void }[] = [];
 afterAll(() => {
   for (const resource of resources) {
+    resource.close();
     resource.db.close();
     rmSync(resource.webRoot, { recursive: true, force: true });
   }
@@ -34,10 +36,14 @@ function deps(overrides: { passphrase?: string } = {}): AppDeps {
   db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
   const events = new EventLog(db);
-  const conversation: ConversationDeps = { db, events, stream: idle, tools: createRegistry([]) };
+  const conversation = createConversation({
+    db,
+    events,
+    turnDeps: () => ({ db, events, stream: idle, tools: createRegistry([]) }),
+  });
   const work: WorkDeps = { db, events, stream: idle, tools: createRegistry([]), policy: [] };
   const webRoot = mkdtempSync(join(tmpdir(), "harness-web-"));
-  resources.push({ db, webRoot });
+  resources.push({ db, webRoot, close: conversation.close });
   return {
     db,
     events,
@@ -153,7 +159,11 @@ describe("auth gate on the server", () => {
     const fixture = deps();
     const shell = await Bun.file(join(import.meta.dir, "../web/index.html")).text();
     await Bun.write(join(fixture.webRoot, "index.html"), shell);
-    const response = await createApp(fixture)(new Request("http://local/"));
+    // "/" now names the chat tab, so the shell is reached through its own path.
+    const root = await createApp(fixture)(new Request("http://local/"));
+    expect(root.status).toBe(302);
+    expect(root.headers.get("location")).toBe("/chat");
+    const response = await createApp(fixture)(new Request("http://local/chat"));
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/html");
     expect(await response.text()).toBe(shell);

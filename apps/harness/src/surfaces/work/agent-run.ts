@@ -32,7 +32,16 @@ function cancelledOutcome(
 ): RunOutcome | null {
   const reason = abortMessage(lease.signal);
   if (reason !== "run_cancelled" && !dbCancelled(deps.db, run.id)) return null;
-  settle(deps.db, deps.events, run, "cancelled", { error: "cancelled" }, now);
+  settle(
+    deps.db,
+    deps.events,
+    run,
+    "cancelled",
+    { error: "cancelled" },
+    now,
+    undefined,
+    deps.hooks,
+  );
   return "cancelled";
 }
 
@@ -245,7 +254,7 @@ export async function executeAgent(
 
     assertActive();
     saveState(deps.db, run, state);
-    settle(deps.db, deps.events, run, "succeeded", { text }, now());
+    settle(deps.db, deps.events, run, "succeeded", { text }, now(), undefined, deps.hooks);
     return "succeeded";
   } catch (error) {
     // The provider's own words (status, upstream message) are the owner's diagnostic.
@@ -269,6 +278,7 @@ export async function executeAgent(
       { error: message },
       now(),
       detail,
+      deps.hooks,
     );
     return interrupted ? "interrupted" : "failed";
   }

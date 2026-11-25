@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../src/store/db";
-import { RESET_VERSION } from "../src/store/migrations";
 import { EventLog } from "../src/events/log";
 import { installJobs, JOB_FILES, JOB_SOURCE_ROOT } from "../src/jobs/install";
 import { jobTools, listJobAccounts } from "../src/tools/jobs";
@@ -26,104 +25,14 @@ function fresh(): Database {
   return db;
 }
 
-/**
- * A database as the build that shipped v10 left it: builtin executors and a recorded
- * version one below the kept v11 transition, which is the state the upgrade repairs.
- * `entries` is the executor per workflow; the rows are written before the version
- * moves, exactly like the old build stored them.
- */
-function atV10(entries: readonly [string, string, unknown][]): Database {
-  const db = new Database(":memory:");
-  databases.push(db);
-  db.exec("PRAGMA foreign_keys=ON");
-  migrate(db);
-  db.transaction(() => {
-    db.exec("PRAGMA foreign_keys=OFF");
-    db.query("DELETE FROM schedules").run();
-    db.query("DELETE FROM workflows_fts").run();
-    db.query("DELETE FROM workflows").run();
-    for (const [id, title, executor] of entries) {
-      db.query(
-        "INSERT INTO workflows(id,title,instruction,executor_json,params_json,timeout_seconds,created_at,updated_at) VALUES (?,?,?,?, '[]', 60, 'now', 'now')",
-      ).run(id, title, `${title} 지시`, JSON.stringify(executor));
-    }
-    db.exec(`PRAGMA user_version = ${RESET_VERSION - 1}`);
-  })();
+/** An installed-then-edited definition: the search index must follow the stored row. */
+function withWorkflow(id: string, title: string, executor: unknown): Database {
+  const db = fresh();
+  db.query(
+    "INSERT INTO workflows(id,title,instruction,executor_json,params_json,timeout_seconds,created_at,updated_at) VALUES (?,?,?,?, '[]', 60, 'now', 'now')",
+  ).run(id, title, `${title} 지시`, JSON.stringify(executor));
   return db;
 }
-
-function executorOf(db: Database, id: string): unknown {
-  const row = db
-    .query<{ executor_json: string }, [string]>("SELECT executor_json FROM workflows WHERE id = ?")
-    .get(id);
-  return row === null ? null : JSON.parse(row.executor_json);
-}
-
-describe("v11 turns stored builtin executors into script jobs", () => {
-  test("a collection builtin keeps its account as the script argument and drops its source list", () => {
-    const db = atV10([
-      [
-        "wf-collect",
-        "연결 자료 수집 · A",
-        { kind: "builtin", name: "sync_sources", accountId: "acct-a", sources: ["gmail"] },
-      ],
-    ]);
-    expect(migrate(db)).toBe(2);
-    // No stored source list: a source switched off after this save must stop the
-    // next run, which only holds when the run asks the account at that moment.
-    expect(executorOf(db, "wf-collect")).toEqual({
-      kind: "script",
-      path: "jobs/collection.ts",
-      args: ["acct-a"],
-      capabilities: ["account.read"],
-    });
-  });
-
-  test("a briefing builtin becomes the shipped briefing job with its two capabilities", () => {
-    const db = atV10([["wf-brief", "아침 브리핑", { kind: "builtin", name: "briefing" }]]);
-    migrate(db);
-    expect(executorOf(db, "wf-brief")).toEqual({
-      kind: "script",
-      path: "jobs/briefing.ts",
-      args: [],
-      capabilities: ["account.read", "mail.send"],
-    });
-  });
-
-  test("a seeded definition naming a job file that was never installed is repaired", () => {
-    // The seed published this path before the file existed, so it could not run.
-    const db = atV10([
-      [
-        "wf-system-briefing-morning",
-        "아침 브리핑",
-        { kind: "script", path: "jobs/briefing.ts", args: [] },
-      ],
-    ]);
-    migrate(db);
-    expect(executorOf(db, "wf-system-briefing-morning")).toEqual({
-      kind: "script",
-      path: "jobs/briefing.ts",
-      args: [],
-      capabilities: ["account.read", "mail.send"],
-    });
-  });
-
-  test("the owner's own missing script is left alone", () => {
-    const db = atV10([
-      ["wf-mine", "내 작업", { kind: "script", path: "mine/report.ts", args: [] }],
-    ]);
-    migrate(db);
-    expect(executorOf(db, "wf-mine")).toMatchObject({ path: "mine/report.ts" });
-  });
-
-  test("running the chain again rewrites nothing", () => {
-    const db = atV10([
-      ["wf-collect", "수집", { kind: "builtin", name: "sync_sources", accountId: "acct-a" }],
-    ]);
-    expect(migrate(db)).toBe(2);
-    expect(migrate(db)).toBe(0);
-  });
-});
 
 describe("the app's jobs are ordinary scripts", () => {
   test("every job file is planted verbatim under the scripts root", () => {
@@ -142,13 +51,13 @@ describe("the app's jobs are ordinary scripts", () => {
   });
 
   test("a rewritten definition stays findable by its title", () => {
-    const db = atV10([
-      [
-        "wf-collect",
-        "연결 자료 수집 · A",
-        { kind: "builtin", name: "sync_sources", accountId: "acct-a" },
-      ],
-    ]);
+    const db = withWorkflow("wf-collect", "연결 자료 수집 · A", {
+      kind: "script",
+      path: "jobs/collection.ts",
+      args: ["acct-a"],
+      capabilities: ["account.read"],
+    });
+    // The store indexes on write; re-running the search reads the same row back.
     migrate(db);
     expect(searchWorkflowIds(db, { keyword: "연결 자료" }).map((hit) => hit.id)).toContain(
       "wf-collect",
