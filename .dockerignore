@@ -1,8 +1,0 @@
-node_modules
-data
-backups
-.git
-.omo
-public/app.js
-*.md
-tests
