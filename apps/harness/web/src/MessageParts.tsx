@@ -10,10 +10,13 @@ export function MessageParts({ parts }: { readonly parts: readonly Part[] }) {
           </p>
         );
       case "reasoning":
+        // Closed by default: the model's internal reasoning stays reachable but never
+        // becomes the visible answer, and it is frequently not in the user's language.
         return (
-          <p key={index} className="reasoning">
-            {part.text}
-          </p>
+          <details key={index} className="reasoning" data-testid="reasoning">
+            <summary>생각 과정</summary>
+            <p>{part.text}</p>
+          </details>
         );
       case "tool_call":
         return (

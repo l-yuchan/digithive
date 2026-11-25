@@ -150,10 +150,20 @@ body {
 }
 
 .bubble .reasoning {
-  margin: 0;
+  margin: 6px 0 0;
   color: var(--muted);
+  font-size: 12px;
+}
+
+.bubble .reasoning summary {
+  cursor: pointer;
+}
+
+.bubble .reasoning p {
+  margin: 4px 0 0;
   font-style: italic;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .bubble.aborted {
