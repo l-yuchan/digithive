@@ -1,5 +1,7 @@
 # 기억과 파일 표면
 
+상태: **출하됨.** 아래 계약은 이 문서 작성 뒤 도구(`memory_*`, `stored_file_*`)·API·화면(지식 탭)에 붙었다.
+
 ## 왜
 
 자산 이전(W6)은 `src/knowledge/memory.ts`와 `src/files/store.ts`를 코드와 테스트로
