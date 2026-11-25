@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { openDatabase } from "./store/db";
 import { EventLog } from "./events/log";
@@ -6,6 +6,8 @@ import { createRegistry } from "./tools/registry";
 import { builtinTools, WORK_POLICY } from "./tools/builtins";
 import { personalTools } from "./tools/personal";
 import { scheduleTools } from "./tools/schedules";
+import { memoryTools } from "./tools/memory";
+import { fileTools } from "./tools/files";
 import { createBuiltinExecutor } from "./scheduler/builtins";
 import { openAiStream } from "./providers/openai";
 import { settleExpiredRuns } from "./core/run-state";
@@ -26,6 +28,8 @@ export type HarnessConfig = {
   readonly dbPath: string;
   readonly webRoot: string;
   readonly workspaceRoot: string;
+  readonly filesRoot: string;
+  readonly maxUploadBytes: number;
   readonly scriptsRoot: string;
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -53,12 +57,20 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     );
   }
   const dataDir = resolve(appRoot, "data");
+  const dbPath = resolve(env["HARNESS_DB"] ?? join(dataDir, "harness.db"));
   const workspaceRoot = resolve(env["HARNESS_WORKSPACE"] ?? join(dataDir, "workspace"));
   return {
     port: Number(env["PORT"] ?? "8799"),
-    dbPath: resolve(env["HARNESS_DB"] ?? join(dataDir, "harness.db")),
+    dbPath,
     webRoot: resolve(appRoot, "web/dist"),
     workspaceRoot,
+    filesRoot: resolve(env["HARNESS_FILES"] ?? join(dirname(dbPath), "files")),
+    maxUploadBytes: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(100 * 1024 * 1024)
+      .parse(env["HARNESS_MAX_UPLOAD_BYTES"] ?? 10 * 1024 * 1024),
     scriptsRoot: resolve(env["HARNESS_SCRIPTS_ROOT"] ?? join(workspaceRoot, "..", "scripts")),
     baseUrl: env["MODEL_BASE_URL"] ?? "http://127.0.0.1:8798/v1",
     apiKey: env["MODEL_API_KEY"] ?? "local",
@@ -107,6 +119,8 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
       },
     }),
     ...scheduleTools({ db, events }),
+    ...memoryTools(db),
+    ...fileTools(db),
   ]);
   const work: WorkDeps = {
     db,

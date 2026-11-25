@@ -16,6 +16,7 @@ import { ConversationSidebar, type RenameTarget } from "./sidebar/ConversationSi
 import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { SchedulesPanel } from "./schedules/SchedulesPanel";
+import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { hasOAuthResult } from "./connections/oauth";
 import { Login } from "./auth/Login";
 import { MessageParts } from "./MessageParts";
@@ -146,8 +147,8 @@ export function App() {
   const [renaming, setRenaming] = useState<RenameTarget | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"chat" | "work" | "connections" | "schedules">(() =>
-    hasOAuthResult(window.location.search) ? "connections" : "chat",
+  const [view, setView] = useState<"chat" | "work" | "connections" | "schedules" | "knowledge">(
+    () => (hasOAuthResult(window.location.search) ? "connections" : "chat"),
   );
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -427,7 +428,9 @@ export function App() {
               ? "작업"
               : view === "schedules"
                 ? "스케줄"
-                : "연결"
+                : view === "knowledge"
+                  ? "기억과 파일"
+                  : "연결"
         }
       >
         <nav className="tabs" role="tablist">
@@ -467,6 +470,15 @@ export function App() {
           >
             연결
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === "knowledge"}
+            data-testid="tab-knowledge"
+            onClick={() => setView("knowledge")}
+          >
+            기억
+          </button>
         </nav>
         {view === "work" ? (
           <WorkPanel />
@@ -474,6 +486,8 @@ export function App() {
           <SchedulesPanel />
         ) : view === "connections" ? (
           <ConnectionsPanel />
+        ) : view === "knowledge" ? (
+          <KnowledgePanel />
         ) : (
           <>
             <ol className="messages" data-testid="messages" aria-live="polite">

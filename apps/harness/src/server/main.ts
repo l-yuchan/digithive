@@ -69,6 +69,8 @@ export function createHarness(config: HarnessConfig): {
       subject: config.vapidSubject,
     },
     webRoot: resolve(config.webRoot),
+    filesRoot: config.filesRoot,
+    maxUploadBytes: config.maxUploadBytes,
     auth: { passphrase: config.passphrase, secret: config.sessionSecret },
   };
   return { deps, handler: createApp(deps), close: runtime.close, work: runtime.work };

@@ -3,6 +3,7 @@ import type { EventLog } from "../../events/log";
 import { appendEntry, updateEntryParts, type Part } from "../../core/sessions";
 import { getLeaf, pathEntries, setLeaf } from "../../core/tree";
 import { buildContext } from "../../core/context";
+import { recallMemories } from "../../knowledge/memory";
 import { latestCompaction, maybeCompact } from "../../core/compaction";
 import { BASE_POLICY, decide, type PolicyRule } from "../../core/policy";
 import { leaseExpiry } from "../../core/run-state";
@@ -179,6 +180,14 @@ export async function runTurn(
     const built = buildContext({
       now: startedAt,
       history,
+      memories: recallMemories(deps.db, input.text).map((memory) =>
+        JSON.stringify({
+          id: memory.id,
+          kind: memory.kind,
+          text: memory.text.slice(0, 1000),
+          truncated: memory.text.length > 1000,
+        }),
+      ),
       tools: specs(deps.tools).map((tool) => ({ name: tool.name, description: tool.description })),
       compaction,
       ...(deps.maxChars === undefined ? {} : { budget: { maxChars: deps.maxChars } }),

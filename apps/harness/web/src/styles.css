@@ -655,6 +655,7 @@ a.ghost {
 
 /* Account and schedule management use the existing dark surfaces and spacing rhythm. */
 .accounts,
+.knowledge,
 .schedules {
   display: flex;
   flex-direction: column;
@@ -663,7 +664,8 @@ a.ghost {
   max-width: 100%;
 }
 
-.schedules {
+.schedules,
+.knowledge {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -789,12 +791,70 @@ button.ghost.danger-button {
   margin: 0;
 }
 
-.schedule-columns {
+.schedule-columns,
+.knowledge-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: var(--space-3);
   min-width: 0;
+}
+
+.knowledge-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-section .form-fields,
+.knowledge-section .run-actions {
+  margin-top: 0;
+}
+
+.knowledge-section .form-fields > button {
+  align-self: flex-start;
+}
+
+.knowledge-list-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.knowledge-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-list li {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.knowledge-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.knowledge-list .form-fields {
+  width: 100%;
+}
+
+.knowledge-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.knowledge-section .run-meta {
+  margin: 0;
 }
 
 .schedule-list-section,
@@ -924,7 +984,8 @@ button.ghost.danger-button {
 }
 
 @media (max-width: 900px) {
-  .schedule-columns {
+  .schedule-columns,
+  .knowledge-columns {
     grid-template-columns: minmax(0, 1fr);
   }
 }

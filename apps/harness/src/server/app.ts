@@ -44,6 +44,7 @@ import { listAccounts } from "../integrations/accounts";
 import { syncEnabledSources } from "../integrations/sync";
 import { handleAccountRequest } from "./account-routes";
 import { handleScheduleRequest } from "./schedule-routes";
+import { handleKnowledgeRequest } from "./knowledge-routes";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
 import { latestBriefing, runBriefing } from "../scheduler/compose";
 import { syncStates } from "../integrations/normalize";
@@ -61,6 +62,8 @@ export type AppDeps = {
   };
   readonly vapid: PushConfig;
   readonly webRoot: string;
+  readonly filesRoot?: string;
+  readonly maxUploadBytes?: number;
   readonly auth: AuthConfig;
 };
 
@@ -223,6 +226,12 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
+    const knowledgeResponse = await handleKnowledgeRequest(request, {
+      db: deps.db,
+      filesRoot: deps.filesRoot ?? `${deps.webRoot}/../files`,
+      maxUploadBytes: deps.maxUploadBytes ?? 10 * 1024 * 1024,
+    });
+    if (knowledgeResponse) return knowledgeResponse;
 
     const accountResponse = await handleAccountRequest(request, deps);
     if (accountResponse) return accountResponse;
