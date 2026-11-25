@@ -3,6 +3,7 @@ import type { EventLog } from "../events/log";
 import type { AccountRecord } from "../integrations/account-store";
 import { COLLECTION_SCRIPT, createWorkflow, deleteWorkflow } from "../workflows/workflow-store";
 import { createBinding } from "../scheduler/schedule-store";
+import { shippedExecutor } from "../store/migrations";
 
 /** One collection workflow per account, bound to a 15-minute schedule. */
 export const COLLECTION_INTERVAL_SECONDS = 900;
@@ -14,12 +15,7 @@ export const COLLECTION_INTERVAL_SECONDS = 900;
  * so turning a feature off stops collection without an edit.
  */
 export function collectionExecutor(accountId: string) {
-  return {
-    kind: "script" as const,
-    path: COLLECTION_SCRIPT,
-    args: [accountId],
-    capabilities: ["account.read" as const],
-  };
+  return shippedExecutor("collection", accountId);
 }
 
 /** True for a workflow that collects one account, however it was created. */

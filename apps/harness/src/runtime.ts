@@ -13,7 +13,6 @@ import { memoryTools } from "./tools/memory";
 import { fileTools } from "./tools/files";
 import { jobTools } from "./tools/jobs";
 import { installJobs } from "./jobs/install";
-import { migrateBuiltinExecutors } from "./store/job-migration";
 import { createRoutingStream, type ProviderRouteConfig } from "./providers/router";
 import { settleExpiredRuns } from "./core/run-state";
 import {
@@ -116,7 +115,6 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   // paths this build actually ships.
   installJobs(config.scriptsRoot);
   const db = openDatabase(config.dbPath);
-  migrateBuiltinExecutors(db, { scriptsRoot: config.scriptsRoot });
   const events = new EventLog(db);
   const primary: ProviderRouteConfig = {
     name: "primary",
@@ -166,13 +164,15 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     ...scheduleTools({ db, events }),
     ...memoryTools(db),
     ...fileTools(db),
-    ...jobTools({ db, events, google: googleDeps, canvas: canvasDeps, push: pushConfig }),
+    // Only the app's own jobs reach these, and in production the jobs are their
+    // own files under HARNESS_SCRIPTS_ROOT, never this process's tools.
+    ...(installJobs(config.scriptsRoot)
+      ? jobTools({ db, events, google: googleDeps, canvas: canvasDeps, push: pushConfig })
+      : []),
   ]);
   // Scripts are separate processes, so the SDK is a loopback bridge plus a
   // generated module; both exist only while the runtime is alive.
   const sdk = new SdkBridge({ tools });
-  // The app's own jobs are ordinary scripts under the scripts root, refreshed on
-  // every start so an upgraded app never leaves a stale copy behind.
   syncSdkFile(config.scriptsRoot);
   const work: WorkDeps = {
     db,

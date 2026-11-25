@@ -1,39 +1,37 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-/** The job sources ship in the app's `jobs/` directory, beside `src/` and `scripts/`. */
+/**
+ * The app's workflow scripts ship in `jobs/`, beside `src/`: they are product
+ * files, never server code. The container copies them to `/app/jobs` and runs with
+ * `HARNESS_SCRIPTS_ROOT=/app/jobs`, so a script's own `../.digithive/sdk.ts`
+ * import resolves to the generated SDK exactly like it does in the checkout.
+ *
+ * While the scripts root does happen to be the checkout's `jobs/` parent, the
+ * install is a no-op: a local run must never overwrite the files under version
+ * control. Anywhere else (tests, a fresh root) the shipped files are planted.
+ */
 export const JOB_SOURCE_ROOT = resolve(import.meta.dir, "..", "..", "jobs");
 
-/** The app's own script jobs, installed under the scripts root at every start. */
+/** The app's own script jobs, planted under the scripts root at every start. */
 export const JOB_FILES = ["collection.ts", "briefing.ts"] as const;
 export type JobFile = (typeof JOB_FILES)[number];
 
-/**
- * A job script reaches the app only through the SDK and the bridge, and it lives
- * one directory below the scripts root, so its `../.digithive/sdk.ts` import is
- * already correct wherever the root is — unless the root is the app directory
- * itself, where that relative import would climb out of the scripts root. In that
- * case the copy is written with the SDK's absolute path instead.
- */
-function sourceFor(scriptsRoot: string, file: JobFile): string {
-  const source = readFileSync(join(JOB_SOURCE_ROOT, file), "utf8");
-  const sdk = join(scriptsRoot, ".digithive", "sdk.ts");
-  // `<root>/../.digithive/sdk.ts` is the same file only when the root is the app root.
-  return resolve(scriptsRoot) === resolve(JOB_SOURCE_ROOT, "..")
-    ? source
-    : source.replace('"../.digithive/sdk.ts"', JSON.stringify(sdk.split("\\").join("/")));
+function sourceOf(file: JobFile): string {
+  return readFileSync(join(JOB_SOURCE_ROOT, file), "utf8");
 }
 
-/** Rewrites a job only when its content changed, so a stable root stays quiet. */
+/** Copies a job only when its content differs. Returns the paths that changed. */
 export function installJobs(scriptsRoot: string): string[] {
   const target = join(scriptsRoot, "jobs");
+  if (resolve(target) === JOB_SOURCE_ROOT) return [];
   mkdirSync(target, { recursive: true });
   const written: string[] = [];
   for (const file of JOB_FILES) {
     const path = join(target, file);
-    const content = sourceFor(scriptsRoot, file);
+    const content = sourceOf(file);
     if (existsSync(path) && readFileSync(path, "utf8") === content) continue;
-    writeFileSync(path, content, "utf8");
+    copyFileSync(join(JOB_SOURCE_ROOT, file), path);
     written.push(path);
   }
   return written;

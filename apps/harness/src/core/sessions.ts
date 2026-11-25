@@ -136,44 +136,47 @@ export function appendEntry(
     readonly now?: number;
   },
 ): Entry {
-  const seqRow = db
-    .query<
-      {
-        next: number;
-      },
-      SQLQueryBindings[]
-    >("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM entries WHERE session_id = ?")
-    .get(input.sessionId);
-  ok(seqRow, "sequence query returns one aggregate row");
-  const id = crypto.randomUUID();
-  const createdAt = new Date(input.now ?? Date.now()).toISOString();
-  const status = input.status ?? "complete";
-  db.query(
-    "INSERT INTO entries (id, session_id, parent_id, kind, role, status, payload_json, created_at, seq) VALUES (?,?,?,?,?,?,?,?,?)",
-  ).run(
-    id,
-    input.sessionId,
-    input.parentId ?? null,
-    input.kind,
-    input.role ?? null,
-    status,
-    JSON.stringify({ events: input.events }),
-    createdAt,
-    seqRow.next,
-  );
-  db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(createdAt, input.sessionId);
-  indexEvents(db, id, input.sessionId, input.events);
-  return {
-    id,
-    sessionId: input.sessionId,
-    parentId: input.parentId ?? null,
-    kind: input.kind,
-    role: input.role ?? null,
-    status,
-    events: input.events,
-    createdAt,
-    seq: seqRow.next,
-  };
+  const now = input.now ?? Date.now();
+  return db.transaction((): Entry => {
+    const seqRow = db
+      .query<
+        {
+          next: number;
+        },
+        SQLQueryBindings[]
+      >("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM entries WHERE session_id = ?")
+      .get(input.sessionId);
+    ok(seqRow, "sequence query returns one aggregate row");
+    const id = crypto.randomUUID();
+    const createdAt = new Date(now).toISOString();
+    const status = input.status ?? "complete";
+    db.query(
+      "INSERT INTO entries (id, session_id, parent_id, kind, role, status, payload_json, created_at, seq) VALUES (?,?,?,?,?,?,?,?,?)",
+    ).run(
+      id,
+      input.sessionId,
+      input.parentId ?? null,
+      input.kind,
+      input.role ?? null,
+      status,
+      JSON.stringify({ events: input.events }),
+      createdAt,
+      seqRow.next,
+    );
+    db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(createdAt, input.sessionId);
+    if (indexText(input.events).length > 0) indexEntry(db, id, input.sessionId, input.events);
+    return {
+      id,
+      sessionId: input.sessionId,
+      parentId: input.parentId ?? null,
+      kind: input.kind,
+      role: input.role ?? null,
+      status,
+      events: input.events,
+      createdAt,
+      seq: seqRow.next,
+    };
+  })();
 }
 
 /**
@@ -203,31 +206,32 @@ export function updateEntryEvents(
     status,
     entryId,
   );
-  if (sessionId) indexEvents(db, entryId, sessionId, events);
+  if (sessionId) indexEntry(db, entryId, sessionId, events);
 }
 
-function indexEvents(
+/** What a session search reads from an entry: its spoken text, trimmed. */
+export function indexText(events: readonly ConversationEvent[]): string {
+  return events
+    .filter((event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text")
+    .map((event) => event.text)
+    .join("\n")
+    .trim();
+}
+
+function indexEntry(
   db: Database,
   entryId: string,
   sessionId: string,
   events: readonly ConversationEvent[],
 ): void {
-  const text = events
-    .filter((event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text")
-    .map((event) => event.text)
-    .join("\n")
-    .trim();
-  try {
-    db.query("DELETE FROM entries_fts WHERE entry_id = ?").run(entryId);
-    if (text.length >= 3)
-      db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?, ?, ?)").run(
-        entryId,
-        sessionId,
-        text,
-      );
-  } catch {
-    // an older database without the FTS table keeps working; search falls back to LIKE
-  }
+  const text = indexText(events);
+  db.query("DELETE FROM entries_fts WHERE entry_id = ?").run(entryId);
+  if (text.length >= 3)
+    db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?, ?, ?)").run(
+      entryId,
+      sessionId,
+      text,
+    );
 }
 
 export function listEntries(db: Database, sessionId: string): Entry[] {
@@ -237,24 +241,4 @@ export function listEntries(db: Database, sessionId: string): Entry[] {
     )
     .all(sessionId)
     .map((row) => toEntry(EntryRow.parse(row)));
-}
-
-export function historyMessages(
-  db: Database,
-  sessionId: string,
-): { role: "user" | "assistant"; content: string }[] {
-  const out: { role: "user" | "assistant"; content: string }[] = [];
-  for (const entry of listEntries(db, sessionId)) {
-    if (entry.kind !== "message") continue;
-    if (entry.role !== "user" && entry.role !== "assistant") continue;
-    const text = entry.events
-      .filter(
-        (event): event is Extract<ConversationEvent, { type: "text" }> => event.type === "text",
-      )
-      .map((event) => event.text)
-      .join("");
-    if (text.length === 0) continue;
-    out.push({ role: entry.role, content: text });
-  }
-  return out;
 }

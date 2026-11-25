@@ -1,49 +1,55 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../src/store/db";
+import { RESET_VERSION } from "../src/store/migrations";
 import { EventLog } from "../src/events/log";
-import { migrateBuiltinExecutors } from "../src/store/job-migration";
 import { installJobs, JOB_FILES, JOB_SOURCE_ROOT } from "../src/jobs/install";
 import { jobTools, listJobAccounts } from "../src/tools/jobs";
 import { allowedTools } from "../src/sdk/capabilities";
 import { collectionExecutor } from "../src/workflows/collection";
 import { searchWorkflowIds } from "../src/workflows/workflow-search";
 
-const resources: { db: Database; root: string }[] = [];
+const databases: Database[] = [];
 
 afterEach(() => {
-  for (const resource of resources.splice(0)) {
-    resource.db.close();
-    rmSync(resource.root, { recursive: true, force: true });
-  }
+  for (const db of databases.splice(0)) db.close();
 });
 
-function fresh(scriptsRoot = mkdtempSync(join(tmpdir(), "harness-jobs-"))) {
+function fresh(): Database {
   const db = new Database(":memory:");
-  resources.push({ db, root: scriptsRoot });
+  databases.push(db);
   db.exec("PRAGMA foreign_keys=ON");
   migrate(db);
-  // The seeded definitions are builtin rows until `migrateBuiltinExecutors` runs in
-  // the real startup path; these tests start from an empty workflow table instead.
-  db.query("DELETE FROM schedules").run();
-  db.query("DELETE FROM workflows").run();
-  db.query("DELETE FROM workflows_fts").run();
-  return { db, scriptsRoot };
+  return db;
 }
 
-function installScripts(scriptsRoot: string): void {
-  mkdirSync(join(scriptsRoot, "jobs"), { recursive: true });
-  for (const file of JOB_FILES)
-    cpSync(join(JOB_SOURCE_ROOT, file), join(scriptsRoot, "jobs", file));
-}
-
-function insertWorkflow(db: Database, id: string, title: string, executor: unknown): void {
-  db.query(
-    "INSERT INTO workflows(id,title,instruction,executor_json,params_json,timeout_seconds,created_at,updated_at) VALUES (?,?,?,?, '[]', 60, 'now', 'now')",
-  ).run(id, title, `${title} 지시`, JSON.stringify(executor));
+/**
+ * A database as the build that shipped v10 left it: builtin executors and a recorded
+ * version one below the kept v11 transition, which is the state the upgrade repairs.
+ * `entries` is the executor per workflow; the rows are written before the version
+ * moves, exactly like the old build stored them.
+ */
+function atV10(entries: readonly [string, string, unknown][]): Database {
+  const db = new Database(":memory:");
+  databases.push(db);
+  db.exec("PRAGMA foreign_keys=ON");
+  migrate(db);
+  db.transaction(() => {
+    db.exec("PRAGMA foreign_keys=OFF");
+    db.query("DELETE FROM schedules").run();
+    db.query("DELETE FROM workflows_fts").run();
+    db.query("DELETE FROM workflows").run();
+    for (const [id, title, executor] of entries) {
+      db.query(
+        "INSERT INTO workflows(id,title,instruction,executor_json,params_json,timeout_seconds,created_at,updated_at) VALUES (?,?,?,?, '[]', 60, 'now', 'now')",
+      ).run(id, title, `${title} 지시`, JSON.stringify(executor));
+    }
+    db.exec(`PRAGMA user_version = ${RESET_VERSION - 1}`);
+  })();
+  return db;
 }
 
 function executorOf(db: Database, id: string): unknown {
@@ -55,15 +61,14 @@ function executorOf(db: Database, id: string): unknown {
 
 describe("v11 turns stored builtin executors into script jobs", () => {
   test("a collection builtin keeps its account as the script argument and drops its source list", () => {
-    const { db, scriptsRoot } = fresh();
-    insertWorkflow(db, "wf-collect", "연결 자료 수집 · A", {
-      kind: "builtin",
-      name: "sync_sources",
-      accountId: "acct-a",
-      sources: ["gmail"],
-    });
-    const result = migrateBuiltinExecutors(db, { scriptsRoot });
-    expect(result.rewritten).toBe(1);
+    const db = atV10([
+      [
+        "wf-collect",
+        "연결 자료 수집 · A",
+        { kind: "builtin", name: "sync_sources", accountId: "acct-a", sources: ["gmail"] },
+      ],
+    ]);
+    expect(migrate(db)).toBe(2);
     // No stored source list: a source switched off after this save must stop the
     // next run, which only holds when the run asks the account at that moment.
     expect(executorOf(db, "wf-collect")).toEqual({
@@ -75,9 +80,8 @@ describe("v11 turns stored builtin executors into script jobs", () => {
   });
 
   test("a briefing builtin becomes the shipped briefing job with its two capabilities", () => {
-    const { db, scriptsRoot } = fresh();
-    insertWorkflow(db, "wf-brief", "아침 브리핑", { kind: "builtin", name: "briefing" });
-    migrateBuiltinExecutors(db, { scriptsRoot });
+    const db = atV10([["wf-brief", "아침 브리핑", { kind: "builtin", name: "briefing" }]]);
+    migrate(db);
     expect(executorOf(db, "wf-brief")).toEqual({
       kind: "script",
       path: "jobs/briefing.ts",
@@ -87,15 +91,15 @@ describe("v11 turns stored builtin executors into script jobs", () => {
   });
 
   test("a seeded definition naming a job file that was never installed is repaired", () => {
-    const { db, scriptsRoot } = fresh();
     // The seed published this path before the file existed, so it could not run.
-    insertWorkflow(db, "wf-system-briefing-morning", "아침 브리핑", {
-      kind: "script",
-      path: "jobs/briefing.ts",
-      args: [],
-    });
-    const result = migrateBuiltinExecutors(db, { scriptsRoot });
-    expect(result.repaired).toBe(1);
+    const db = atV10([
+      [
+        "wf-system-briefing-morning",
+        "아침 브리핑",
+        { kind: "script", path: "jobs/briefing.ts", args: [] },
+      ],
+    ]);
+    migrate(db);
     expect(executorOf(db, "wf-system-briefing-morning")).toEqual({
       kind: "script",
       path: "jobs/briefing.ts",
@@ -105,69 +109,50 @@ describe("v11 turns stored builtin executors into script jobs", () => {
   });
 
   test("the owner's own missing script is left alone", () => {
-    const { db, scriptsRoot } = fresh();
-    insertWorkflow(db, "wf-mine", "내 작업", { kind: "script", path: "mine/report.ts", args: [] });
-    const result = migrateBuiltinExecutors(db, { scriptsRoot });
-    expect(result).toEqual({ rewritten: 0, repaired: 0 });
+    const db = atV10([
+      ["wf-mine", "내 작업", { kind: "script", path: "mine/report.ts", args: [] }],
+    ]);
+    migrate(db);
     expect(executorOf(db, "wf-mine")).toMatchObject({ path: "mine/report.ts" });
   });
 
-  test("running again rewrites nothing", () => {
-    const { db, scriptsRoot } = fresh();
-    installScripts(scriptsRoot);
-    insertWorkflow(db, "wf-collect", "수집", {
-      kind: "builtin",
-      name: "sync_sources",
-      accountId: "acct-a",
-    });
-    migrateBuiltinExecutors(db, { scriptsRoot });
-    expect(migrateBuiltinExecutors(db, { scriptsRoot })).toEqual({ rewritten: 0, repaired: 0 });
-  });
-
-  test("the search index still finds a rewritten definition by its title", () => {
-    const { db, scriptsRoot } = fresh();
-    installScripts(scriptsRoot);
-    insertWorkflow(db, "wf-collect", "연결 자료 수집 · A", {
-      kind: "builtin",
-      name: "sync_sources",
-      accountId: "acct-a",
-    });
-    migrateBuiltinExecutors(db, { scriptsRoot });
-    expect(searchWorkflowIds(db, { keyword: "연결 자료" }).map((hit) => hit.id)).toEqual([
-      "wf-collect",
+  test("running the chain again rewrites nothing", () => {
+    const db = atV10([
+      ["wf-collect", "수집", { kind: "builtin", name: "sync_sources", accountId: "acct-a" }],
     ]);
+    expect(migrate(db)).toBe(2);
+    expect(migrate(db)).toBe(0);
   });
 });
 
 describe("the app's jobs are ordinary scripts", () => {
-  test("the installer copies both jobs into the scripts root", () => {
-    const scriptRoot = mkdtempSync(join(tmpdir(), "harness-install-"));
-    resources.push({ db: new Database(":memory:"), root: scriptRoot });
-    expect(installJobs(scriptRoot)).toHaveLength(JOB_FILES.length);
-    for (const file of JOB_FILES) {
-      const installed = readFileSync(join(scriptRoot, "jobs", file), "utf8");
-      // The import is absolute, because the relative `../.digithive/sdk.ts` of the
-      // source would resolve against `<root>/jobs`, i.e. one level too deep.
-      expect(installed).toContain(
-        JSON.stringify(join(scriptRoot, ".digithive", "sdk.ts").split("\\").join("/")),
-      );
+  test("every job file is planted verbatim under the scripts root", () => {
+    const root = mkdtempSync(join(tmpdir(), "harness-jobs-"));
+    try {
+      expect(installJobs(root)).toHaveLength(JOB_FILES.length);
+      for (const file of JOB_FILES) {
+        const shipped = readFileSync(join(JOB_SOURCE_ROOT, file), "utf8");
+        expect(readFileSync(join(root, "jobs", file), "utf8")).toBe(shipped);
+      }
+      // A second start changes nothing.
+      expect(installJobs(root)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
-    // A second run changes nothing.
-    expect(installJobs(scriptRoot)).toEqual([]);
   });
 
-  test("a root that is the app directory gets an absolute SDK import instead", () => {
-    // In that layout `<root>/../.digithive/sdk.ts` is outside the root, which the
-    // script path check refuses, so the import must not climb out.
-    const appShaped = mkdtempSync(join(tmpdir(), "harness-app-"));
-    resources.push({ db: new Database(":memory:"), root: appShaped });
-    const jobs = join(appShaped, "jobs");
-    mkdirSync(jobs, { recursive: true });
-    cpSync(join(JOB_SOURCE_ROOT, "collection.ts"), join(jobs, "collection.ts"));
-    expect(installJobs(appShaped)).toHaveLength(JOB_FILES.length);
-    const source = readFileSync(join(jobs, "collection.ts"), "utf8");
-    expect(source).toContain(join(appShaped, ".digithive", "sdk.ts").split("\\").join("/"));
-    expect(source).not.toContain('"../.digithive/sdk.ts"');
+  test("a rewritten definition stays findable by its title", () => {
+    const db = atV10([
+      [
+        "wf-collect",
+        "연결 자료 수집 · A",
+        { kind: "builtin", name: "sync_sources", accountId: "acct-a" },
+      ],
+    ]);
+    migrate(db);
+    expect(searchWorkflowIds(db, { keyword: "연결 자료" }).map((hit) => hit.id)).toContain(
+      "wf-collect",
+    );
   });
 
   test("a collection workflow names the job path and its account argument", () => {
@@ -180,7 +165,7 @@ describe("the app's jobs are ordinary scripts", () => {
   });
 
   test("a job sees only the sources the owner left on", () => {
-    const { db } = fresh();
+    const db = fresh();
     db.query(
       "INSERT INTO integration_accounts(id,provider,subject,email,label,created_at,updated_at) VALUES ('acct-a','google','s','a@example.com','A','2026-01-01','2026-01-01')",
     ).run();
@@ -205,7 +190,7 @@ describe("job capabilities gate the job tools", () => {
   });
 
   test("an unconfigured push reports no device instead of failing", async () => {
-    const { db } = fresh();
+    const db = fresh();
     // The events and sync clients are never touched by a push without VAPID keys.
     const deps = {
       db,

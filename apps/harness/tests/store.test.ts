@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { unlinkSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { migrate, openDatabase } from "../src/store/db";
-import { MIGRATIONS } from "../src/store/migrations";
+import { LATEST, RESET_VERSION, V12 } from "../src/store/migrations";
 
 function memoryDb(): Database {
   const db = new Database(":memory:");
@@ -11,8 +13,12 @@ function memoryDb(): Database {
   return db;
 }
 
+function version(db: Database): number {
+  return db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
+}
+
 describe("store migrations", () => {
-  test("fresh migration creates the core storage tables at the latest schema version", () => {
+  test("a fresh database is created at the latest schema version", () => {
     const db = memoryDb();
     const names = db
       .query<{ name: string }, SQLQueryBindings[]>(
@@ -24,15 +30,18 @@ describe("store migrations", () => {
       "approvals",
       "entries",
       "events",
-      "parts",
       "runs",
       "saved_approvals",
       "sessions",
       "tool_calls",
+      "workflows",
     ]) {
       expect(names).toContain(table);
     }
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
+    // The v1 `parts` table is retired: an entry owns its payload.
+    expect(names).not.toContain("parts");
+    expect(version(db)).toBe(LATEST);
+    expect(LATEST).toBeGreaterThan(RESET_VERSION);
   });
 
   test("re-running migrate applies nothing", () => {
@@ -53,57 +62,78 @@ describe("store migrations", () => {
   });
 
   test("openDatabase works on a file and is idempotent across connections", () => {
-    const dir = import.meta.dir;
-    const path = `${dir}/tmp-store-${crypto.randomUUID()}.db`;
-    const first = openDatabase(path);
-    first.close();
-    const second = openDatabase(path);
-    expect(second.query("PRAGMA user_version").get()).toEqual({ user_version: MIGRATIONS.length });
-    second.close();
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try {
-        unlinkSync(path + suffix);
-      } catch {
-        // absent file is fine
-      }
+    const path = join(mkdtempSync(join(tmpdir(), "harness-open-")), "db.sqlite");
+    try {
+      const first = openDatabase(path);
+      expect(version(first)).toBe(LATEST);
+      first.close();
+      const second = openDatabase(path);
+      expect(migrate(second)).toBe(0);
+      second.close();
+    } finally {
+      rmSync(join(path, ".."), { recursive: true, force: true });
+    }
+  });
+
+  test("a database older than the reset is refused instead of half-upgraded", () => {
+    // WAL leaves -wal/-shm beside the file, so the whole set is removed.
+    const path = join(mkdtempSync(join(tmpdir(), "harness-refuse-")), "old.db");
+    const old = new Database(path, { create: true });
+    old.exec("CREATE TABLE sessions (id TEXT PRIMARY KEY)");
+    old.exec(`PRAGMA user_version = ${RESET_VERSION - 1}`);
+    old.close();
+    try {
+      // Refused at open, before anything writes to the file.
+      expect(() => openDatabase(path)).toThrow("older than this build supports");
+      const after = new Database(path, { readonly: true });
+      expect(version(after)).toBe(RESET_VERSION - 1);
+      after.close();
+    } finally {
+      rmSync(join(path, ".."), { recursive: true, force: true });
     }
   });
 });
 
-test("upgrading an older schema preserves its stored conversation", () => {
-  const db = new Database(":memory:");
-  try {
-    for (const migration of MIGRATIONS.slice(0, 2)) db.exec(migration.sql);
-    db.exec("PRAGMA user_version=2");
-    db.query(
-      "INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','retained','now','now')",
-    ).run();
-    db.query(
-      "INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user','{\"parts\":[{\"type\":\"text\",\"text\":\"original\"}]}','now',1)",
-    ).run();
+describe("a transition is one transaction", () => {
+  /** A database at the latest schema with one entry stored in the pre-event form. */
+  function withLegacyEntry(): Database {
+    const db = new Database(":memory:");
+    db.exec("PRAGMA foreign_keys = ON");
     migrate(db);
-    expect(db.query("SELECT title FROM sessions WHERE id='s'").get()).toEqual({
-      title: "retained",
-    });
-    expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
-      payload_json: '{"parts":[{"type":"text","text":"original"}]}',
-    });
-    expect(migrate(db)).toBe(0);
-  } finally {
-    db.close();
+    db.query(
+      "INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','kept','now','now')",
+    ).run();
+    db.query(
+      "INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user',?,'now',1)",
+    ).run(JSON.stringify({ parts: [{ type: "text", text: "original" }] }));
+    db.exec(`PRAGMA user_version = ${V12.version - 1}`);
+    return db;
   }
-});
 
-test("a failed migration rolls back its earlier statements and leaves the previous version", () => {
-  const db = new Database(":memory:");
-  try {
-    for (const migration of MIGRATIONS.slice(0, 3)) db.exec(migration.sql);
-    db.exec("PRAGMA user_version=3");
-    db.exec("CREATE TABLE files (existing TEXT)");
-    expect(() => migrate(db)).toThrow("already exists");
-    expect(db.query("SELECT name FROM sqlite_master WHERE name='memories'").all()).toEqual([]);
-    expect(db.query("PRAGMA user_version").get()).toEqual({ user_version: 3 });
-  } finally {
-    db.close();
-  }
+  test("the version bump and the payload rewrite commit together", () => {
+    const db = withLegacyEntry();
+    try {
+      expect(migrate(db)).toBe(1);
+      expect(version(db)).toBe(LATEST);
+      expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
+        payload_json: JSON.stringify({ events: [{ type: "text", id: 0, text: "original" }] }),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("a rewrite that throws leaves the rows and the version untouched", () => {
+    const db = withLegacyEntry();
+    try {
+      db.exec("CREATE TRIGGER boom BEFORE UPDATE ON entries BEGIN SELECT RAISE(ABORT,'boom'); END");
+      expect(() => migrate(db)).toThrow("boom");
+      expect(version(db)).toBe(V12.version - 1);
+      expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
+        payload_json: JSON.stringify({ parts: [{ type: "text", text: "original" }] }),
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
