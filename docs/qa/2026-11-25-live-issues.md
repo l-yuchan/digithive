@@ -71,3 +71,16 @@ also keeps whichever copy of a still-streaming entry has more text.
 - 연결 tab locally: no load error, `계정 ID <uuid>` line present, VAPID resolved.
 - Stale-tab reload: with a new `build.json` served, focusing the old tab reloaded
   it within one check.
+
+## Live result after deploy (`5a3aee9`, guard `5e6314f`)
+
+The first automatic dispatch after the migration ran at 19:51 KST and created one
+run per account; all three settled `succeeded`:
+
+- `chanoil@hanyang.ac.kr`: Gmail collected (calendar skipped with `source_disabled`, as switched off)
+- `chabun314@gmail.com`: Calendar and Gmail collected
+- `한양 LMS`: Canvas collected
+
+No run reports `account_required`. The previous `연결 자료 수집` (`system-sync`)
+was removed by v9; its past runs stay in the database with no schedule link.
+
