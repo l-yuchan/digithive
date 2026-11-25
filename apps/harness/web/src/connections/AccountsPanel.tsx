@@ -101,10 +101,11 @@ export function AccountsPanel({ onChanged }: { readonly onChanged: () => void })
     );
   };
 
+  // The seeded Google row is a placeholder until a credential or an identity is bound
+  // to it; an account the owner connected is always listed.
   const visibleAccounts =
     state?.accounts.filter(
-      (account) =>
-        account.id !== "google-default" || account.provider !== "google" || account.connected,
+      (account) => account.connected || account.subject !== null || account.email !== null,
     ) ?? [];
 
   const addGoogle = (

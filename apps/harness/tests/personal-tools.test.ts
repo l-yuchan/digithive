@@ -140,7 +140,7 @@ test("personal_data_search stays inside one cached source and treats the query a
       "INSERT INTO sync_items (account_id,source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?,?)",
     );
     insert.run(
-      "google-default",
+      "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
       "calendar",
       "cal-1",
       "팀 회의",
@@ -150,7 +150,7 @@ test("personal_data_search stays inside one cached source and treats the query a
       "2026-11-25T00:00:00.000Z",
     );
     insert.run(
-      "google-default",
+      "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
       "gmail",
       "mail-1",
       "팀 회의 안내",
@@ -171,7 +171,7 @@ test("personal_data_search stays inside one cached source and treats the query a
     );
     harness.deps.db
       .query(
-        "UPDATE account_sources SET ok=1, last_sync_at='2026-11-25T00:00:00.000Z' WHERE account_id='google-default' AND source='calendar'",
+        "UPDATE account_sources SET ok=1, last_sync_at='2026-11-25T00:00:00.000Z' WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
       )
       .run();
 
@@ -212,7 +212,7 @@ test("a createHarness conversation runs personal_data_search from the runtime re
       "INSERT INTO sync_items (account_id,source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?,?)",
     );
     insert.run(
-      "google-default",
+      "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
       "gmail",
       "mail-1",
       "팀 회의 안내",
@@ -222,7 +222,7 @@ test("a createHarness conversation runs personal_data_search from the runtime re
       "2026-11-25T00:00:00.000Z",
     );
     insert.run(
-      "google-default",
+      "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
       "calendar",
       "cal-1",
       "팀 회의",

@@ -476,7 +476,7 @@ describe("verified identity and OAuth challenge", () => {
       return json({ history: [], historyId: "h" });
     });
     const deps = routeDeps(googleDeps(db, events, fetchImpl));
-    const first = createOAuthState(db, null, NOW);
+    const first = createOAuthState(db, null);
     const response = await handleAccountRequest(
       new Request(`https://local/api/oauth/google/callback?code=c&state=${first}`),
       deps,
@@ -490,7 +490,7 @@ describe("verified identity and OAuth challenge", () => {
       email: "new@example.com",
     });
 
-    const second = createOAuthState(db, null, NOW);
+    const second = createOAuthState(db, null);
     await handleAccountRequest(
       new Request(`https://local/api/oauth/google/callback?code=c&state=${second}`),
       deps,
@@ -523,7 +523,7 @@ describe("verified identity and OAuth challenge", () => {
       return json({ items: [], nextSyncToken: "c" });
     });
     const deps = routeDeps(googleDeps(db, events, fetchImpl));
-    const state = createOAuthState(db, target, NOW);
+    const state = createOAuthState(db, target);
     const response = await handleAccountRequest(
       new Request(`https://local/api/oauth/google/callback?code=c&state=${state}`),
       deps,

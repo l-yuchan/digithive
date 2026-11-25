@@ -35,11 +35,16 @@ test("the seeded Google row upgrades into an ordinary account without losing any
       "SELECT id,label,subject,email FROM integration_accounts ORDER BY provider,id",
     )
     .all();
-  // google-default is a normal row (the fallback owner of pre-account data); its
-  // label is not the legacy "기존 Google" marker any more.
+  // The renamed legacy row is a normal account: it is the fallback owner of
+  // pre-account data, and its label is not the old "기존 Google" marker any more.
   expect(seeded).toEqual([
     { id: "canvas-default", label: "한양 LMS", subject: null, email: null },
-    { id: "google-default", label: "Google 계정", subject: null, email: null },
+    {
+      id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
+      label: "Google 계정",
+      subject: null,
+      email: null,
+    },
   ]);
   expect(
     db
@@ -47,21 +52,25 @@ test("the seeded Google row upgrades into an ordinary account without losing any
         "SELECT account_id,payload FROM oauth_tokens",
       )
       .get(),
-  ).toEqual({ account_id: "google-default", payload: encrypted });
+  ).toEqual({ account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", payload: encrypted });
   expect(
     db
       .query<{ account_id: string; source: string; cursor: string }, []>(
         "SELECT account_id,source,cursor FROM account_sources WHERE source='gmail'",
       )
       .get(),
-  ).toEqual({ account_id: "google-default", source: "gmail", cursor: "mail-history" });
+  ).toEqual({
+    account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
+    source: "gmail",
+    cursor: "mail-history",
+  });
   expect(
     db
       .query<{ account_id: string; item_id: string }, []>(
         "SELECT account_id,item_id FROM sync_items WHERE source='gmail'",
       )
       .get(),
-  ).toEqual({ account_id: "google-default", item_id: "m1" });
+  ).toEqual({ account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", item_id: "m1" });
 
   // Added and migrated Google accounts are the same kind of row.
   const { id } = upsertGoogleAccount(db, { subject: "sub-new", email: "new@example.com" });
@@ -104,7 +113,7 @@ test("v5 credentials, source cursors and items retain their explicit account ide
         "SELECT account_id,payload FROM oauth_tokens",
       )
       .get();
-    expect(token?.account_id).toBe("google-default");
+    expect(token?.account_id).toBe("6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6");
     expect(token?.payload).toBe(encrypted);
     expect(open("migration-secret", token?.payload ?? "")).toBe('{"accessToken":"retained"}');
     expect(
@@ -113,7 +122,7 @@ test("v5 credentials, source cursors and items retain their explicit account ide
         .all(),
     ).toEqual([
       {
-        account_id: "google-default",
+        account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
         source: "calendar",
         cursor: "calendar-sync",
         last_sync_at: "success",
@@ -125,7 +134,7 @@ test("v5 credentials, source cursors and items retain their explicit account ide
         last_sync_at: "success",
       },
       {
-        account_id: "google-default",
+        account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
         source: "gmail",
         cursor: "mail-history",
         last_sync_at: "success",
@@ -134,9 +143,19 @@ test("v5 credentials, source cursors and items retain their explicit account ide
     expect(
       db.query("SELECT account_id,source,item_id,detail FROM sync_items ORDER BY source").all(),
     ).toEqual([
-      { account_id: "google-default", source: "calendar", item_id: "same-id", detail: "body" },
+      {
+        account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
+        source: "calendar",
+        item_id: "same-id",
+        detail: "body",
+      },
       { account_id: "canvas-default", source: "canvas", item_id: "same-id", detail: "body" },
-      { account_id: "google-default", source: "gmail", item_id: "same-id", detail: "body" },
+      {
+        account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
+        source: "gmail",
+        item_id: "same-id",
+        detail: "body",
+      },
     ]);
     expect(
       db.query("SELECT goal,executor_json,timeout_seconds FROM runs WHERE id='old-run'").get(),
@@ -146,6 +165,70 @@ test("v5 credentials, source cursors and items retain their explicit account ide
       timeout_seconds: 1800,
     });
     expect(migrate(db)).toBe(0);
+    expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally {
+    db.close();
+  }
+});
+
+function databaseAt8(): Database {
+  const db = new Database(":memory:");
+  db.exec("PRAGMA foreign_keys=ON");
+  for (const migration of MIGRATIONS.filter((entry) => entry.version <= 8)) {
+    db.exec(migration.sql);
+  }
+  db.exec("PRAGMA user_version=8");
+  return db;
+}
+
+const RENAMED_LEGACY_ID = "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6";
+
+test("v9 gives the placeholder account an ordinary id and moves every reference with it", () => {
+  const db = databaseAt8();
+  try {
+    db.query(
+      "INSERT INTO oauth_states(state,account_id,expires_at,created_at) VALUES ('st','google-default','later','now')",
+    ).run();
+    db.query(
+      `INSERT INTO schedules
+         (id,title,instruction,enabled,trigger_json,executor_json,timeout_seconds,next_run_at,created_at,updated_at)
+       VALUES ('mine','내 수집','x',1,?,?,1800,NULL,'now','now')`,
+    ).run(
+      JSON.stringify({ kind: "interval", everySeconds: 900, anchorAt: "2026-01-01T00:00:00.000Z" }),
+      JSON.stringify({
+        kind: "builtin",
+        name: "sync_sources",
+        accountId: "google-default",
+      }),
+    );
+
+    migrate(db);
+
+    expect(
+      db.query("SELECT id FROM integration_accounts WHERE id='google-default'").get(),
+    ).toBeNull();
+    expect(db.query("SELECT account_id FROM oauth_states WHERE state='st'").get()).toEqual({
+      account_id: RENAMED_LEGACY_ID,
+    });
+    expect(db.query("SELECT executor_json FROM schedules WHERE id='mine'").get()).toEqual({
+      executor_json: JSON.stringify({
+        kind: "builtin",
+        name: "sync_sources",
+        accountId: RENAMED_LEGACY_ID,
+      }),
+    });
+    // The account-less seed is gone; every account has its own collection schedule.
+    expect(db.query("SELECT id FROM schedules WHERE id='system-sync'").get()).toBeNull();
+    const collectors = db
+      .query<{ id: string; account: string }, []>(
+        `SELECT id, json_extract(executor_json,'$.accountId') AS account FROM schedules
+          WHERE json_extract(executor_json,'$.name')='sync_sources' ORDER BY id`,
+      )
+      .all();
+    expect(collectors).toEqual([
+      { id: "collect-canvas-default", account: "canvas-default" },
+      { id: "mine", account: RENAMED_LEGACY_ID },
+    ]);
     expect(db.query("PRAGMA foreign_key_check").all()).toEqual([]);
   } finally {
     db.close();
@@ -164,10 +247,10 @@ test("account/source foreign keys reject cross-source orphans while identical ID
     const insert = db.query(
       "INSERT INTO sync_items(account_id,source,item_id,title,updated_at) VALUES (?,?,'same-id',?,'now')",
     );
-    insert.run("google-default", "gmail", "first");
+    insert.run("6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", "gmail", "first");
     insert.run("other", "gmail", "second");
     expect(db.query("SELECT account_id,title FROM sync_items ORDER BY account_id").all()).toEqual([
-      { account_id: "google-default", title: "first" },
+      { account_id: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", title: "first" },
       { account_id: "other", title: "second" },
     ]);
     expect(() => insert.run("other", "calendar", "orphan")).toThrow("FOREIGN KEY");

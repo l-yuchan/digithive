@@ -58,3 +58,34 @@ UPDATE schedules
    SET enabled = 0, next_run_at = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
  WHERE id = 'system-sync' AND json_extract(executor_json, '$.accountId') IS NULL;
 `;
+
+/**
+ * v9 installs collection as one schedule per account. The account-less seed is
+ * removed (its occurrences keep their history) and every account that has no
+ * collection schedule yet gets one that names it; an account added later gets its
+ * own when it is connected. The schedule reads whatever the account's feature
+ * switches allow, so turning a source off never needs a schedule edit.
+ */
+export const COLLECTION_SCHEDULE_SEED = `
+DELETE FROM schedules WHERE id = 'system-sync';
+
+INSERT INTO schedules
+  (id,title,instruction,enabled,trigger_json,executor_json,timeout_seconds,next_run_at,created_at,updated_at)
+SELECT 'collect-' || a.id,
+       '연결 자료 수집 · ' || a.label,
+       '이 계정의 사용 중인 정보를 증분 수집합니다.',
+       1,
+       json_object('kind','interval','everySeconds',900,
+                   'anchorAt',strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+       json_object('kind','builtin','name','sync_sources','accountId',a.id),
+       1800,
+       strftime('%Y-%m-%dT%H:%M:%fZ','now','+900 seconds'),
+       strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+       strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  FROM integration_accounts a
+ WHERE NOT EXISTS (
+       SELECT 1 FROM schedules s
+        WHERE json_extract(s.executor_json, '$.name') = 'sync_sources'
+          AND json_extract(s.executor_json, '$.accountId') = a.id
+ );
+`;

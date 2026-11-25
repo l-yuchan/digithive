@@ -1,7 +1,10 @@
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 
-/** Fixed identities seeded by migration v6, so legacy data always has an owner. */
-export const DEFAULT_GOOGLE_ACCOUNT_ID = "google-default";
+/**
+ * The Google row seeded by v6 and bound by the OAuth callback. v9 replaced its
+ * placeholder id with an ordinary generated one, so its id is no longer a label.
+ */
+export const DEFAULT_GOOGLE_ACCOUNT_ID = "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6";
 export const DEFAULT_CANVAS_ACCOUNT_ID = "canvas-default";
 
 export type Provider = "google" | "canvas";

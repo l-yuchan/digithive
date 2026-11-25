@@ -22,6 +22,7 @@ import {
 import { ScheduleTriggerSchema, nextDueAfter, wallToInstant } from "../src/scheduler/triggers";
 import { scheduleTools } from "../src/tools/schedules";
 import { handleScheduleRequest } from "../src/server/schedule-routes";
+import { ensureCollectionSchedule, removeAccountSchedules } from "../src/scheduler/collection";
 
 const databases: Database[] = [];
 afterEach(() => {
@@ -108,12 +109,19 @@ describe("schedule definitions", () => {
   test("seeded system schedules exist and dispatch initializes daily deadlines without firing", () => {
     const { db, deps } = setup({ seeds: true });
     const before = listSchedules(db);
-    expect(before).toHaveLength(3);
-    // The former global collector is retired: it names no account, so it must
-    // not keep reading every account after the upgrade.
-    const retired = before.find((row) => row.id === "system-sync");
-    expect(retired?.enabled).toBe(false);
-    expect(retired?.nextRunAt).toBeNull();
+    // Collection is one schedule per account: the old account-less collector is gone.
+    expect(before.some((row) => row.id === "system-sync")).toBe(false);
+    const collectors = before.filter(
+      (row) => row.executor.kind === "builtin" && row.executor.name === "sync_sources",
+    );
+    expect(collectors).toHaveLength(2);
+    for (const schedule of collectors) {
+      expect(schedule.enabled).toBe(true);
+      expect(schedule.executor.kind === "builtin" ? schedule.executor.accountId : null).not.toBe(
+        undefined,
+      );
+    }
+    expect(before).toHaveLength(4);
     const morning = before.find((row) => row.id === "system-briefing-morning");
     expect(morning?.nextRunAt).toBeNull();
 
@@ -124,6 +132,38 @@ describe("schedule definitions", () => {
       expect(after.find((row) => row.id === id)?.nextRunAt).not.toBeNull();
     }
     expect(count(db, "SELECT count(*) AS n FROM runs")).toBe(0);
+  });
+
+  test("a connected account gets one collection schedule that names it", () => {
+    const { db, deps } = setup();
+    const account = {
+      id: "acc",
+      provider: "google",
+      subject: null,
+      email: "owner@example.com",
+      label: "owner@example.com",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    } as const;
+    db.query(
+      "INSERT INTO integration_accounts(id,provider,label,created_at,updated_at) VALUES ('acc','google','owner@example.com','now','now')",
+    ).run();
+
+    const id = ensureCollectionSchedule(db, account, deps.events, BASE);
+    expect(id).not.toBeNull();
+    expect(getSchedule(db, id ?? "")?.executor).toEqual({
+      kind: "builtin",
+      name: "sync_sources",
+      accountId: "acc",
+    });
+
+    // A schedule the owner paused is never silently switched back on.
+    updateSchedule(db, id ?? "", { enabled: false }, BASE);
+    expect(ensureCollectionSchedule(db, account, deps.events, BASE)).toBeNull();
+    expect(getSchedule(db, id ?? "")?.enabled).toBe(false);
+
+    expect(removeAccountSchedules(db, "acc")).toBe(1);
+    expect(getSchedule(db, id ?? "")).toBeNull();
   });
 
   test("interval catch-up enqueues the latest missed slot only once", () => {

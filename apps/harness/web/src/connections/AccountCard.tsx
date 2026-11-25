@@ -31,7 +31,10 @@ export function AccountCard({
           <p className="run-meta">
             {PROVIDER_LABELS[account.provider]}
             {account.email ? ` · ${account.email}` : ""}
-            {account.subject ? ` · ID ${account.subject}` : ""}
+          </p>
+          <p className="run-meta" data-testid="account-id">
+            계정 ID {account.id}
+            {account.subject ? ` · Google 사용자 ID ${account.subject}` : ""}
           </p>
         </div>
         <span className={`badge ${account.connected ? "succeeded" : "failed"}`}>

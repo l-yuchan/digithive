@@ -23,6 +23,7 @@ import {
   type GoogleDeps,
 } from "../integrations/google";
 import { z } from "zod";
+import { ensureCollectionSchedule, removeAccountSchedules } from "../scheduler/collection";
 
 /** The same object shape the app already assembles for Google and Canvas. */
 export type AccountRouteDeps = {
@@ -173,6 +174,7 @@ async function handleOAuthCallback(request: Request, deps: AccountRouteDeps): Pr
         return redirect(url, { oauth: "error", reason: bound.reason });
       }
       saveTokens(deps.google.db, deps.google.vaultSecret, tokens, target.id);
+      ensureCollectionSchedule(deps.google.db, target, deps.google.events);
       deps.google.events.append({
         kind: "integration.connected",
         payload: { provider: "google", accountId: target.id, subject: identity.subject },
@@ -188,6 +190,8 @@ async function handleOAuthCallback(request: Request, deps: AccountRouteDeps): Pr
       email: identity.email,
     });
     saveTokens(deps.google.db, deps.google.vaultSecret, tokens, account.id);
+    const recorded = getAccount(deps.google.db, account.id);
+    if (recorded) ensureCollectionSchedule(deps.google.db, recorded, deps.google.events);
     deps.google.events.append({
       kind: "integration.connected",
       payload: {
@@ -271,9 +275,10 @@ export async function handleAccountRequest(
     if (!getAccount(deps.google.db, accountId))
       return json({ error: "account_not_found", detail: accountId }, 404);
     deleteAccount(deps.google.db, accountId);
+    const removed = removeAccountSchedules(deps.google.db, accountId, deps.google.events);
     deps.google.events.append({
       kind: "integration.sync_state",
-      payload: { accountId, deleted: true },
+      payload: { accountId, deleted: true, schedules: removed },
     });
     return json({ deleted: true, id: accountId });
   }

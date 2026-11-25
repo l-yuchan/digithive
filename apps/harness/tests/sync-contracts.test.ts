@@ -37,10 +37,10 @@ function setup(respond: (url: URL, init?: Parameters<typeof fetch>[1]) => Respon
 }
 function seed(db: Database, source: string, cursor: string) {
   db.query(
-    "INSERT INTO account_sources(account_id,source,cursor,ok) VALUES ('google-default',?,?,1) ON CONFLICT(account_id,source) DO UPDATE SET cursor=excluded.cursor, ok=excluded.ok",
+    "INSERT INTO account_sources(account_id,source,cursor,ok) VALUES ('6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6',?,?,1) ON CONFLICT(account_id,source) DO UPDATE SET cursor=excluded.cursor, ok=excluded.ok",
   ).run(source, cursor);
   db.query(
-    "INSERT INTO sync_items(account_id,source,item_id,title,detail,updated_at) VALUES ('google-default',?,'old','old','','x')",
+    "INSERT INTO sync_items(account_id,source,item_id,title,detail,updated_at) VALUES ('6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6',?,'old','old','','x')",
   ).run(source);
 }
 
@@ -73,14 +73,14 @@ test("a failing later calendar page preserves the previous snapshot and cursor",
   seed(deps.db, "calendar", "previous");
   deps.db
     .query(
-      "UPDATE account_sources SET last_sync_at='2026-11-24T00:00:00.000Z' WHERE account_id='google-default' AND source='calendar'",
+      "UPDATE account_sources SET last_sync_at='2026-11-24T00:00:00.000Z' WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
     )
     .run();
   expect((await syncGoogleCalendar(deps)).ok).toBe(false);
   expect(
     deps.db
       .query(
-        "SELECT cursor,ok FROM account_sources WHERE account_id='google-default' AND source='calendar'",
+        "SELECT cursor,ok FROM account_sources WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
       )
       .get(),
   ).toEqual({
@@ -91,14 +91,14 @@ test("a failing later calendar page preserves the previous snapshot and cursor",
   expect(
     deps.db
       .query(
-        "SELECT last_sync_at FROM account_sources WHERE account_id='google-default' AND source='calendar'",
+        "SELECT last_sync_at FROM account_sources WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='calendar'",
       )
       .get(),
   ).toEqual({
     last_sync_at: "2026-11-24T00:00:00.000Z",
   });
   expect(deps.events.after(0).at(-1)?.payload).toMatchObject({
-    accountId: "google-default",
+    accountId: "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
     source: "calendar",
     ok: false,
     error: "calendar_http_403",
@@ -161,7 +161,7 @@ test("gmail consumes more than 25 additions across every history page", async ()
   expect(
     deps.db
       .query(
-        "SELECT count(*) AS n FROM sync_items WHERE account_id='google-default' AND source='gmail'",
+        "SELECT count(*) AS n FROM sync_items WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
       )
       .get(),
   ).toEqual({
@@ -183,7 +183,7 @@ test("a failed gmail detail does not advance history or partially commit message
   expect(
     deps.db
       .query(
-        "SELECT cursor,ok FROM account_sources WHERE account_id='google-default' AND source='gmail'",
+        "SELECT cursor,ok FROM account_sources WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
       )
       .get(),
   ).toEqual({

@@ -1,6 +1,10 @@
 import { ACCOUNT_MIGRATION } from "./account-migration";
-import { IDENTITY_MIGRATION } from "./identity-migration";
-import { COLLECTION_SEED_RETIREMENT, SCHEDULE_MIGRATION } from "./schedule-migration";
+import { IDENTITY_MIGRATION, LEGACY_GOOGLE_ACCOUNT_RENAME } from "./identity-migration";
+import {
+  COLLECTION_SCHEDULE_SEED,
+  COLLECTION_SEED_RETIREMENT,
+  SCHEDULE_MIGRATION,
+} from "./schedule-migration";
 
 export type Migration = {
   readonly version: number;
@@ -210,4 +214,5 @@ CREATE INDEX sync_items_at ON sync_items(at);
   { version: 6, sql: ACCOUNT_MIGRATION },
   { version: 7, sql: SCHEDULE_MIGRATION },
   { version: 8, sql: `${IDENTITY_MIGRATION}${COLLECTION_SEED_RETIREMENT}` },
+  { version: 9, sql: `${LEGACY_GOOGLE_ACCOUNT_RENAME}${COLLECTION_SCHEDULE_SEED}` },
 ];

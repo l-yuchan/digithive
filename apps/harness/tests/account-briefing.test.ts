@@ -13,10 +13,10 @@ test("briefings exclude disabled account sources and attribute identical item ID
     const insert = db.query(
       "INSERT INTO sync_items(account_id,source,item_id,title,detail,updated_at) VALUES (?,'gmail','shared',?,'body','now')",
     );
-    insert.run("google-default", "Disabled newsletter");
+    insert.run("6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", "Disabled newsletter");
     insert.run("second", "Enabled newsletter");
     db.query(
-      "UPDATE account_sources SET enabled=0 WHERE account_id='google-default' AND source='gmail'",
+      "UPDATE account_sources SET enabled=0 WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
     ).run();
 
     const content = composeBriefing(db, Date.parse("2026-11-25T00:00:00Z"));
@@ -41,7 +41,7 @@ test("an account-scoped briefing ignores every other account's items", () => {
     const insert = db.query(
       "INSERT INTO sync_items(account_id,source,item_id,title,detail,updated_at) VALUES (?,'gmail','shared',?,'body','now')",
     );
-    insert.run("google-default", "First account mail");
+    insert.run("6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6", "First account mail");
     insert.run("second", "Second account mail");
 
     const scoped = composeBriefing(db, Date.parse("2026-11-25T00:00:00Z"), {

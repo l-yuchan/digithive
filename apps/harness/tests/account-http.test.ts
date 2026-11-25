@@ -33,16 +33,19 @@ test("Google callbacks require a valid single-use challenge while account contro
   const { harness, cleanup } = setup();
   try {
     const denied = await harness.handler(
-      new Request("https://app.example/api/accounts/google-default/sources/gmail", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: '{"enabled":false}',
-      }),
+      new Request(
+        "https://app.example/api/accounts/6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6/sources/gmail",
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: '{"enabled":false}',
+        },
+      ),
     );
     expect(denied.status).toBe(401);
     const state = createOAuthState(
       harness.deps.db,
-      "google-default",
+      "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
       Date.now() - OAUTH_STATE_TTL_MS - 1,
     );
 
@@ -63,7 +66,7 @@ test("Google callbacks require a valid single-use challenge while account contro
     expect(
       harness.deps.db
         .query(
-          "SELECT enabled FROM account_sources WHERE account_id='google-default' AND source='gmail'",
+          "SELECT enabled FROM account_sources WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
         )
         .get(),
     ).toEqual({ enabled: 1 });
@@ -81,7 +84,7 @@ test("reconnecting an unidentified migrated account verifies its old mailbox bef
       expiresAt: Date.now() + 3_600_000,
       scope: null,
     });
-    const state = createOAuthState(harness.deps.db, "google-default");
+    const state = createOAuthState(harness.deps.db, "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6");
     const fetchImpl = Object.assign(
       async (input: Parameters<typeof fetch>[0]) => {
         const url = input instanceof Request ? input.url : input.toString();
@@ -118,7 +121,9 @@ test("reconnecting an unidentified migrated account verifies its old mailbox bef
     expect(loadTokens(harness.deps.db, "test-secret")?.accessToken).toBe("old-token");
     expect(
       harness.deps.db
-        .query("SELECT subject,email FROM integration_accounts WHERE id='google-default'")
+        .query(
+          "SELECT subject,email FROM integration_accounts WHERE id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6'",
+        )
         .get(),
     ).toEqual({
       subject: null,
