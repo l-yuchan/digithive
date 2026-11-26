@@ -18,11 +18,11 @@ import { valueMatchesParamType } from "./workflow-types";
 import { listBindings, parseArgs } from "../scheduler/schedule-types";
 
 /**
- * The app's own jobs, installed under `<scriptsRoot>/jobs` at every start. A job is
- * not a kind of workflow: it is a script whose path happens to belong to the app.
+ * The app's own jobs, named `@builtin/<file>` so a job is just a script whose path
+ * belongs to the app. It is never a kind of workflow and has no separate selector.
  */
-export const COLLECTION_SCRIPT = "jobs/collection.ts";
-export const BRIEFING_SCRIPT = "jobs/briefing.ts";
+export const COLLECTION_SCRIPT = "@builtin/collection.ts";
+export const BRIEFING_SCRIPT = "@builtin/briefing.ts";
 
 /** A refusal a tool or route can turn into an answer, with the facts attached. */
 export class WorkflowError extends Error {

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate, openDatabase, OLDEST_OPENABLE } from "../src/store/db";
-import { LATEST, RESET_VERSION, V13 } from "../src/store/migrations";
+import { LATEST, RESET_VERSION, V14 } from "../src/store/migrations";
 
 function memoryDb(): Database {
   const db = new Database(":memory:");
@@ -106,7 +106,7 @@ describe("the kept schema steps", () => {
   test("a fresh database ends at the latest version and reports the steps it ran", () => {
     // The count reports the kept steps that ran; the reset is not a transition.
     const db = new Database(":memory:");
-    expect(migrate(db)).toBe(2);
+    expect(migrate(db)).toBe(3);
     // Each kept step ran on top of the reset, and v13's queue table is in the result.
     expect(version(db)).toBe(LATEST);
     expect(
@@ -116,36 +116,44 @@ describe("the kept schema steps", () => {
 
   test("a database one version behind runs exactly the step it lacks", () => {
     const db = fresh();
-    db.exec(`PRAGMA user_version = ${V13.version - 1}`);
+    db.exec(`PRAGMA user_version = ${V14.version - 1}`);
     expect(migrate(db)).toBe(1);
     expect(version(db)).toBe(LATEST);
   });
 
-  test("the v12 step rewrites a stored payload in one call", () => {
+  test("v14 renames the app's own jobs wherever they were stored", () => {
     const db = fresh();
     db.query(
-      "INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','kept','now','now')",
-    ).run();
-    db.query(
-      "INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user',?,'now',1)",
-    ).run(JSON.stringify({ parts: [{ type: "text", text: "original" }] }));
-    // What the build before v12 lacks is only the version; its payload form is the legacy one.
-    db.exec("DROP TABLE session_queue");
-    db.exec(`PRAGMA user_version = ${V13.version - 2}`);
-    expect(migrate(db)).toBe(2);
-    expect(db.query("SELECT payload_json FROM entries WHERE id='e'").get()).toEqual({
-      payload_json: JSON.stringify({ events: [{ type: "text", id: 0, text: "original" }] }),
+      "INSERT INTO workflows(id,title,instruction,executor_json,created_at,updated_at) VALUES ('w','t','i',?,'now','now')",
+    ).run(
+      JSON.stringify({
+        kind: "script",
+        path: "jobs/collection.ts",
+        args: ["a"],
+        capabilities: ["account.read"],
+      }),
+    );
+    db.exec(`PRAGMA user_version = ${V14.version - 1}`);
+    expect(migrate(db)).toBe(1);
+    expect(db.query("SELECT executor_json FROM workflows WHERE id='w'").get()).toEqual({
+      executor_json: JSON.stringify({
+        kind: "script",
+        path: "@builtin/collection.ts",
+        args: ["a"],
+        capabilities: ["account.read"],
+      }),
     });
   });
 
   test("v13 gives an older database the queue table it lacks", () => {
     const db = fresh();
     db.exec("DROP TABLE session_queue");
-    db.exec(`PRAGMA user_version = ${V13.version - 1}`);
+    db.exec(`PRAGMA user_version = ${V14.version - 2}`);
     // OUTSIDE the transaction: whether a step runs is decided by the version read
     // here, so a no-op body cannot satisfy a step whose schema is missing.
     const ran = migrate(db);
-    expect(ran).toBe(1);
+    // v12 is retired, so the two kept steps (v13, v14) both run here.
+    expect(ran).toBe(2);
     expect(
       db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),
     ).toEqual({

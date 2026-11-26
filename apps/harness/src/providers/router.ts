@@ -1,5 +1,6 @@
 import { openAiStream, type AdapterEvent, type StreamFn, type StreamOptions } from "./openai";
 import { ProviderError } from "./errors";
+import { OPENCODE_SESSION_HEADER } from "./usage";
 
 /** One route: an OpenAI-compatible endpoint plus the role it serves. */
 export type ProviderRouteConfig = {
@@ -16,15 +17,30 @@ export type ProvidersConfig = {
   readonly fallbacks: readonly ProviderRouteConfig[];
 };
 
+/** When a route suspended by quota may be used again, and which window said so. */
+export type UsageResume = {
+  readonly resumeAt: number;
+  readonly window: string;
+};
+
 export type RouterOptions = {
-  /** How long a quota or authentication failure keeps a route out of rotation. */
+  /**
+   * How long a quota or authentication failure keeps a route out of rotation when
+   * nothing says when access returns. A reported reset — in the failure's own text
+   * or in the provider's usage windows — replaces it.
+   */
   readonly cooldownMs?: number;
+  /** Reads a provider's usage windows to learn when a quota returns. */
+  readonly usageProbe?: (
+    route: ProviderRouteConfig,
+    signal?: AbortSignal,
+  ) => Promise<UsageResume | null>;
   /** Attempts on one route for transient failures before the next route is tried. */
   readonly retries?: number;
   readonly retryDelayMs?: number;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
-  /** Per-route transport override (tests and gateways with a shared fetch). */
+  /** Per-route transport override (tests, gateways with a shared fetch). */
   readonly fetchFor?: (route: ProviderRouteConfig) => typeof fetch | undefined;
   readonly onDiagnostic?: (diagnostic: ProviderDiagnostic) => void;
   /** Transport for every route, overriding the per-route hook (routing tests). */
@@ -45,6 +61,8 @@ export type ProviderDiagnostic = {
   readonly model: string;
   readonly reason?: string;
   readonly retryInMs?: number;
+  /** ISO instant the suspended route may be used again; absent when none is known. */
+  readonly until?: string;
   readonly failedProvider?: string;
   readonly contextKey?: string;
   readonly error?: string;
@@ -52,17 +70,59 @@ export type ProviderDiagnostic = {
 
 type Route = ProviderRouteConfig & { readonly index: number };
 
+/**
+ * OpenCode's gateway asks every client to name the session with
+ * `x-opencode-session`; without it a request is refused outright (HTTP 400
+ * MissingSessionID). The header is a property of that route, so it is added here
+ * rather than by whichever process happens to call it.
+ */
+function withGatewayHeaders(route: ProviderRouteConfig): ProviderRouteConfig {
+  if (!route.baseUrl.includes("opencode.ai")) return route;
+  return {
+    ...route,
+    headers: { ...route.headers, [OPENCODE_SESSION_HEADER]: route.name },
+  };
+}
+
 const DEFAULT_COOLDOWN_MS = 15 * 60_000;
 const DEFAULT_RETRIES = 1;
 const DEFAULT_RETRY_DELAY_MS = 250;
 
 /**
+ * Reads the reset a failure's own text names: "resets in 1d 11h", "resets in 31m".
+ * Milliseconds from now, or null when the text names none.
+ */
+export function namedResetMs(detail: string): number | null {
+  const match = /resets? in ((?:\d+[dhms]\s*)+)/i.exec(detail);
+  if (!match?.[1]) return null;
+  const units: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1_000 };
+  let total = 0;
+  for (const part of match[1].matchAll(/(\d+)([dhms])/gi)) {
+    total += Number(part[1] ?? 0) * (units[(part[2] ?? "s").toLowerCase()] ?? 0);
+  }
+  return total > 0 ? total : null;
+}
+
+/** A wait the owner can read: minutes for brief holds, larger units after. */
+export function formatWait(ms: number): string {
+  const minutes = Math.max(0, Math.ceil(ms / 60_000));
+  if (minutes < 180) return `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours < 48) return rest === 0 ? `${hours}시간` : `${hours}시간 ${rest}분`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours === 0 ? `${days}일` : `${days}일 ${restHours}시간`;
+}
+
+/**
  * Routes model calls with per-context affinity: a conversation keeps the route
  * it started on while that route is healthy, so one context is served by one
  * provider. Transient failures retry the same route and then fall back for this
- * call only. Quota and authentication failures suspend the route for a cooldown,
- * and the context moves to the next healthy route. A response that already
- * streamed text or tool calls is never replayed elsewhere.
+ * call only. Quota and authentication failures suspend the route — until the reset
+ * the provider reports, or a fixed cooldown when it reports none — and the context
+ * moves to the next healthy route. A response that already streamed text or tool
+ * calls is never replayed elsewhere.
  */
 export function createRoutingStream(
   config: ProvidersConfig,
@@ -72,24 +132,27 @@ export function createRoutingStream(
   readonly activeRoute: (contextKey: string) => string | null;
 } {
   const routes: readonly Route[] = [config.primary, ...config.fallbacks].map((route, index) => ({
-    ...route,
+    ...withGatewayHeaders(route),
     index,
   }));
   const streams = new Map<number, StreamFn>();
   let fetchOverride: typeof fetch | undefined;
-  /** A transport supplied after creation (a test override) rebuilds adapters lazily. */
-  const transport = (route: Route): typeof fetch | undefined =>
-    fetchOverride ?? options.fetchImplOverride ?? options.fetchFor?.(route);
+  /**
+   * Every route reads its own endpoint through this network fetch when no
+   * per-route transport is configured. `fetch` looked up unbound and called
+   * without its global object is not a callable transport.
+   */
+  const network = globalThis.fetch.bind(globalThis);
+  const transport = (route: Route): typeof fetch =>
+    fetchOverride ?? options.fetchImplOverride ?? options.fetchFor?.(route) ?? network;
   const stream = (route: Route): StreamFn => {
     const existing = streams.get(route.index);
     if (existing) return existing;
-    const impl = transport(route);
     const created = openAiStream({
       baseUrl: route.baseUrl,
       apiKey: route.apiKey,
       model: route.model,
       ...(route.headers === undefined ? {} : { headers: route.headers }),
-      ...(impl === undefined ? {} : { fetchImpl: impl }),
     });
     streams.set(route.index, created);
     return created;
@@ -103,6 +166,8 @@ export function createRoutingStream(
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const cooldownUntil = new Map<number, number>();
   const preferred = new Map<string, number>();
+  /** The last failure per route, kept so an exhausted answer says why. */
+  const lastError = new Map<number, ProviderError>();
   const history: ProviderDiagnostic[] = [];
 
   /** Per-call sink from StreamOptions, so a run's decisions reach its own log. */
@@ -111,6 +176,20 @@ export function createRoutingStream(
     history.push(diagnostic);
     callSink?.(diagnostic);
     options.onDiagnostic?.(diagnostic);
+  };
+
+  /**
+   * How long a route's failure keeps it out of rotation. A reset the provider
+   * reported is exact, so the route returns the moment its quota does; the fixed
+   * cooldown only covers a provider that says nothing.
+   */
+  const suspendFor = async (route: Route, error: ProviderError): Promise<number> => {
+    if (error.kind !== "quota_exhausted") return cooldownMs;
+    const named = namedResetMs(error.detail ?? "");
+    if (named !== null) return named;
+    if (!options.usageProbe) return cooldownMs;
+    const resume = await options.usageProbe(route).catch(() => null);
+    return resume === null ? cooldownMs : Math.max(0, resume.resumeAt - now());
   };
 
   /** Healthy routes in preference order: the context's route first, then config order. */
@@ -124,6 +203,44 @@ export function createRoutingStream(
     });
   };
 
+  /** The route a caller should be told about next: the first one out of cooldown. */
+  const soonest = (): { route: Route; waitMs: number } | null => {
+    const open = routes
+      .map((route) => ({ route, until: cooldownUntil.get(route.index) ?? 0 }))
+      .filter((entry) => entry.until > now())
+      .toSorted((left, right) => left.until - right.until);
+    const next = open[0];
+    return next ? { route: next.route, waitMs: Math.max(0, next.until - now()) } : null;
+  };
+
+  /**
+   * The one error for an answer that cannot be produced: every route is suspended,
+   * or every route failed on this call. It names the route that returns first and
+   * when, and repeats what each route actually said.
+   */
+  const outage = (contextKey: string, where: "cooldown" | "failed"): ProviderError => {
+    const next = soonest();
+    const reasons = [...lastError.values()].map((error) => error.message);
+    report({
+      kind: "provider.exhausted",
+      provider: next?.route.name ?? routes[0]?.name ?? "unknown",
+      model: next?.route.model ?? routes[0]?.model ?? "unknown",
+      reason: where === "cooldown" ? "all routes are in cooldown" : "every route failed",
+      retryInMs: next?.waitMs ?? 0,
+      ...(next ? { until: new Date(now() + next.waitMs).toISOString() } : {}),
+      contextKey,
+      ...(reasons.length > 0 ? { error: reasons.join("\n") } : {}),
+    });
+    const headline = next
+      ? `모든 모델 경로를 지금은 쓸 수 없습니다. ${next.route.name} 경로가 ${formatWait(next.waitMs)} 후 다시 열립니다.`
+      : "모든 모델 경로가 실패했습니다.";
+    return new ProviderError(
+      "quota_exhausted",
+      503,
+      [headline, ...reasons].filter((line) => line.length > 0).join("\n"),
+    );
+  };
+
   const describe = (error: ProviderError): string =>
     error.detail && error.detail.length > 0 ? error.message : error.kind;
 
@@ -133,26 +250,13 @@ export function createRoutingStream(
     streamOptions: Omit<StreamOptions, "fetchImpl">,
   ): AsyncIterable<AdapterEvent> {
     const contextKey = streamOptions.contextKey ?? "default";
-    const candidates = ranked(contextKey);
-    if (candidates.length === 0) {
-      const next = Math.min(...routes.map((route) => cooldownUntil.get(route.index) ?? 0));
-      const waitMs = Math.max(0, next - now());
-      report({
-        kind: "provider.exhausted",
-        provider: routes[0]?.name ?? "unknown",
-        model: routes[0]?.model ?? "unknown",
-        reason: "all routes are in cooldown",
-        retryInMs: waitMs,
-        contextKey,
-      });
-      throw new ProviderError(
-        "quota_exhausted",
-        503,
-        `모든 모델 경로가 사용할 수 없습니다. 가장 빠른 경로는 ${Math.ceil(waitMs / 60_000)}분 후 다시 열립니다.`,
-      );
-    }
+    // Every model call is routed again, including the next round of one reply: a
+    // route suspended a moment ago is still suspended now, and the round must not
+    // replay it because the previous round happened to answer.
+    if (ranked(contextKey).length === 0) throw outage(contextKey, "cooldown");
 
-    const failures: string[] = [];
+    // Fixed before any suspension, so "the next route" stays the route after this one.
+    const candidates = ranked(contextKey);
     for (const [position, route] of candidates.entries()) {
       let attempt = 0;
       while (true) {
@@ -163,6 +267,9 @@ export function createRoutingStream(
           for await (const event of stream(route)(request, tools, {
             ...streamOptions,
             contextKey,
+            // Each route reads through its own transport: the endpoint belongs to the
+            // route, never to whichever transport answered the previous call.
+            fetchImpl: transport(route),
           })) {
             if (event.type !== "done") emitted.push(event);
             yield event;
@@ -181,16 +288,18 @@ export function createRoutingStream(
             throw providerError;
           }
           if (visible) throw providerError;
-          failures.push(`${route.name}/${route.model}: ${describe(providerError)}`);
+          lastError.set(route.index, providerError);
           if (providerError.unhealthy) {
-            cooldownUntil.set(route.index, now() + cooldownMs);
+            const held = await suspendFor(route, providerError);
+            cooldownUntil.set(route.index, now() + held);
             preferred.delete(contextKey);
             report({
               kind: "provider.fallback",
               provider: candidates[position + 1]?.name ?? route.name,
               model: candidates[position + 1]?.model ?? route.model,
               reason: providerError.kind,
-              retryInMs: cooldownMs,
+              retryInMs: held,
+              until: new Date(now() + held).toISOString(),
               failedProvider: route.name,
               contextKey,
               error: describe(providerError),
@@ -223,20 +332,7 @@ export function createRoutingStream(
         }
       }
     }
-
-    report({
-      kind: "provider.exhausted",
-      provider: routes[0]?.name ?? "unknown",
-      model: routes[0]?.model ?? "unknown",
-      reason: "every route failed",
-      retryInMs: 0,
-      contextKey,
-    });
-    throw new ProviderError(
-      "quota_exhausted",
-      undefined,
-      `모든 모델 경로가 실패했습니다.\n${failures.join("\n")}`,
-    );
+    throw outage(contextKey, "failed");
   }
   const routed = async function* (
     messages: readonly Message[],

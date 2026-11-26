@@ -10,6 +10,7 @@ import { BASE_POLICY, decide, type PolicyRule } from "../../core/policy";
 import { leaseExpiry } from "../../core/run-state";
 import type { ChatMessage, StreamFn } from "../../providers/openai";
 import type { ProviderDiagnostic } from "../../providers/router";
+import { formatWait } from "../../providers/router";
 import { specs, type ToolRegistry } from "../../tools/registry";
 import { keepLease, ownsLease } from "../work/lease";
 import { z } from "zod";
@@ -66,18 +67,29 @@ function reason(error: unknown): string {
 /** One readable line per routing decision, e.g. a provider suspended by quota. */
 function describeRouting(diagnostic: ProviderDiagnostic): string {
   const target = `${diagnostic.provider}/${diagnostic.model}`;
+  const hold =
+    diagnostic.retryInMs !== undefined && diagnostic.retryInMs > 0
+      ? formatWait(diagnostic.retryInMs)
+      : null;
+  const back = diagnostic.until === undefined ? "" : ` (~${diagnostic.until})`;
   switch (diagnostic.kind) {
     case "provider.retry":
       return `모델 경로 ${target} 응답 실패(${diagnostic.reason ?? "unknown"}), 같은 경로로 다시 시도합니다.`;
     case "provider.fallback": {
-      const cooldown =
-        diagnostic.retryInMs && diagnostic.retryInMs > 0
-          ? ` ${Math.ceil(diagnostic.retryInMs / 60_000)}분 동안 사용하지 않습니다.`
-          : " 이번 호출만 대체 경로를 사용합니다.";
-      return `모델 경로 ${diagnostic.failedProvider ?? "?"} 실패(${diagnostic.reason ?? "unknown"}): ${diagnostic.error ?? ""} → ${target}로 전환.${cooldown}`;
+      const suspension =
+        hold === null
+          ? " 이번 호출만 대체 경로를 사용합니다."
+          : ` ${diagnostic.failedProvider ?? "?"} 경로는 ${hold} 동안 사용하지 않습니다${back}.`;
+      return `모델 경로 ${diagnostic.failedProvider ?? "?"} 실패(${diagnostic.reason ?? "unknown"}): ${diagnostic.error ?? ""} → ${target}로 전환.${suspension}`;
     }
     case "provider.exhausted":
-      return `사용 가능한 모델 경로가 없습니다. ${diagnostic.retryInMs ? `${Math.ceil(diagnostic.retryInMs / 60_000)}분 후 다시 시도할 수 있습니다.` : ""}`.trim();
+      return [
+        `사용 가능한 모델 경로가 없습니다.`,
+        hold === null ? "" : `${diagnostic.provider} 경로가 ${hold} 후 다시 열립니다${back}.`,
+        diagnostic.error ?? "",
+      ]
+        .filter((line) => line.length > 0)
+        .join("\n");
     case "provider.recovered":
       return `대체 모델 경로 ${target}에서 응답했습니다.`;
     default: {

@@ -98,7 +98,7 @@ describe("workflow definition contract", () => {
       id: "wf-system-briefing-morning",
       title: "아침 브리핑",
       instruction: "브리핑을 만든다",
-      executor_json: '{"kind":"script","path":"jobs/briefing.ts","args":[]}',
+      executor_json: '{"kind":"script","path":"@builtin/briefing.ts","args":[]}',
       params_json: "[]",
       timeout_seconds: 900,
       created_at: "2026-01-01T00:00:00.000Z",

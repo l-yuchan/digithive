@@ -236,3 +236,79 @@ describe("openai adapter error detail", () => {
     expect(failure).rejects.toMatchObject({ kind: "empty_output" });
   });
 });
+
+/**
+ * The reported failure: the primary answers 429 "monthly, resets in 1d 11h", the
+ * fallback is healthy, yet the next sentence says no route is available.
+ */
+describe("a quota failure suspends its route until the reset it reports", () => {
+  const MONTHLY =
+    "OpenCode Go usage limit reached (monthly, resets in 1d 11h). To keep going now, turn on Extra Usage.";
+
+  test("the reported text becomes a suspension ending at that reset, and the fallback answers", async () => {
+    let now = 0;
+    const { fetchImpl, calls } = transport(
+      () => quotaBody(MONTHLY),
+      () => answer("대체 경로 응답"),
+    );
+    const { stream, diagnostics } = routed(
+      [route("primary"), route("backup")],
+      fetchImpl,
+      () => now,
+    );
+    expect(await collect(stream([], [], { ...options(fetchImpl), contextKey: "s-1" }))).toBe(
+      "대체 경로 응답",
+    );
+    const fallback = diagnostics.find((record) => record.kind === "provider.fallback");
+    // 1d 11h = 35 hours, not the fixed 15 minutes.
+    expect(fallback?.retryInMs).toBe(35 * 3_600_000);
+    expect(fallback?.until).toBe(new Date(35 * 3_600_000).toISOString());
+    // Eleven hours in, the fallback still answers: the primary has not reset.
+    now = 11 * 3_600_000;
+    expect(await collect(stream([], [], { ...options(fetchImpl), contextKey: "s-2" }))).toBe(
+      "대체 경로 응답",
+    );
+    expect(calls.map((url) => new URL(url).host)).toEqual(["primary", "backup", "backup"]);
+  });
+
+  test("a provider whose usage windows report the reset is asked when its message names none", async () => {
+    const now = 0;
+    const { fetchImpl } = transport(
+      () => quotaBody("usage limit reached"),
+      () => answer("백업"),
+    );
+    const primary = route("primary");
+    const probes: string[] = [];
+    const diagnostics: ProviderDiagnostic[] = [];
+    const stream = createRoutingStream(
+      { primary, fallbacks: [route("backup")] },
+      {
+        now: () => now,
+        sleep: async () => {},
+        fetchImplOverride: fetchImpl,
+        usageProbe: async (candidate) => {
+          probes.push(candidate.name);
+          return { resumeAt: now + 9 * 3_600_000, window: "monthly" };
+        },
+        onDiagnostic: (record) => diagnostics.push(record),
+      },
+    );
+    expect(await collect(stream([], [], options(fetchImpl)))).toBe("백업");
+    expect(probes).toEqual(["primary"]);
+    expect(diagnostics.find((record) => record.kind === "provider.fallback")?.retryInMs).toBe(
+      9 * 3_600_000,
+    );
+  });
+
+  test("a route already suspended is never called again for the next model call", async () => {
+    // The second call of one reply used to replay the route the first call answered on.
+    let now = 0;
+    const { fetchImpl, calls } = transport(quotaBody(MONTHLY), answer("백업"), answer("백업 둘째"));
+    const { stream } = routed([route("primary"), route("backup")], fetchImpl, () => now);
+    const run = () => collect(stream([], [], { ...options(fetchImpl), contextKey: "same" }));
+    expect(await run()).toBe("백업");
+    now = 1_000;
+    expect(await run()).toBe("백업 둘째");
+    expect(calls.map((url) => new URL(url).host)).toEqual(["primary", "backup", "backup"]);
+  });
+});

@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate } from "../src/store/db";
 import { EventLog } from "../src/events/log";
 import { installJobs, JOB_FILES, JOB_SOURCE_ROOT } from "../src/jobs/install";
 import { jobTools, listJobAccounts } from "../src/tools/jobs";
+import { resolveScriptPath } from "../src/surfaces/work/script";
 import { allowedTools } from "../src/sdk/capabilities";
 import { collectionExecutor } from "../src/workflows/collection";
 import { searchWorkflowIds } from "../src/workflows/workflow-search";
@@ -53,7 +54,7 @@ describe("the app's jobs are ordinary scripts", () => {
   test("a rewritten definition stays findable by its title", () => {
     const db = withWorkflow("wf-collect", "연결 자료 수집 · A", {
       kind: "script",
-      path: "jobs/collection.ts",
+      path: "@builtin/collection.ts",
       args: ["acct-a"],
       capabilities: ["account.read"],
     });
@@ -67,7 +68,7 @@ describe("the app's jobs are ordinary scripts", () => {
   test("a collection workflow names the job path and its account argument", () => {
     expect(collectionExecutor("acct-a")).toEqual({
       kind: "script",
-      path: "jobs/collection.ts",
+      path: "@builtin/collection.ts",
       args: ["acct-a"],
       capabilities: ["account.read"],
     });
@@ -118,5 +119,26 @@ describe("job capabilities gate the job tools", () => {
       await unconfigured.execute({ title: "t", body: "b" }, { runId: "r" }),
     );
     expect(raw).toEqual({ sent: 0, failed: 0, errors: ["push_unconfigured"] });
+  });
+});
+
+describe("@builtin/ names the app's own job", () => {
+  test("a builtin path reads the shipped file, not a same-named one under the scripts root", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "builtin-"));
+    await Bun.write(join(dir, "collection.ts"), 'console.log("owner copy");\n');
+    const resolved = resolveScriptPath(dir, "@builtin/collection.ts");
+    expect(resolved).toBe(realpathSync(join(JOB_SOURCE_ROOT, "collection.ts")));
+    expect(resolved).not.toContain(dir);
+  });
+
+  test("a builtin path cannot leave the app's jobs directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "builtin-"));
+    for (const path of ["@builtin/../src/server/main.ts", "@builtin/nested/job.ts", "@builtin/"])
+      expect(() => resolveScriptPath(dir, path)).toThrow(/script_(path_outside_root|not_found)/);
+  });
+
+  test("forgetting the prefix is the same thing as naming a missing file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "builtin-"));
+    expect(() => resolveScriptPath(dir, "collection.ts")).toThrow("script_not_found");
   });
 });

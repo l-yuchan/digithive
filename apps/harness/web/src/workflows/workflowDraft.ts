@@ -80,6 +80,13 @@ function scriptPath(value: string): string {
   if (path.length > 500) throw new Error("스크립트 경로는 500자 이하여야 합니다.");
   if (/\s/.test(path))
     throw new Error("경로에 공백을 넣을 수 없습니다. 인자는 줄당 하나씩 입력하세요.");
+  // `@builtin/<file>.ts` names one of the app's own jobs; everything else is a file
+  // under the server's scripts directory.
+  if (/^@builtin\/[^/\\]+\.(ts|js)$/.test(path)) return path;
+  if (path.startsWith("@builtin"))
+    throw new Error(
+      "@builtin/ 뒤에는 앱이 싣는 파일 이름 하나만 올 수 있습니다: @builtin/collection.ts.",
+    );
   if (/[;&|$<>`'"\\]/.test(path) || path.includes(":") || path.startsWith("/")) {
     throw new Error("서버 scripts 디렉터리 기준의 상대 파일 경로만 입력하세요.");
   }

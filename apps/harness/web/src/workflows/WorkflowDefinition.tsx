@@ -5,10 +5,10 @@ function executorLabel(executor: Executor): string {
   return executor.kind === "agent" ? "에이전트" : "스크립트";
 }
 
-/** The app's own jobs are scripts; calling one out by name is the only difference. */
+/** The app's own jobs are scripts whose path begins with `@builtin/`. */
 const JOB_LABELS: Readonly<Record<string, string>> = {
-  "jobs/collection.ts": "연결 자료 수집",
-  "jobs/briefing.ts": "브리핑 생성",
+  "@builtin/collection.ts": "연결 자료 수집",
+  "@builtin/briefing.ts": "브리핑 생성",
 };
 
 export function WorkflowDefinition({ workflow }: { readonly workflow: WorkflowView }) {

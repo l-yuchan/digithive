@@ -4,8 +4,9 @@ import { migrate } from "../src/store/db";
 import { OLDEST_OPENABLE } from "../src/store/db";
 
 /**
- * A database as the v10 build left it. Built by taking a fresh schema back to v10
- * with a pre-event entry, which is the only shape in the wild (the live server).
+ * A database as the v10 build left it, carrying the entry form that build's v12 step
+ * produced (the response events a v10 entry held, written back in place). Built by
+ * taking a fresh schema back to v10, which is the only shape in the wild.
  */
 function v10Database(): Database {
   const db = new Database(":memory:");
@@ -15,18 +16,22 @@ function v10Database(): Database {
     db.query(
       "INSERT INTO sessions(id,title,created_at,updated_at) VALUES ('s','kept','now','now')",
     ).run();
+    // The entry form the v10 build's v12 step stored: its response events, written in
+    // place. That step is retired, so a v10 database opened today already holds it.
     db.query(
       "INSERT INTO entries(id,session_id,kind,role,payload_json,created_at,seq) VALUES ('e','s','message','user',?,'now',1)",
     ).run(
       JSON.stringify({
-        parts: [
-          { type: "reasoning", text: "생각" },
-          { type: "tool_call", id: "c1", name: "gmail_search", arguments: "{}" },
+        events: [
+          { type: "thinking", id: 0, text: "생각" },
+          { type: "tool_call", id: 1, callId: "c1", name: "gmail_search", detail: "{}" },
           {
             type: "tool_result",
-            id: "c1",
+            id: 2,
+            callId: "c1",
             name: "gmail_search",
-            output: "ok",
+            detail: "ok",
+            failed: true,
             denied: true,
           },
         ],
@@ -57,7 +62,7 @@ test("a legacy database upgrades to exactly the schema a fresh database starts w
   migrate(fresh);
   expect(upgraded).toEqual(shape(fresh));
   expect(legacy.query<{ user_version: number }, []>("PRAGMA user_version").get()).toEqual({
-    user_version: 13,
+    user_version: 14,
   });
   legacy.close();
   fresh.close();

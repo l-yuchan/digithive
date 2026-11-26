@@ -45,7 +45,7 @@ function definition(db: Database, events: EventLog, now = BASE) {
       instruction: "자료를 수집한다",
       executor: {
         kind: "script",
-        path: "jobs/collection.ts",
+        path: "@builtin/collection.ts",
         args: ["acct-a"],
         capabilities: ["account.read"],
       },

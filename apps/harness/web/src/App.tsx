@@ -202,16 +202,35 @@ function reducer(state: State, action: Action): State {
 }
 
 /**
+ * The directory the app is served from, ending in `/`.
+ *
+ * `document.baseURI` is the *current page's* URL, not the mount point. On `/chat/<id>`
+ * it therefore pointed at the conversation, and every link was built on top of it:
+ * `/chat/<id>` → `/chat/<id>/chat/<id2>` → `//chat//chat//chat/<id3>`. The app is
+ * served at the origin root (the server answers `/`, `/chat`, `/chat/<id>` and the
+ * other tabs from one shell), so the root is the origin itself.
+ */
+function appRoot(): string {
+  return "/";
+}
+
+/** The app's own path: the address minus the root above. */
+function appPath(): string {
+  return new URL(window.location.href).pathname;
+}
+
+/**
  * The tab comes from the address, so a reload or a shared link opens the same screen and
  * back/forward move between tabs. A static host (a file:// preview, an `/assets/` shell)
  * cannot route paths, so there the address is a `?tab=` query instead; the app uses
  * whichever form its own location already uses.
  */
 function readLocation(): { tab: Tab; sessionId: string | null } {
-  const base = document.baseURI;
-  const path = decodeURIComponent(new URL(window.location.href).pathname);
-  const prefix = new URL(base).pathname.replace(/[^/]*$/, "");
-  if (path.startsWith(prefix)) return routeOf(`/${path.slice(prefix.length)}`);
+  const path = appPath();
+  // A query address is the static host's form; otherwise the path is the answer.
+  if (!new URLSearchParams(window.location.search).has("tab")) return routeOf(path);
+  const route = routeOf(path);
+  if (route.sessionId !== null) return route;
   const query = new URLSearchParams(window.location.search);
   if (query.get("oauth") !== null) return { tab: "connections", sessionId: null };
   const tab = query.get("tab");
@@ -221,22 +240,19 @@ function readLocation(): { tab: Tab; sessionId: string | null } {
 }
 
 function locationUsingQuery(): boolean {
-  const path = decodeURIComponent(new URL(window.location.href).pathname);
-  const prefix = new URL(document.baseURI).pathname.replace(/[^/]*$/, "");
-  return !path.startsWith(prefix) && new URLSearchParams(window.location.search).has("tab");
+  return new URLSearchParams(window.location.search).has("tab");
 }
 
 function addressFor(tab: Tab, sessionId: string | null): string {
-  const target = tabPath(tab, tab === "chat" ? sessionId : null);
+  const target = tabPath(tab, tab === "chat" ? sessionId : null).replace(/^\//, "");
   if (locationUsingQuery()) {
     const query = new URLSearchParams();
     if (tab !== "chat") query.set("tab", tab);
     if (tab === "chat" && sessionId) query.set("session", sessionId);
     const suffix = query.toString();
-    return `${document.baseURI.replace(/[^/]*$/, "")}${suffix.length > 0 ? `?${suffix}` : ""}`;
+    return `${window.location.origin}${appRoot()}${suffix.length > 0 ? `?${suffix}` : ""}`;
   }
-  const prefix = new URL(document.baseURI).pathname.replace(/[^/]*$/, "");
-  return `${window.location.origin}${prefix}${target}`;
+  return `${window.location.origin}${appRoot()}${target}`;
 }
 
 export function App() {
@@ -300,6 +316,14 @@ export function App() {
     const onPop = () => setRoute(readLocation());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // An address written by the old links is rewritten in place, so a bookmarked
+  // `//chat//chat/<id>` becomes `/chat/<id>` without a second entry in history.
+  useEffect(() => {
+    const current = readLocation();
+    const canonical = addressFor(current.tab, current.sessionId);
+    if (window.location.href !== canonical) window.history.replaceState(null, "", canonical);
   }, []);
 
   // The chat tab owns the conversation; opening another tab keeps it in memory.

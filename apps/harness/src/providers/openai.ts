@@ -121,7 +121,9 @@ export function openAiStream(config: ProviderConfig): StreamFn {
       options.signal.addEventListener("abort", onAbort, { once: true });
     }
     try {
-      const response = await fetchImpl(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      // Built apart from the call so a route's own transport can read it (a gateway's
+      // session header, a fixture asserting the endpoint) before it is sent.
+      const request: RequestInit = {
         method: "POST",
         headers: {
           authorization: `Bearer ${config.apiKey}`,
@@ -161,7 +163,11 @@ export function openAiStream(config: ProviderConfig): StreamFn {
               }),
         }),
         signal: controller.signal,
-      });
+      };
+      const response = await fetchImpl(
+        `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`,
+        request,
+      );
       // A JSON body on a 2xx is an error envelope, never a stream: keep it rather
       // than parsing an empty stream into a silent success.
       if (

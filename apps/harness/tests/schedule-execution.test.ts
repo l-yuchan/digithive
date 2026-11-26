@@ -22,7 +22,6 @@ import { resolveScriptPath } from "../src/surfaces/work/script";
 import { createWorkflow } from "../src/workflows/workflow-store";
 import { createBinding } from "../src/scheduler/schedule-store";
 import { dispatchDueSchedules } from "../src/scheduler/schedule-dispatch";
-import { collectionExecutor } from "../src/workflows/collection";
 import { RunExecutorSchema } from "../src/core/executor";
 import { scheduleTools } from "../src/tools/schedules";
 import { workflowTools } from "../src/tools/workflows";
@@ -309,18 +308,18 @@ describe("script and agent executors", () => {
     expect(
       RunExecutorSchema.parse({
         kind: "script",
-        path: "jobs/collection.ts",
+        path: "@builtin/collection.ts",
         args: ["acct-a"],
         capabilities: ["account.read"],
       }),
-    ).toMatchObject({ kind: "script", path: "jobs/collection.ts", args: ["acct-a"] });
+    ).toMatchObject({ kind: "script", path: "@builtin/collection.ts", args: ["acct-a"] });
   });
 
   test("a script without a scripts root fails instead of falling back to the model", async () => {
     const { db, deps, modelCalls } = setup();
     const run = enqueueRun(db, deps.events, {
       goal: "no root",
-      executor: { kind: "script", path: "jobs/briefing.ts", args: [] },
+      executor: { kind: "script", path: "@builtin/briefing.ts", args: [] },
       timeoutSeconds: 60,
     });
     expect(
@@ -445,16 +444,23 @@ describe("script and agent executors", () => {
         "gmail",
       );
     }
-    // A stand-in for the installed job: it records the argument it was given.
+    // A stand-in the owner wrote: it records the argument it was given. The account's
+    // collection workflow names it, so the schedule path is what runs here; a
+    // `@builtin/` path reads the app's own job and ignores the scripts root.
     await writeScript(
       root,
-      "jobs/collection.ts",
+      "jobs/collect-a.ts",
       "console.log(JSON.stringify({ accountId: process.argv[2] ?? null }));\n",
     );
     const { binding } = scheduledFixture(db, deps, {
       title: "A 수집",
       instruction: "A 계정의 자료을 모읍니다.",
-      executor: collectionExecutor("acct-a"),
+      executor: {
+        kind: "script",
+        path: "jobs/collect-a.ts",
+        args: ["acct-a"],
+        capabilities: ["account.read"],
+      },
       timeoutSeconds: 60,
     });
     db.query("UPDATE schedules SET next_run_at = ? WHERE id = ?").run(

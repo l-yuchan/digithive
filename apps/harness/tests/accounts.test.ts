@@ -748,7 +748,7 @@ describe("account API and tools", () => {
           instruction: "메일을 모읍니다",
           executor: {
             kind: "script",
-            path: "jobs/collection.ts",
+            path: "@builtin/collection.ts",
             args: [missing],
             capabilities: ["account.read"],
           },
@@ -783,7 +783,7 @@ describe("account API and tools", () => {
           instruction: "켜진 정보를 모읍니다",
           executor: {
             kind: "script",
-            path: "jobs/collection.ts",
+            path: "@builtin/collection.ts",
             args: [a],
             capabilities: ["account.read"],
           },
@@ -801,7 +801,7 @@ describe("account API and tools", () => {
       .get(a);
     expect(row === null ? {} : JSON.parse(row.executor_json)).toEqual({
       kind: "script",
-      path: "jobs/collection.ts",
+      path: "@builtin/collection.ts",
       args: [a],
       capabilities: ["account.read"],
     });

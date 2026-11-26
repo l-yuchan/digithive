@@ -26,15 +26,10 @@ const CAPABILITIES: readonly { id: CapabilityGroup; label: string; access: strin
   { id: "workflow.run", label: "워크플로 실행", access: "실행" },
 ];
 
-/** The app's own jobs: ordinary scripts whose path belongs to the app. */
-const SHIPPED_JOBS: readonly { path: string; label: string; capabilities: CapabilityGroup[] }[] = [
-  { path: "jobs/collection.ts", label: "연결 자료 수집", capabilities: ["account.read"] },
-  {
-    path: "jobs/briefing.ts",
-    label: "브리핑 생성",
-    capabilities: ["account.read", "mail.send"],
-  },
-];
+/** The app's own collection job takes the account as its first argument. */
+function isBuiltinCollection(path: string): boolean {
+  return path.trim() === "@builtin/collection.ts";
+}
 
 function executorKind(value: string): "agent" | "script" {
   if (value === "agent" || value === "script") return value;
@@ -42,14 +37,6 @@ function executorKind(value: string): "agent" | "script" {
 }
 
 export function ExecutorFields({ draft, accountsError, onChange }: Props) {
-  const shipped = SHIPPED_JOBS.find((job) => job.path === draft.scriptPath);
-  const chooseJob = (path: string) => {
-    const job = SHIPPED_JOBS.find((candidate) => candidate.path === path);
-    if (job) {
-      onChange("scriptPath", job.path);
-      onChange("capabilities", job.capabilities);
-    }
-  };
   const toggleCapability = (capability: CapabilityGroup, checked: boolean) =>
     onChange(
       "capabilities",
@@ -74,32 +61,18 @@ export function ExecutorFields({ draft, accountsError, onChange }: Props) {
       {draft.executorKind === "script" ? (
         <>
           <label className="field field-wide">
-            <span>앱이 제공하는 작업 (선택)</span>
-            <select
-              value={shipped ? draft.scriptPath : ""}
-              onChange={(event) => chooseJob(event.target.value)}
-              data-testid="workflow-job"
-            >
-              <option value="">직접 입력</option>
-              {SHIPPED_JOBS.map((job) => (
-                <option value={job.path} key={job.path}>
-                  {job.label} · {job.path}
-                </option>
-              ))}
-            </select>
-            <small>
-              앱이 실어 보내는 작업도 다른 스크립트와 같은 방식으로 실행됩니다. 경로만 다릅니다.
-            </small>
-          </label>
-          <label className="field field-wide">
             <span>스크립트 파일 경로</span>
             <input
               value={draft.scriptPath}
               onChange={(event) => onChange("scriptPath", event.target.value)}
-              placeholder="jobs/report.ts"
+              placeholder="report.ts 또는 @builtin/collection.ts"
               required
             />
-            <small>서버 scripts 기준의 상대 .ts/.js 경로입니다.</small>
+            <small>
+              서버 scripts 기준의 상대 .ts/.js 경로입니다. @builtin/으로 시작하면 앱이 직접 싣는
+              작업입니다: @builtin/collection.ts (연결 자료 수집), @builtin/briefing.ts (브리핑
+              생성).
+            </small>
           </label>
           <label className="field field-wide">
             <span>스크립트 인자 (줄당 하나)</span>
@@ -108,7 +81,7 @@ export function ExecutorFields({ draft, accountsError, onChange }: Props) {
               value={draft.scriptArgs}
               onChange={(event) => onChange("scriptArgs", event.target.value)}
             />
-            {shipped?.path === "jobs/collection.ts" ? (
+            {isBuiltinCollection(draft.scriptPath) ? (
               <small>첫 인자는 수집할 계정 id입니다. 연결 탭에서 계정 id를 확인하세요.</small>
             ) : null}
           </label>

@@ -1,5 +1,24 @@
 import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { JOB_SOURCE_ROOT } from "../../jobs/install";
+
+/**
+ * A script path that starts with this names one of the app's own jobs, not a file
+ * under the scripts root: `@builtin/collection.ts` is `jobs/collection.ts` as this
+ * app ships it, wherever the owner's own scripts live. A job is then an ordinary
+ * script with an unusual path, and there is no separate "the app provides this"
+ * concept to keep in sync.
+ */
+export const BUILTIN_PREFIX = "@builtin/";
+
+/** The file a `@builtin/…` path names, without checking that it exists. */
+export function builtinFile(path: string): string | null {
+  if (!path.startsWith(BUILTIN_PREFIX)) return null;
+  const file = path.slice(BUILTIN_PREFIX.length);
+  return file.length === 0 || file.includes("/") || file.includes("\\") || file.includes("..")
+    ? null
+    : file;
+}
 
 export type ScriptExecution = {
   readonly stdout: string;
@@ -25,6 +44,16 @@ function contained(parent: string, child: string): boolean {
  */
 export function resolveScriptPath(scriptsRoot: string, path: string): string {
   if (path.length === 0 || isAbsolute(path)) throw new Error("script_path_outside_root");
+  // `@builtin/<file>` is read from the app's own jobs directory. The copy installed
+  // under the scripts root is planted from there, so both run the same file content;
+  // reading the shipped copy means an edited install cannot change a builtin.
+  if (path.startsWith(BUILTIN_PREFIX)) {
+    const file = builtinFile(path);
+    if (file === null) throw new Error("script_path_outside_root");
+    const target = resolve(JOB_SOURCE_ROOT, file);
+    if (!existsSync(target)) throw new Error("script_not_found");
+    return realpathSync(target);
+  }
   if (!existsSync(scriptsRoot)) throw new Error("scripts_root_unavailable");
   const root = realpathSync(scriptsRoot);
   const target = resolve(root, path);

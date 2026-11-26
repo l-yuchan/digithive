@@ -10,7 +10,7 @@ export const COLLECTION_INTERVAL_SECONDS = 900;
 
 /**
  * Collection is the app's own script job, so a collection workflow is an ordinary
- * script workflow whose path points at `jobs/collection.ts`. What it reads is not
+ * script workflow whose path is `@builtin/collection.ts`. What it reads is not
  * written down here: the script asks the account list for the sources that are on,
  * so turning a feature off stops collection without an edit.
  */

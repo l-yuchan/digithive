@@ -14,6 +14,7 @@ import { fileTools } from "./tools/files";
 import { jobTools } from "./tools/jobs";
 import { installJobs } from "./jobs/install";
 import { createRoutingStream, type ProviderRouteConfig } from "./providers/router";
+import { fetchUsageResume } from "./providers/usage";
 import { settleExpiredRuns } from "./core/run-state";
 import {
   claimNext,
@@ -125,7 +126,19 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   };
   const stream = createRoutingStream(
     { primary, fallbacks: config.fallbackProviders },
-    { cooldownMs: config.providerCooldownMs, retries: config.providerRetries },
+    {
+      cooldownMs: config.providerCooldownMs,
+      retries: config.providerRetries,
+      // A quota failure that names no reset asks the provider's usage windows; any
+      // route whose /usage is not a usage document simply keeps the fixed cooldown.
+      usageProbe: (route) =>
+        fetchUsageResume({
+          baseUrl: route.baseUrl,
+          apiKey: route.apiKey,
+          ...(route.headers === undefined ? {} : { headers: route.headers }),
+          now: Date.now(),
+        }),
+    },
   );
   // `workflow_run` executes inline and therefore needs the work layer that owns
   // the registry; the getter reads the holder once the runtime object exists.

@@ -15,32 +15,61 @@ export const TAB_PATHS: Record<Tab, string> = {
 
 const FIXED_TABS: readonly Tab[] = ["work", "workflows", "connections", "knowledge"];
 
-/** The tab a pathname belongs to, and the conversation it names (chat only). */
 /**
- * A same-origin URL for a tab. The path alone is not enough: the app is also reachable
- * under a prefix (and from the file:// shell in a test), so links keep the current
- * directory and only replace the trailing segments.
+ * The problem this solves, recorded because it was reported from the live site: the
+ * tab links multiplied their own separators. `/chat` opened became `//chat`, and a
+ * conversation switch made `//chat/chat/<id>`; after three switches and a tab change
+ * the address read `//chat//chat//chat///workflows`. A browser keeps an address exactly
+ * as it was pushed, so the parser must accept them, and the app must never write one.
+ *
+ * Parsing, stated plainly:
+ *   - empty segments (whatever a run of slashes produced) do not exist;
+ *   - the word `chat` repeated directly after itself is the tab naming itself again,
+ *     which a doubled slash produced, so only the first one counts;
+ *   - `chat` takes at most one id, and a tab word after that id is the tab, not a
+ *     second conversation.
  */
-export function tabHref(tab: Tab, base: string, sessionId?: string | null): string {
-  const root = base.replace(/[^/]*$/, "");
-  const path = tabPath(tab, sessionId).replace(/^\//, "");
-  return `${root}${path}`;
+/** The tab a word names, or null when it names no tab. */
+function fixedTab(word: string): Tab | null {
+  for (const tab of FIXED_TABS) if (tab === word) return tab;
+  return null;
 }
 
 export function routeOf(pathname: string): { tab: Tab; sessionId: string | null } {
-  const segments = pathname.split("/").filter((segment) => segment.length > 0);
-  const head = segments[0];
+  const pieces: string[] = [];
+  for (const part of pathname.split("/")) if (part !== "") pieces.push(part);
+
+  const cleaned: string[] = [];
+  for (const part of pieces) {
+    const last = cleaned.length === 0 ? null : cleaned[cleaned.length - 1];
+    if (part === "chat" && last === "chat") continue;
+    cleaned.push(part);
+  }
+
+  const head: string | undefined = cleaned[0];
   if (head === undefined) return { tab: "chat", sessionId: null };
-  const fixed = FIXED_TABS.find((tab) => tab === head);
-  if (fixed) return { tab: fixed, sessionId: null };
-  if (head !== "chat") return { tab: "chat", sessionId: null };
-  const id = segments[1];
-  if (id === undefined || segments.length > 2) return { tab: "chat", sessionId: null };
+  if (head !== "chat") {
+    const fixed = fixedTab(head);
+    return fixed === null ? { tab: "chat", sessionId: null } : { tab: fixed, sessionId: null };
+  }
+  if (cleaned.length > 2) {
+    const after = fixedTab(cleaned[2] ?? "");
+    return after === null ? { tab: "chat", sessionId: null } : { tab: after, sessionId: null };
+  }
+  const id = cleaned.length === 2 ? cleaned[1] : null;
+  if (id === null || id === undefined) return { tab: "chat", sessionId: null };
   try {
     return { tab: "chat", sessionId: decodeURIComponent(id) };
   } catch {
     return { tab: "chat", sessionId: null };
   }
+}
+
+/** The segments of a path with the empty ones dropped. */
+export function collapsePath(pathname: string): string[] {
+  const segments: string[] = [];
+  for (const part of pathname.split("/")) if (part !== "") segments.push(part);
+  return segments;
 }
 
 export function chatPath(sessionId: string | null | undefined): string {

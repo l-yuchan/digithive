@@ -354,56 +354,6 @@ export const V11: Transition = {
 };
 
 /**
- * v12 — entry payloads hold events in the database, not only when read.
- *
- * Records written before v11 store `parts`; every reader converted them on the way
- * out. v12 writes them back in the one shape every writer produces, so the read path
- * loses its legacy branch. A denied tool result keeps `denied` instead of being
- * folded into `failed`. The reset no longer creates the v1 `parts` table: nothing has
- * written it since entries became the payload owner.
- */
-export const V12: Transition = {
-  version: 12,
-  sql: "DROP TABLE IF EXISTS parts;",
-  run: (db) => {
-    const rows = db
-      .query<{ id: string; session_id: string; payload_json: string }, []>(
-        "SELECT id, session_id, payload_json FROM entries",
-      )
-      .all();
-    for (const row of rows) {
-      let payload: unknown;
-      try {
-        payload = JSON.parse(row.payload_json);
-      } catch {
-        continue;
-      }
-      if (typeof payload === "object" && payload !== null && "events" in payload) continue;
-      const events = eventsFromStoredParts(payload);
-      if (events === null) continue;
-      db.query("UPDATE entries SET payload_json=? WHERE id=?").run(
-        JSON.stringify({ events }),
-        row.id,
-      );
-      // Re-indexed by the same rule the writer uses, so a converted entry is as
-      // findable as one written today.
-      db.query("DELETE FROM entries_fts WHERE entry_id = ?").run(row.id);
-      const text = events
-        .map((event) => (event.type === "text" ? event.text : ""))
-        .filter((part) => part.length > 0)
-        .join("\n")
-        .trim();
-      if (text.length >= 3)
-        db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?,?,?)").run(
-          row.id,
-          row.session_id,
-          text,
-        );
-    }
-  },
-};
-
-/**
  * v13 — the conversation queue and who owns a title.
  *
  * `session_queue` holds what the owner said while an answer was still arriving, so
@@ -436,11 +386,38 @@ CREATE TABLE IF NOT EXISTS session_queue (
   },
 };
 
-/** The newest version this build writes. */
-export const LATEST = V13.version;
+/**
+ * v14 — the app's own jobs are named `@builtin/<file>`.
+ *
+ * They used to be spelled `jobs/collection.ts`, which read as a path under the owner's
+ * scripts directory and needed a separate "the app provides this" picker in the form. The
+ * `@builtin/` prefix says which directory the file comes from, so a job is an ordinary
+ * script. Every stored executor that named a job is rewritten here; a definition already
+ * writing `@builtin/…` is left alone.
+ */
+export const V14: Transition = {
+  version: 14,
+  sql: "SELECT 1;",
+  run: (db) => {
+    for (const [from, to] of [
+      ["jobs/collection.ts", "@builtin/collection.ts"],
+      ["jobs/briefing.ts", "@builtin/briefing.ts"],
+    ]) {
+      db.query(
+        "UPDATE workflows SET executor_json=replace(executor_json, ?, ?) WHERE instr(executor_json, ?) > 0",
+      ).run(`"${from}"`, `"${to}"`, `"${from}"`);
+      db.query(
+        "UPDATE runs SET executor_json=replace(executor_json, ?, ?) WHERE instr(executor_json, ?) > 0",
+      ).run(`"${from}"`, `"${to}"`, `"${from}"`);
+    }
+  },
+};
 
-/** At most two steps, as the rule requires (v11 is retired), oldest first. */
-export const TRANSITIONS: readonly Transition[] = [V12, V13];
+/** The newest version this build writes. */
+export const LATEST = V14.version;
+
+/** At most two steps, as the rule requires (v12 is retired), oldest first. */
+export const TRANSITIONS: readonly Transition[] = [V13, V14];
 
 /** The executor a shipped job carries: the path, the account, the grant. */
 export function shippedExecutor(
@@ -465,16 +442,18 @@ export function shippedExecutor(
   job: "collection" | "briefing",
   accountId?: unknown,
 ): Record<string, unknown> {
+  // `@builtin/<file>` is how the app's own job is named now: a script whose path
+  // belongs to the app rather than to the owner's scripts directory.
   if (job === "briefing")
     return {
       kind: "script",
-      path: "jobs/briefing.ts",
+      path: "@builtin/briefing.ts",
       args: [],
       capabilities: ["account.read", "mail.send"],
     };
   return {
     kind: "script",
-    path: "jobs/collection.ts",
+    path: "@builtin/collection.ts",
     args: typeof accountId === "string" && accountId.length > 0 ? [accountId] : [],
     capabilities: ["account.read"],
   };
