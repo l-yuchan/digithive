@@ -53,7 +53,9 @@ export function settleExpiredRuns(db: Database, now = Date.now(), owner?: string
     .all();
   const settled: string[] = [];
   const update = db.query(
-    "UPDATE runs SET status = 'interrupted', cancel_intent = 'host_restart', settled_at = ? WHERE id = ? AND status = 'running'",
+    // A run the owner already asked to stop keeps that record: recovery repaints it as
+    // interrupted, but never overwrites who asked for it.
+    "UPDATE runs SET status = 'interrupted', cancel_intent = CASE WHEN cancel_intent = 'user' THEN 'user' ELSE 'host_restart' END, settled_at = ? WHERE id = ? AND status = 'running'",
   );
   for (const row of rows) {
     if (owner && row.lease_expires_at !== null && !isLeaseExpired(row.lease_expires_at, now))

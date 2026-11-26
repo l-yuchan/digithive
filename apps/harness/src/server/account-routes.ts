@@ -244,8 +244,10 @@ export async function handleAccountRequest(
 
   const sourceMatch = /^\/api\/accounts\/([^/]+)\/sources\/([^/]+)$/.exec(path);
   if (sourceMatch && request.method === "PATCH") {
-    const accountId = decodeURIComponent(sourceMatch[1] ?? "");
-    const source = parseSource(decodeURIComponent(sourceMatch[2] ?? ""));
+    // `url.pathname` is already percent-decoded; decoding it again throws URIError on
+    // any id that contains a literal `%`.
+    const accountId = sourceMatch[1] ?? "";
+    const source = parseSource(sourceMatch[2] ?? "");
     const parsed = z
       .object({ enabled: z.boolean() })
       .safeParse(await request.json().catch(() => null));
@@ -277,7 +279,7 @@ export async function handleAccountRequest(
 
   const deleteMatch = /^\/api\/accounts\/([^/]+)$/.exec(path);
   if (deleteMatch && request.method === "DELETE") {
-    const accountId = decodeURIComponent(deleteMatch[1] ?? "");
+    const accountId = deleteMatch[1] ?? "";
     if (!getAccount(deps.google.db, accountId))
       return json({ error: "account_not_found", detail: accountId }, 404);
     deleteAccount(deps.google.db, accountId);

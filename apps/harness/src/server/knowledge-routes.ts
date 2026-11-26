@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { z } from "zod";
-import { unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { listMemories, remember, correctMemory, MEMORY_KINDS } from "../knowledge/memory";
 import { listFiles, storeFile, readStoredFile } from "../files/store";
 
@@ -93,7 +93,9 @@ export async function handleKnowledgeRequest(
     if (request.method === "DELETE" && !file[2]) {
       const stored = readStoredFile(deps.db, id);
       if (!stored) return json({ error: "file_not_found" }, 404);
-      unlinkSync(stored.meta.path);
+      // The row is what the API answers for, and the bytes may already be gone (a
+      // restored database, a wiped file root): deleting must still clear the row.
+      if (existsSync(stored.meta.path)) unlinkSync(stored.meta.path);
       deps.db.query("DELETE FROM files WHERE id = ?").run(id);
       return json({ deleted: true });
     }

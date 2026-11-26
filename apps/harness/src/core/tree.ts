@@ -31,20 +31,22 @@ export function setLeaf(db: Database, sessionId: string, entryId: string | null)
 export function pathEntries(db: Database, sessionId: string, leafId?: string | null): Entry[] {
   const all = listEntries(db, sessionId);
   const byId = new Map(all.map((entry) => [entry.id, entry]));
-  let current = leafId === undefined ? getLeaf(db, sessionId) : leafId;
-  if (!current) {
-    const last = all.at(-1);
-    return last ? [last] : [];
-  }
+  const current = leafId === undefined ? getLeaf(db, sessionId) : leafId;
+  const last = all.at(-1);
+  // A leaf that names no entry of this session (a pruned row, a restored copy) shows
+  // the newest entry, the same as a session whose leaf was never set: an empty
+  // conversation over intact history would read as data loss.
+  if (!current || !byId.has(current)) return last ? [last] : [];
   const chain: Entry[] = [];
   const seen = new Set<string>();
-  while (current) {
-    if (seen.has(current)) break;
-    seen.add(current);
-    const entry = byId.get(current);
+  let step: string | null = current;
+  while (step) {
+    if (seen.has(step)) break;
+    seen.add(step);
+    const entry = byId.get(step);
     if (!entry) break;
     chain.push(entry);
-    current = entry.parentId;
+    step = entry.parentId;
   }
   return chain.toReversed();
 }

@@ -39,6 +39,15 @@ function toMemory(row: z.infer<typeof MemoryRow>): Memory {
   };
 }
 
+/** A stored source is unvalidated text; a row that is not JSON reads as no source. */
+function parseSource(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 export function remember(
   db: Database,
   input: {
@@ -50,13 +59,17 @@ export function remember(
 ): Memory {
   const id = crypto.randomUUID();
   const iso = new Date(input.now ?? Date.now()).toISOString();
+  // The stored text is what a reader gets back, so it is also what this returns: the
+  // rows hold at most 4000 characters, and a caller comparing the two must not see a
+  // longer value than the database kept.
+  const text = input.text.slice(0, 4_000);
   db.query(
     "INSERT INTO memories (id, kind, text, source_json, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-  ).run(id, input.kind, input.text.slice(0, 4_000), JSON.stringify(input.source ?? {}), iso, iso);
+  ).run(id, input.kind, text, JSON.stringify(input.source ?? {}), iso, iso);
   return {
     id,
     kind: input.kind,
-    text: input.text,
+    text,
     source: input.source ?? {},
     supersededBy: null,
     createdAt: iso,
@@ -96,7 +109,9 @@ export function correctMemory(
     const created = remember(db, {
       kind: z.enum(MEMORY_KINDS).parse(existing.kind),
       text: input.text,
-      source: JSON.parse(existing.source_json),
+      // Read the way every reader of this column does: a row whose source_json is not
+      // valid JSON still gets corrected, keeping its correction without that source.
+      source: parseSource(existing.source_json),
       ...(input.now === undefined ? {} : { now: input.now }),
     });
     db.query("UPDATE memories SET superseded_by = ?, updated_at = ? WHERE id = ?").run(

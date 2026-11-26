@@ -97,8 +97,12 @@ export function listRuns(db: Database, filters: RunFilters | number = {}, cap = 
   const where: string[] = [];
   const bindings: SQLQueryBindings[] = [];
   if (options.query && options.query.trim().length > 0) {
-    const like = `%${options.query.trim()}%`;
-    where.push("(goal LIKE ? OR id LIKE ? OR result_json LIKE ?)");
+    // An operator's text is searched for, not interpreted: `%` and `_` typed into the
+    // filter must match themselves rather than every run.
+    const like = `%${options.query.trim().replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    where.push(
+      "(goal LIKE ? ESCAPE '\\' OR id LIKE ? ESCAPE '\\' OR result_json LIKE ? ESCAPE '\\')",
+    );
     bindings.push(like, like, like);
   }
   if (options.status) {
