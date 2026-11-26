@@ -18,12 +18,13 @@ recorded for the next round because the fix needs a decision about intended beha
 | R2 | `jobTools` was registered only when `installJobs` returned written files — never on a normal start — so a job's first tool call answered `unknown_tool` | fixed e98d90f |
 | R3 | A fresh checkout (CI) had no generated SDK, so lint and typecheck read it as a missing module | fixed a303ec7 |
 | R4 | Bun reports "Cannot find module" for a file that exists when its path holds a space | explained in the script's stderr |
+| R5 | Retiring v13 left a pre-reset database (v10/v11) stamped to the newest version without its queue table and two columns; the replacement repair in v11 never ran | found by the gate review, fixed 6ce5ed5 — the one kept step now repairs its own prerequisites and the guard test drops them from its fixture |
 
 ## Lane A — server routes & auth (`src/server`)
 
 | # | Finding | Status |
 |---|---|---|
-| A1 | `PATCH/DELETE /api/accounts/:id/sources/:source` decoded the already-decoded pathname; a literal `%` threw URIError → bodyless 500 | fixed 1fd3801 |
+| A1 | `PATCH/DELETE /api/accounts/:id/sources/:source` decoded the already-decoded pathname; a literal `%` threw URIError → bodyless 500 | corrected 6ce5ed5: a probe showed `url.pathname` keeps `%25` encoded, so decoding is right — the route now decodes once with a guard so a stray `%` cannot throw |
 | A2 | `/api/runs/:id/cancel` returns the whole `RunRow` while the client schema declares three fields | kept — Zod strips the extras; no failure today |
 | A3 | The workflow search route ignores `limit`, so every HTTP search returns 20 | kept |
 | A4 | `/api/workflows/:id/runs` stops at 30 runs with no cursor | kept |

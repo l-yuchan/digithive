@@ -52,4 +52,10 @@ Bun v1.4.4 (Linux x64)
 - 표면 실행: `createRuntime`으로 작업 도구를 연결한 런타임을 만들고 이미지와 같은 형태의
   루트에서 수집 워크플로를 실행. 수정 전 `failed` / `Cannot find module`, 수정 후 `succeeded`.
   증거 `.omo/evidence/job-sdk-fix/pre-fix-run.json`, `.omo/evidence/job-sdk-fix/local-surface-run.json`.
-- `bun run verify`: 291 pass, 0 fail; lint/typecheck/build/format 통과.
+- 라이브: 이미지 `9ac7d7f` 배포 후 연결된 세 계정(chanoil@hanyang.ac.kr, 한양 LMS,
+  chabun314@gmail.com)에 대해 수집 워크플로를 직접 실행 → 세 계정 모두 `succeeded`, 실패한 출처 없음
+  (`.omo/evidence/job-sdk-fix/live-run.json`).
+- 라이브 스케줄: 배포 후 정각 15분 간격 실행이 스스로 성공했다 — 2026-11-26T04:36, 04:51,
+  05:06 UTC 세 번 모두 세 계정 `succeeded`(`failed: []`). 보고된 실패는 수동 실행이 아니라
+  원래 경로(스케줄)에서 해결됐다.
+- `bun run verify`: 290 pass, 0 fail; lint/typecheck/build/format 통과.
