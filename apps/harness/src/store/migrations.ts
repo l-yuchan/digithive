@@ -81,7 +81,7 @@ CREATE VIRTUAL TABLE entries_fts USING fts5(
   entry_id UNINDEXED,
   session_id UNINDEXED,
   text,
-  tokenize = 'trigram'
+  tokenize = 'unicode61'
 );
 
 CREATE TABLE runs (
@@ -262,7 +262,7 @@ CREATE TABLE workflows (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX workflows_updated ON workflows(updated_at);
-CREATE VIRTUAL TABLE workflows_fts USING fts5(workflow_id UNINDEXED, text, tokenize = 'trigram');
+CREATE VIRTUAL TABLE workflows_fts USING fts5(workflow_id UNINDEXED, text, tokenize = 'unicode61');
 
 CREATE TABLE schedules (
   id TEXT PRIMARY KEY,
@@ -309,10 +309,22 @@ INSERT INTO account_sources(account_id,source) VALUES
  * `{kind:"builtin"}` executors, and a definition naming a shipped job without its
  * capabilities could not run. A fresh database never passes through it, because the
  * reset already carries the final shape and later seeds are written as scripts.
+ *
+ * The conversation columns and the queue table that v13 introduced arrive here too.
+ * v13 is retired, and a database written by that build is at v13, four steps back;
+ * these statements are written so running them again is harmless: the columns are
+ * added only when missing, and the table only when absent.
  */
 export const V11: Transition = {
   version: 11,
-  sql: "SELECT 1;",
+  sql: `
+CREATE TABLE IF NOT EXISTS session_queue (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`,
   run: (db) => {
     // What the v10 build itself wrote: a shipped job path, but without the capability
     // list v11 introduced. Both shapes it left behind are repaired.
@@ -350,6 +362,16 @@ export const V11: Transition = {
       );
       reindexWorkflow(db, row.id, row.title, row.instruction);
     }
+    // The two conversation columns v13 introduced; a database from that build already
+    // has them, so each is added only when the table does not.
+    const columns = db
+      .query<{ name: string }, []>("SELECT name FROM pragma_table_info('sessions')")
+      .all()
+      .map((column) => column.name);
+    if (!columns.includes("title_source"))
+      db.run("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'initial'");
+    if (!columns.includes("queue_paused"))
+      db.run("ALTER TABLE sessions ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0");
   },
 };
 
@@ -413,11 +435,47 @@ export const V14: Transition = {
   },
 };
 
-/** The newest version this build writes. */
-export const LATEST = V14.version;
+/**
+ * v15 — searches are indexed with `unicode61`, not `trigram`.
+ *
+ * `trigram` is a substring index over three-character runs, and it could not index
+ * Korean at all: `회의` matched nothing, while the 2-character fallback path (a LIKE
+ * over the raw serialised payload) matched JSON keys such as `id`. `unicode61` indexes
+ * every word, so a Korean word, a Latin word, and `"first" AND "second"` all match.
+ * Both indexes are rebuilt from the tables they describe, so searching conversations
+ * that already exist starts working at upgrade.
+ */
+export const V15: Transition = {
+  version: 15,
+  sql: `
+DROP TABLE IF EXISTS entries_fts;
+CREATE VIRTUAL TABLE entries_fts USING fts5(
+  entry_id UNINDEXED,
+  session_id UNINDEXED,
+  text,
+  tokenize = 'unicode61'
+);
+INSERT INTO entries_fts (entry_id, session_id, text)
+  SELECT e.id, e.session_id, group_concat(json_extract(part.value, '$.text'), ' ')
+  FROM entries e, json_each(e.payload_json, '$.events') AS part
+  WHERE json_extract(part.value, '$.text') IS NOT NULL
+  GROUP BY e.id;
 
-/** At most two steps, as the rule requires (v12 is retired), oldest first. */
-export const TRANSITIONS: readonly Transition[] = [V13, V14];
+DROP TABLE IF EXISTS workflows_fts;
+CREATE VIRTUAL TABLE workflows_fts USING fts5(workflow_id UNINDEXED, text, tokenize = 'unicode61');
+INSERT INTO workflows_fts (workflow_id, text)
+  SELECT id, title || ' ' || instruction FROM workflows;
+`,
+  run: () => {
+    // The rebuild is the whole step and lives in `sql`, inside the step's transaction.
+  },
+};
+
+/** The newest version this build writes. */
+export const LATEST = V15.version;
+
+/** At most two steps, as the rule requires: the two after the reset (v11). */
+export const TRANSITIONS: readonly Transition[] = [V14, V15];
 
 /** The executor a shipped job carries: the path, the account, the grant. */
 export function shippedExecutor(

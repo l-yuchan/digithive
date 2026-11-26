@@ -260,7 +260,9 @@ function indexEntry(
 ): void {
   const text = indexText(events);
   db.query("DELETE FROM entries_fts WHERE entry_id = ?").run(entryId);
-  if (text.length >= 3)
+  // No length floor: a word is a token now, so even a one-character word is indexed.
+  // The floor belonged to the trigram index, where three characters was the minimum.
+  if (text.length > 0)
     db.query("INSERT INTO entries_fts (entry_id, session_id, text) VALUES (?, ?, ?)").run(
       entryId,
       sessionId,

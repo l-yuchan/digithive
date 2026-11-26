@@ -49,22 +49,30 @@ function writeVersion(db: Database, version: number): void {
  *   connection can still return the value chosen before the transaction began, so a
  *   step never re-reads the version inside its own transaction: the version travels
  *   as a parameter, and the recorded value is written after the last step commits.
- * - `db.transaction(fn)` does not reliably pass the callback value back, so whether
- *   a step ran is decided by the caller and reported from here.
+ * - the `user_version` read only answers through a statement whose result is kept, so
+ *   it is asked with `query().get()` and never with `exec`.
  */
-function runSteps(db: Database, version: number): number {
+/**
+ * Applies the kept steps after `version`. Returns the recorded version and how many
+ * steps it ran, counted where they run.
+ */
+function runSteps(
+  db: Database,
+  version: number,
+): { readonly recorded: number; readonly ran: number } {
   let recorded = version;
+  let ran = 0;
   for (const transition of TRANSITIONS) {
     if (recorded >= transition.version) continue;
-    const run = db.transaction((): void => {
+    db.transaction((): void => {
       db.exec(transition.sql);
       transition.run?.(db);
-    });
-    run();
+    })();
     recorded = transition.version;
+    ran += 1;
   }
   if (recorded !== version) writeVersion(db, recorded);
-  return recorded;
+  return { recorded, ran };
 }
 
 /**
@@ -84,7 +92,6 @@ export function migrate(db: Database): number {
   } else {
     version = before;
   }
-  const after = runSteps(db, version);
   // Every step on a fresh database is one the reset did not do, plus the reset itself.
-  return before === 0 ? after - RESET_VERSION : after - before;
+  return runSteps(db, version).ran;
 }

@@ -244,7 +244,12 @@ describe("conversation tree", () => {
     expect(typeof found[0]?.createdAt).toBe("string");
     expect(typeof found[0]?.updatedAt).toBe("string");
     expect(searchSessions(db, "준비물").map((row) => row.id)).toContain(sessionId);
+    // A word index, not a substring one: words that are not adjacent still match.
+    expect(searchSessions(db, "내일 회의").map((row) => row.id)).toContain(sessionId);
+    expect(searchSessions(db, "준비물 내일").map((row) => row.id)).toContain(sessionId);
     expect(searchSessions(db, "없는단어")).toHaveLength(0);
+    // The fallback reads message text, not the payload's own keys.
+    expect(searchSessions(db, "id")).toHaveLength(0);
     db.query("UPDATE sessions SET title='뉴스레터 자료' WHERE id=?").run(sessionId);
     expect(searchSessions(db, "뉴스레터").map((row) => row.id)).toEqual([sessionId]);
   });

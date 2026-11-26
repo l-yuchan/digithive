@@ -169,8 +169,17 @@ export function searchSessions(db: Database, query: string, limit = 20): Session
   const trimmed = query.trim();
   if (trimmed.length === 0) return [];
   const columns = "s.id,s.title,s.title_source,s.created_at,s.updated_at";
+  // A trigram index matches a contiguous phrase, so a multi-word search is one phrase
+  // per word joined with AND: `내일 회의` must find both words wherever they sit, the
+  // way a search reader expects, instead of the exact adjacent string only.
+  const tokens = trimmed.split(/\s+/).filter((token) => token.length > 0);
+  const match = tokens.map((token) => `"${token.replace(/"/g, '""')}"*`).join(" AND ");
+  // A word index matches words, so a two-character word like 회의 is searchable; the
+  // three-character floor belonged to the trigram index this index replaced. A word
+  // seeking its own start (`준비물` for `준비물을`) is a prefix query, since Korean
+  // attaches its particles to the noun.
   try {
-    if (trimmed.length >= 3) {
+    if (trimmed.length > 0) {
       return db
         .query<InferSessionRow, SQLQueryBindings[]>(
           `SELECT ${columns} FROM sessions s
@@ -178,20 +187,26 @@ export function searchSessions(db: Database, query: string, limit = 20): Session
              (SELECT session_id FROM entries_fts WHERE entries_fts MATCH ?))
            LIMIT ?`,
         )
-        .all(`%${trimmed}%`, `"${trimmed.replace(/"/g, '""')}"`, limit)
+        .all(`%${trimmed}%`, match, limit)
         .map(toSession);
     }
   } catch {
-    // fall through to LIKE for short or unparsable queries
+    // fall through to LIKE for an unparsable query
   }
   const like = `%${trimmed}%`;
   return db
     .query<z.infer<typeof SessionRow>, SQLQueryBindings[]>(
       `SELECT DISTINCT ${columns} FROM sessions s
        LEFT JOIN entries e ON e.session_id = s.id
-       WHERE s.deleted_at IS NULL AND (s.title LIKE ? OR e.payload_json LIKE ?)
+       WHERE s.deleted_at IS NULL
+         AND (s.title LIKE ? OR EXISTS (
+           SELECT 1 FROM json_each(e.payload_json, '$.events') AS part
+           WHERE json_extract(part.value, '$.text') LIKE ?
+              OR json_extract(part.value, '$.title') LIKE ?
+              OR json_extract(part.value, '$.body') LIKE ?
+         ))
        LIMIT ?`,
     )
-    .all(like, like, limit)
+    .all(like, like, like, like, limit)
     .map(toSession);
 }
