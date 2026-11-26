@@ -1,3 +1,5 @@
 node_modules
 data
 web/dist
+# The script SDK is generated at startup beside the jobs that import it.
+.digithive

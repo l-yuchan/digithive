@@ -1,5 +1,4 @@
 import { SdkBridge } from "./sdk/bridge";
-import { syncSdkFile } from "./sdk/generated";
 import { dirname, join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
 import { openDatabase } from "./store/db";
@@ -186,7 +185,6 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   // Scripts are separate processes, so the SDK is a loopback bridge plus a
   // generated module; both exist only while the runtime is alive.
   const sdk = new SdkBridge({ tools });
-  syncSdkFile(config.scriptsRoot);
   const work: WorkDeps = {
     db,
     events,

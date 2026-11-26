@@ -11,7 +11,7 @@
  * Exit 0 with a JSON summary on stdout when every read succeeded; exit 1 with the
  * summary when any source failed, which marks the run failed with the reason.
  */
-import { sdk } from "../.digithive/sdk.ts";
+import { sdk } from "./.digithive/sdk.ts";
 
 type Account = {
   readonly id: string;

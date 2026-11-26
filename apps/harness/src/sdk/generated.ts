@@ -3,7 +3,8 @@
  * separate process, so it cannot import the harness: it talks to the run-scoped
  * loopback bridge through the two environment variables the bridge injects.
  *
- * Generated — do not edit the copy under `<scriptsRoot>/.digithive/sdk.ts`.
+ * Generated — do not edit the copy under `<scriptsRoot>/.digithive/sdk.ts`, nor
+ * the one beside the app's shipped jobs, which `installJobs` plants from here.
  */
 export const SCRIPT_SDK_SOURCE = `/**
  * digithive script SDK (generated at startup; do not edit).

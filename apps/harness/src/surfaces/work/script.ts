@@ -98,6 +98,16 @@ async function collect(
 }
 
 /**
+ * Bun answers "Cannot find module" both for a file that is absent and for one it
+ * cannot resolve beside a path holding a space — a module that exists is reported
+ * missing, which sends the reader looking for the wrong thing. Name the cause.
+ */
+function explainModuleMiss(script: string, stderr: string): string {
+  if (!stderr.includes("Cannot find module") || !/\s/.test(script)) return stderr;
+  return `${stderr}\n참고: 이 파일 경로에 공백이 있어 Bun이 모듈을 찾지 못합니다. 스크립트 디렉터리 이름의 공백을 없애세요: ${script}`;
+}
+
+/**
  * Runs a local `.ts`/`.js` file with Bun, no shell, bounded output, and the run
  * signal wired to an actual process kill. It never touches the model provider.
  */
@@ -137,7 +147,7 @@ export async function runScriptFile(input: {
     if (input.signal.aborted) throw input.signal.reason ?? new Error("run_cancelled");
     return {
       stdout: stdout.text,
-      stderr: stderr.text,
+      stderr: explainModuleMiss(script, stderr.text),
       exitCode,
       truncated: stdout.truncated || stderr.truncated,
     };

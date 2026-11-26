@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
+import { z } from "zod";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,15 @@ import { resolveScriptPath } from "../src/surfaces/work/script";
 import { allowedTools } from "../src/sdk/capabilities";
 import { collectionExecutor } from "../src/workflows/collection";
 import { searchWorkflowIds } from "../src/workflows/workflow-search";
+import { SdkBridge } from "../src/sdk/bridge";
+import { createRegistry } from "../src/tools/registry";
+import {
+  WORK_LIMITS,
+  claimNext,
+  enqueueRun,
+  executeRun,
+  getRun,
+} from "../src/surfaces/work/runner";
 
 const databases: Database[] = [];
 
@@ -39,12 +49,16 @@ describe("the app's jobs are ordinary scripts", () => {
   test("every job file is planted verbatim under the scripts root", () => {
     const root = mkdtempSync(join(tmpdir(), "harness-jobs-"));
     try {
-      expect(installJobs(root)).toHaveLength(JOB_FILES.length);
+      expect(installJobs(root)).toHaveLength(JOB_FILES.length + 1);
       for (const file of JOB_FILES) {
         const shipped = readFileSync(join(JOB_SOURCE_ROOT, file), "utf8");
         expect(readFileSync(join(root, "jobs", file), "utf8")).toBe(shipped);
       }
-      // A second start changes nothing.
+      // The job's own import resolves beside it, not one level up where the image has none.
+      expect(readFileSync(join(root, "jobs", ".digithive", "sdk.ts"), "utf8")).toContain(
+        "DIGITHIVE_SDK_TOKEN",
+      );
+      // A second start rewrites nothing.
       expect(installJobs(root)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -123,6 +137,66 @@ describe("job capabilities gate the job tools", () => {
 });
 
 describe("@builtin/ names the app's own job", () => {
+  test("an installed job starts and reaches the SDK, from a root that only has the install", async () => {
+    // The deployed image has no `.digithive` above `jobs/`, so the installed job must
+    // find the SDK beside itself. A run that never starts is the failure to catch.
+    const root = mkdtempSync(join(tmpdir(), "jobs-installed-"));
+    const db = new Database(":memory:");
+    databases.push(db);
+    db.exec("PRAGMA foreign_keys=ON");
+    migrate(db);
+    const events = new EventLog(db);
+    const tools = createRegistry(
+      jobTools({
+        db,
+        events,
+        google: {
+          db,
+          events,
+          config: { clientId: "", clientSecret: "", redirectUri: "" },
+          vaultSecret: "",
+        },
+        canvas: { db, events, config: { baseUrl: "", token: "" } },
+      }),
+    );
+    const bridge = new SdkBridge({ tools });
+    try {
+      installJobs(root);
+      const run = enqueueRun(db, events, {
+        goal: "collect",
+        executor: collectionExecutor("acct-missing"),
+      });
+      const claimed = claimNext(db, events, "w1");
+      if (!claimed) throw new Error("fixture claim");
+      const outcome = await executeRun(
+        {
+          db,
+          events,
+          tools,
+          policy: [],
+          sdk: bridge,
+          scriptsRoot: root,
+          limits: WORK_LIMITS,
+          stream: () => {
+            throw new Error("a script run must not call the model");
+          },
+        },
+        claimed,
+      );
+      // The account does not exist, so the job reports that and exits 1; what matters
+      // is that it ran: it got past its import and reached the bridge.
+      expect(outcome).toBe("failed");
+      const result = z
+        .object({ stderr: z.string().optional() })
+        .parse(JSON.parse(getRun(db, run.id)?.resultJson ?? "{}"));
+      expect(result.stderr ?? "").not.toContain("Cannot find module");
+      expect(result.stderr ?? "").toContain("acct-missing");
+    } finally {
+      bridge.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("a builtin path reads the shipped file, not a same-named one under the scripts root", async () => {
     const dir = mkdtempSync(join(tmpdir(), "builtin-"));
     await Bun.write(join(dir, "collection.ts"), 'console.log("owner copy");\n');

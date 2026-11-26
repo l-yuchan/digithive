@@ -12,7 +12,7 @@
  * does not fail the run: the briefing exists and the reason is reported, since a
  * phone that is offline should not turn the day's briefing into a failed run.
  */
-import { sdk } from "../.digithive/sdk.ts";
+import { sdk } from "./.digithive/sdk.ts";
 
 type Composed = {
   readonly slot: string;
