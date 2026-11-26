@@ -304,26 +304,12 @@ INSERT INTO account_sources(account_id,source) VALUES
 
 /**
  * v11 — no schema change; the version that turned the two former builtin executors
- * into the app's own script jobs. It is kept in the chain (cap 2) so a database
- * written by the build that shipped it still opens: that build seeded
- * `{kind:"builtin"}` executors, and a definition naming a shipped job without its
- * capabilities could not run. A fresh database never passes through it, because the
- * reset already carries the final shape and later seeds are written as scripts.
- *
- * The conversation columns and the queue table that v13 introduced arrive here too.
- * v13 is retired, and a database written by that build is at v13, four steps back;
- * these statements are written so running them again is harmless: the columns are
- * added only when missing, and the table only when absent.
+ * into the app's own script jobs. It is not one of the kept steps (the cap is two, and
+ * the reset already carries its shape), but its repair is still the one a v10 database
+ * needs, so `restoreConversationSchema` runs from the newest kept step on its behalf.
+ * The repair covers both shapes that build left behind: `{kind:"builtin"}` executors and
+ * shipped job paths without a capability list.
  */
-/**
- * v11 — no schema change; the version that turned the two former builtin executors
- * into the app's own script jobs. It is kept in the chain (cap 2) so a database
- * written by the build that shipped it still opens: that build seeded
- * `{kind:"builtin"}` executors, and a definition naming a shipped job without its
- * capabilities could not run. A fresh database never passes through it, because the
- * reset already carries the final shape and later seeds are written as scripts.
- */
-
 export const V11: Transition = {
   version: 11,
   sql: "SELECT 1;",
@@ -459,9 +445,10 @@ INSERT INTO workflows_fts (workflow_id, text)
   SELECT id, title || ' ' || instruction FROM workflows;
 `,
   run: (db) => {
-    // Before the index is rebuilt: a database that predates this build may also lack the
-    // conversation pieces the reset carries. Idempotent, so every path through here ends
-    // with them, whichever version it started from.
+    // `sql` has already run, and the scripted rebuild above reads `entries`, not the
+    // conversation pieces. This runs afterwards so a database that predates them (v10,
+    // v11) ends complete; it is idempotent, so a database that already has them is
+    // unchanged.
     restoreConversationSchema(db);
   },
 };
@@ -482,8 +469,7 @@ export function restoreConversationSchema(db: Database): void {
     db.run("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'initial'");
   if (!columns.includes("queue_paused"))
     db.run("ALTER TABLE sessions ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0");
-  db.run(`
-CREATE TABLE IF NOT EXISTS session_queue (
+  db.run(`CREATE TABLE IF NOT EXISTS session_queue (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL REFERENCES sessions(id),
   text TEXT NOT NULL,
@@ -498,7 +484,7 @@ export const LATEST = V15.version;
 /**
  * The one kept step: the newest schema change. A fresh database gets the reset (v11's
  * shape) and needs only this; an older one is repaired by the step itself, because it
- * brings the conversation pieces the reset carries before it rebuilds the index.
+ * brings the conversation pieces the reset carries whichever version it started from.
  */
 export const TRANSITIONS: readonly Transition[] = [V15];
 

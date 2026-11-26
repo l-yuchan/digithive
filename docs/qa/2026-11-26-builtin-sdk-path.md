@@ -31,7 +31,6 @@ Bun v1.4.4 (Linux x64)
 ```
 
 ## 수정
-
 - `jobs/collection.ts`, `jobs/briefing.ts`가 SDK를 자기 디렉터리에서 import한다:
   `./.digithive/sdk.ts`. 이 앱의 작업은 항상 스크립트 루트의 `jobs/` 안에서 실행되므로
   (배포 시 `/app/jobs`, 로컬 시 `<scriptsRoot>/jobs`), 위치가 한 가지로 고정된다.
@@ -59,3 +58,12 @@ Bun v1.4.4 (Linux x64)
   05:06 UTC 세 번 모두 세 계정 `succeeded`(`failed: []`). 보고된 실패는 수동 실행이 아니라
   원래 경로(스케줄)에서 해결됐다.
 - `bun run verify`: 290 pass, 0 fail; lint/typecheck/build/format 통과.
+
+## 이 라운드 이후의 스키마 정리 (같은 날, 게이트 리뷰 후)
+
+거부된 빌드가 그 사이 로컬 `apps/harness/data/harness.db`를 최신 버전으로 찍어버리며
+`session_queue`와 대화 관련 두 컬럼을 빠뜨린 상태로 남겼다. 이 프로젝트는 프로덕션 상태가
+아니고 그 DB에 OAuth 자격증명이 없었으므로(토큰 0건), 억지 마이그레이션 대신 **DB를 새로 만들었다**.
+새 DB는 v15이고 모든 요소를 갖춘다. 손상된 사본은 비교용으로
+`%TEMP%\harness-local-v15-broken.db.bak`에 두었다. 라이브(`mini`) DB는 v14에서 올라왔고
+모든 요소를 갖춤을 확인했다 — 영향 없음.

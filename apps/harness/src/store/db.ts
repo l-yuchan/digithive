@@ -41,23 +41,16 @@ function writeVersion(db: Database, version: number): void {
 }
 
 /**
- * Applies the kept steps from `version` up, each in its own transaction, oldest first.
+ * Applies the kept steps after `version`, each in its own transaction, oldest first.
+ * Returns the recorded version and how many steps it ran, counted where they run.
  *
- * Two things are measured rather than assumed (Bun 1.4.5, Windows):
- * - while a write transaction is open, a `PRAGMA user_version` read on the same
- *   connection can still return the value chosen before the transaction began, so a
- *   step never re-reads the version inside its own transaction: the version travels
- *   as a parameter, and the recorded value is written after the last step commits.
- * - the `user_version` read only answers through a statement whose result is kept, so
- *   it is asked with `query().get()` and never with `exec`.
- */
-/**
- * Applies the kept steps after `version`. Returns the recorded version and how many
- * steps it ran, counted where they run.
- *
- * A database older than the reset also needs the repairs the reset already carries
- * (`session_queue`, `title_source`, `queue_paused`) before v14 and v15 can run; those
- * live in v12, which runs exactly for a database a reset never produced.
+ * A database older than the reset is repaired by the kept step itself, which brings the
+ * pieces the reset carries before it touches anything that assumes them — the shape a
+ * v10 database lacks. Two things are measured rather than assumed (Bun 1.4.5, Windows):
+ * while a write transaction is open, a `PRAGMA user_version` read on the same connection
+ * can still return the value chosen before the transaction began, so a step never
+ * re-reads the version inside its own transaction; and that read only answers through a
+ * statement whose result is kept, so it is asked with `query().get()`.
  */
 function runSteps(
   db: Database,
@@ -65,8 +58,7 @@ function runSteps(
 ): { readonly recorded: number; readonly ran: number } {
   let recorded = version;
   let ran = 0;
-  const steps = TRANSITIONS;
-  for (const transition of steps) {
+  for (const transition of TRANSITIONS) {
     if (recorded >= transition.version) continue;
     db.transaction((): void => {
       db.exec(transition.sql);
