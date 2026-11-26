@@ -25,6 +25,16 @@ import {
 import { z } from "zod";
 import { ensureCollectionWorkflow, removeAccountWorkflows } from "../workflows/collection";
 
+/** A captured path segment, decoded once; text that is not a valid escape is kept. */
+function decodeSegment(segment: string | undefined): string {
+  if (segment === undefined) return "";
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 /** The same object shape the app already assembles for Google and Canvas. */
 export type AccountRouteDeps = {
   readonly google: GoogleDeps;
@@ -244,10 +254,11 @@ export async function handleAccountRequest(
 
   const sourceMatch = /^\/api\/accounts\/([^/]+)\/sources\/([^/]+)$/.exec(path);
   if (sourceMatch && request.method === "PATCH") {
-    // `url.pathname` is already percent-decoded; decoding it again throws URIError on
-    // any id that contains a literal `%`.
-    const accountId = sourceMatch[1] ?? "";
-    const source = parseSource(sourceMatch[2] ?? "");
+    // `url.pathname` keeps `%25` and `%20` encoded (measured), so the segment is decoded
+    // once here; a stray `%` that is not an escape is kept as it stands instead of
+    // throwing out of the handler.
+    const accountId = decodeSegment(sourceMatch[1]);
+    const source = parseSource(decodeSegment(sourceMatch[2]));
     const parsed = z
       .object({ enabled: z.boolean() })
       .safeParse(await request.json().catch(() => null));
@@ -279,7 +290,7 @@ export async function handleAccountRequest(
 
   const deleteMatch = /^\/api\/accounts\/([^/]+)$/.exec(path);
   if (deleteMatch && request.method === "DELETE") {
-    const accountId = deleteMatch[1] ?? "";
+    const accountId = decodeSegment(deleteMatch[1]);
     if (!getAccount(deps.google.db, accountId))
       return json({ error: "account_not_found", detail: accountId }, 404);
     deleteAccount(deps.google.db, accountId);

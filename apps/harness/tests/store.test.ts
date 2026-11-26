@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate, openDatabase, OLDEST_OPENABLE } from "../src/store/db";
-import { LATEST, RESET_VERSION, V13, V14, V15 } from "../src/store/migrations";
+import { LATEST, RESET_VERSION, V13, V15 } from "../src/store/migrations";
 
 function memoryDb(): Database {
   const db = new Database(":memory:");
@@ -106,8 +106,8 @@ describe("the kept schema steps", () => {
   test("a fresh database ends at the latest version and reports the steps it ran", () => {
     // The count reports the kept steps that ran; the reset is not a transition.
     const db = new Database(":memory:");
-    expect(migrate(db)).toBe(2);
-    // The queue table is in the reset itself; the two kept steps run on top of it.
+    expect(migrate(db)).toBe(1);
+    // The queue table is in the reset itself; only the newest step runs on top of it.
     expect(version(db)).toBe(LATEST);
     expect(
       db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),
@@ -121,38 +121,15 @@ describe("the kept schema steps", () => {
     expect(version(db)).toBe(LATEST);
   });
 
-  test("v14 renames the app's own jobs wherever they were stored", () => {
+  test("a database recorded before the reset gets the queue table it lacks", () => {
+    // A real v13 database has the queue table; one that only claims v13 and lacks it is
+    // the case that used to be stamped to the newest version without being repaired.
     const db = fresh();
-    db.query(
-      "INSERT INTO workflows(id,title,instruction,executor_json,created_at,updated_at) VALUES ('w','t','i',?,'now','now')",
-    ).run(
-      JSON.stringify({
-        kind: "script",
-        path: "jobs/collection.ts",
-        args: ["a"],
-        capabilities: ["account.read"],
-      }),
-    );
-    db.exec(`PRAGMA user_version = ${V14.version - 1}`);
-    expect(migrate(db)).toBe(2);
-    expect(db.query("SELECT executor_json FROM workflows WHERE id='w'").get()).toEqual({
-      executor_json: JSON.stringify({
-        kind: "script",
-        path: "@builtin/collection.ts",
-        args: ["a"],
-        capabilities: ["account.read"],
-      }),
-    });
-  });
-
-  test("a database from the retired v13 build keeps its queue table", () => {
-    const db = fresh();
-    db.exec(`PRAGMA user_version = ${V13.version}`);
-    // OUTSIDE the transaction: whether a step runs is decided by the version read
-    // here, so a no-op body cannot satisfy a step whose schema is missing.
+    db.exec("DROP TABLE session_queue");
+    db.exec(`PRAGMA user_version = ${V13.version - 1}`);
     const ran = migrate(db);
-    // v13 is retired, so the two kept steps (v14, v15) both run on that database.
-    expect(ran).toBe(2);
+    expect(ran).toBe(1);
+    expect(version(db)).toBe(LATEST);
     expect(
       db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),
     ).toEqual({

@@ -315,16 +315,18 @@ INSERT INTO account_sources(account_id,source) VALUES
  * these statements are written so running them again is harmless: the columns are
  * added only when missing, and the table only when absent.
  */
+/**
+ * v11 — no schema change; the version that turned the two former builtin executors
+ * into the app's own script jobs. It is kept in the chain (cap 2) so a database
+ * written by the build that shipped it still opens: that build seeded
+ * `{kind:"builtin"}` executors, and a definition naming a shipped job without its
+ * capabilities could not run. A fresh database never passes through it, because the
+ * reset already carries the final shape and later seeds are written as scripts.
+ */
+
 export const V11: Transition = {
   version: 11,
-  sql: `
-CREATE TABLE IF NOT EXISTS session_queue (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES sessions(id),
-  text TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-`,
+  sql: "SELECT 1;",
   run: (db) => {
     // What the v10 build itself wrote: a shipped job path, but without the capability
     // list v11 introduced. Both shapes it left behind are repaired.
@@ -362,16 +364,6 @@ CREATE TABLE IF NOT EXISTS session_queue (
       );
       reindexWorkflow(db, row.id, row.title, row.instruction);
     }
-    // The two conversation columns v13 introduced; a database from that build already
-    // has them, so each is added only when the table does not.
-    const columns = db
-      .query<{ name: string }, []>("SELECT name FROM pragma_table_info('sessions')")
-      .all()
-      .map((column) => column.name);
-    if (!columns.includes("title_source"))
-      db.run("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'initial'");
-    if (!columns.includes("queue_paused"))
-      db.run("ALTER TABLE sessions ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0");
   },
 };
 
@@ -466,16 +458,49 @@ CREATE VIRTUAL TABLE workflows_fts USING fts5(workflow_id UNINDEXED, text, token
 INSERT INTO workflows_fts (workflow_id, text)
   SELECT id, title || ' ' || instruction FROM workflows;
 `,
-  run: () => {
-    // The rebuild is the whole step and lives in `sql`, inside the step's transaction.
+  run: (db) => {
+    // Before the index is rebuilt: a database that predates this build may also lack the
+    // conversation pieces the reset carries. Idempotent, so every path through here ends
+    // with them, whichever version it started from.
+    restoreConversationSchema(db);
   },
 };
+
+/**
+ * The repairs the reset already carries, for a database that predates them.
+ *
+ * `session_queue` and the two conversation columns arrived in v11..v13; those steps are
+ * retired or unreachable for an older database, so the newest step ensures them itself
+ * before it touches anything that assumes them. Running it again is harmless.
+ */
+export function restoreConversationSchema(db: Database): void {
+  const columns = db
+    .query<{ name: string }, []>("SELECT name FROM pragma_table_info('sessions')")
+    .all()
+    .map((column) => column.name);
+  if (!columns.includes("title_source"))
+    db.run("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'initial'");
+  if (!columns.includes("queue_paused"))
+    db.run("ALTER TABLE sessions ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0");
+  db.run(`
+CREATE TABLE IF NOT EXISTS session_queue (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES sessions(id),
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+`);
+}
 
 /** The newest version this build writes. */
 export const LATEST = V15.version;
 
-/** At most two steps, as the rule requires: the two after the reset (v11). */
-export const TRANSITIONS: readonly Transition[] = [V14, V15];
+/**
+ * The one kept step: the newest schema change. A fresh database gets the reset (v11's
+ * shape) and needs only this; an older one is repaired by the step itself, because it
+ * brings the conversation pieces the reset carries before it rebuilds the index.
+ */
+export const TRANSITIONS: readonly Transition[] = [V15];
 
 /** The executor a shipped job carries: the path, the account, the grant. */
 export function shippedExecutor(

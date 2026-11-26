@@ -2,7 +2,9 @@ node_modules
 data
 web/dist
 # The script SDK is generated beside the app's jobs — by the app at startup, and by
-# `src/sdk/gen-script-sdk.ts` for a fresh checkout. The example copy under
-# `scripts/jobs/` is typed by the tracked stand-in beside it.
-.digithive/*
-.DS_Store
+# `src/sdk/gen-script-sdk.ts` for a fresh checkout — so it is never tracked. The pattern
+# is unanchored for that reason: `<scriptsRoot>/jobs/.digithive/sdk.ts` is the copy a
+# local run writes, and `git add -A` must not pick it up. The example's type stand-in
+# under `scripts/.digithive/sdk.d.ts` is re-included explicitly.
+.digithive/
+!scripts/.digithive/sdk.d.ts

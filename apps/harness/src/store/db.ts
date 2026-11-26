@@ -1,6 +1,5 @@
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { RESET_SCHEMA, RESET_VERSION, TRANSITIONS } from "./migrations";
-
 /**
  * The oldest recorded version this build opens: the last version of the retired
  * chain (v10), whose schema the reset reproduces. Anything older would need steps
@@ -42,7 +41,7 @@ function writeVersion(db: Database, version: number): void {
 }
 
 /**
- * Runs the kept steps from `version` up, each in its own transaction, oldest first.
+ * Applies the kept steps from `version` up, each in its own transaction, oldest first.
  *
  * Two things are measured rather than assumed (Bun 1.4.5, Windows):
  * - while a write transaction is open, a `PRAGMA user_version` read on the same
@@ -55,6 +54,10 @@ function writeVersion(db: Database, version: number): void {
 /**
  * Applies the kept steps after `version`. Returns the recorded version and how many
  * steps it ran, counted where they run.
+ *
+ * A database older than the reset also needs the repairs the reset already carries
+ * (`session_queue`, `title_source`, `queue_paused`) before v14 and v15 can run; those
+ * live in v12, which runs exactly for a database a reset never produced.
  */
 function runSteps(
   db: Database,
@@ -62,7 +65,8 @@ function runSteps(
 ): { readonly recorded: number; readonly ran: number } {
   let recorded = version;
   let ran = 0;
-  for (const transition of TRANSITIONS) {
+  const steps = TRANSITIONS;
+  for (const transition of steps) {
     if (recorded >= transition.version) continue;
     db.transaction((): void => {
       db.exec(transition.sql);
