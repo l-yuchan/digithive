@@ -3,3 +3,7 @@ data
 web/dist
 tests
 .omo
+# Generated: the runtime writes the script SDK beside the jobs that import it.
+# A stale tracked copy would be removed from the build context, so whatever the
+# build's own start wrote can never disagree with the image.
+.digithive

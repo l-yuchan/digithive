@@ -1,5 +1,8 @@
 node_modules
 data
 web/dist
-# The script SDK is generated at startup beside the jobs that import it.
-.digithive
+# The script SDK is generated beside the app's jobs — by the app at startup, and by
+# `src/sdk/gen-script-sdk.ts` for a fresh checkout. The example copy under
+# `scripts/jobs/` is typed by the tracked stand-in beside it.
+.digithive/*
+.DS_Store
