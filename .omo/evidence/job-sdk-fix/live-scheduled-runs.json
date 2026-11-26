@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-11-26T05:52Z",
+  "image": "ghcr.io/l-yuchan/digithive-harness:dd35c168b3c9d28bdc61cd20bc7e190e3d943ad5",
+  "source": "ssh mini -> docker exec deploy-harness-1, read-only SQLite probes on /data/harness.db",
+  "live_schema": {
+    "user_version": 15,
+    "session_queue": "present",
+    "sessions_extra_columns": ["title_source", "queue_paused"],
+    "entries_fts_tokenizer": "unicode61"
+  },
+  "scheduled_collection_runs": [
+    { "title": "연결 자료 수집 · chanoil@hanyang.ac.kr", "settled_at": "2026-11-26T05:51:10.501Z", "status": "succeeded" },
+    { "title": "연결 자료 수집 · 한양 LMS", "settled_at": "2026-11-26T05:51:10.506Z", "status": "succeeded" },
+    { "title": "연결 자료 수집 · chabun314@gmail.com", "settled_at": "2026-11-26T05:51:11.013Z", "status": "succeeded" },
+    { "title": "연결 자료 수집 · chanoil@hanyang.ac.kr", "settled_at": "2026-11-26T05:36:10.525Z", "status": "succeeded" },
+    { "title": "연결 자료 수집 · 한양 LMS", "settled_at": "2026-11-26T05:36:10.531Z", "status": "succeeded" },
+    { "title": "연결 자료 수집 · chabun314@gmail.com", "settled_at": "2026-11-26T05:36:11.038Z", "status": "succeeded" }
+  ]
+}
