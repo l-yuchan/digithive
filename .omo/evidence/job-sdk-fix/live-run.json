@@ -1,0 +1,41 @@
+[
+  {
+    "account": "chanoil@hanyang.ac.kr",
+    "accountId": "6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6",
+    "outcome": "succeeded",
+    "status": "succeeded",
+    "result": {
+      "text": "{\"accountId\":\"6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6\",\"label\":\"chanoil@hanyang.ac.kr\",\"collected\":[{\"source\":\"gmail\",\"ok\":true,\"count\":0}],\"failed\":[]}\n",
+      "stdout": "{\"accountId\":\"6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6\",\"label\":\"chanoil@hanyang.ac.kr\",\"collected\":[{\"source\":\"gmail\",\"ok\":true,\"count\":0}],\"failed\":[]}\n",
+      "stderr": "",
+      "exitCode": 0,
+      "truncated": false
+    }
+  },
+  {
+    "account": "한양 LMS",
+    "accountId": "canvas-default",
+    "outcome": "succeeded",
+    "status": "succeeded",
+    "result": {
+      "text": "{\"accountId\":\"canvas-default\",\"label\":\"한양 LMS\",\"collected\":[{\"source\":\"canvas\",\"ok\":true,\"count\":2}],\"failed\":[]}\n",
+      "stdout": "{\"accountId\":\"canvas-default\",\"label\":\"한양 LMS\",\"collected\":[{\"source\":\"canvas\",\"ok\":true,\"count\":2}],\"failed\":[]}\n",
+      "stderr": "",
+      "exitCode": 0,
+      "truncated": false
+    }
+  },
+  {
+    "account": "chabun314@gmail.com",
+    "accountId": "1543f9e6-ce37-4151-82bb-885275c66b7a",
+    "outcome": "succeeded",
+    "status": "succeeded",
+    "result": {
+      "text": "{\"accountId\":\"1543f9e6-ce37-4151-82bb-885275c66b7a\",\"label\":\"chabun314@gmail.com\",\"collected\":[{\"source\":\"calendar\",\"ok\":true,\"count\":0},{\"source\":\"gmail\",\"ok\":true,\"count\":0}],\"failed\":[]}\n",
+      "stdout": "{\"accountId\":\"1543f9e6-ce37-4151-82bb-885275c66b7a\",\"label\":\"chabun314@gmail.com\",\"collected\":[{\"source\":\"calendar\",\"ok\":true,\"count\":0},{\"source\":\"gmail\",\"ok\":true,\"count\":0}],\"failed\":[]}\n",
+      "stderr": "",
+      "exitCode": 0,
+      "truncated": false
+    }
+  }
+]
