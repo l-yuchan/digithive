@@ -99,6 +99,15 @@ function toLogged(row: z.infer<typeof EventRow>): LoggedEvent {
   };
 }
 
+/** Delivers one event; a subscriber's failure is reported, never propagated. */
+function notify(listener: Listener, event: LoggedEvent): void {
+  try {
+    listener(event);
+  } catch (error) {
+    console.error("event listener failed", error);
+  }
+}
+
 /**
  * Persisted events carry a global sequence. Subscribers drain the database,
  * including rows appended by other processes, and deduplicate local wakeups.
@@ -127,7 +136,9 @@ export class EventLog {
         createdAt,
       );
     const event = toLogged(EventRow.parse(row));
-    for (const listener of this.#listeners) listener(event);
+    // A subscriber that fails to render one event must not fail the write that
+    // already committed it, nor stop the other subscribers from seeing it.
+    for (const listener of this.#listeners) notify(listener, event);
     return event;
   }
 
@@ -159,8 +170,11 @@ export class EventLog {
     const drain = () => {
       for (const event of this.after(cursor)) {
         if (event.seq <= cursor) continue;
+        // The cursor moves first: a listener that throws has still been offered the
+        // event, and leaving the cursor behind would re-offer it forever, while
+        // advancing it after a throw would skip the rest of the backlog.
         cursor = event.seq;
-        listener(event);
+        notify(listener, event);
       }
     };
     const deliver: Listener = () => drain();

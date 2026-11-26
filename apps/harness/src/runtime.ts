@@ -176,11 +176,11 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     ...scheduleTools({ db, events }),
     ...memoryTools(db),
     ...fileTools(db),
-    // Only the app's own jobs reach these, and in production the jobs are their
-    // own files under HARNESS_SCRIPTS_ROOT, never this process's tools.
-    ...(installJobs(config.scriptsRoot)
-      ? jobTools({ db, events, google: googleDeps, canvas: canvasDeps, push: pushConfig })
-      : []),
+    // The app's own jobs call these through the SDK bridge. They are registered on
+    // every start: an install writes nothing once the files are in place, so tying
+    // the tools to what that call wrote left a normal start without them and every
+    // job's first call failing as an unknown tool.
+    ...jobTools({ db, events, google: googleDeps, canvas: canvasDeps, push: pushConfig }),
   ]);
   // Scripts are separate processes, so the SDK is a loopback bridge plus a
   // generated module; both exist only while the runtime is alive.

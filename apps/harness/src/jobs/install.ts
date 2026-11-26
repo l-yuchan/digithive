@@ -1,6 +1,6 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { sdkFilePath, syncSdkFile } from "../sdk/generated";
+import { jobSdkFilePath, SCRIPT_SDK_SOURCE, syncJobSdkFile, syncSdkFile } from "../sdk/generated";
 
 /**
  * The app's workflow scripts ship in `jobs/`, beside `src/`: they are product
@@ -33,16 +33,14 @@ export function sdkRootsFor(scriptsRoot: string): string[] {
   return [...new Set([join(scriptsRoot, "jobs"), JOB_SOURCE_ROOT].map((root) => resolve(root)))];
 }
 
-/** Writes the generated SDK wherever a job's import can land. Returns the new paths. */
+/** Writes the generated SDK beside every job that imports it. Returns the new paths. */
 function plantSdk(scriptsRoot: string): string[] {
-  const source = readFileSync(sdkFilePath(scriptsRoot), "utf8");
+  syncSdkFile(scriptsRoot);
   const written: string[] = [];
   for (const root of sdkRootsFor(scriptsRoot)) {
-    const path = sdkFilePath(root);
-    if (existsSync(path) && readFileSync(path, "utf8") === source) continue;
-    mkdirSync(join(root, ".digithive"), { recursive: true });
-    writeFileSync(path, source, "utf8");
-    written.push(path);
+    const path = jobSdkFilePath(root);
+    if (existsSync(path) && readFileSync(path, "utf8") === SCRIPT_SDK_SOURCE) continue;
+    written.push(syncJobSdkFile(root));
   }
   return written;
 }
@@ -52,7 +50,6 @@ function plantSdk(scriptsRoot: string): string[] {
  * The SDK is written first: it is what the copied job imports.
  */
 export function installJobs(scriptsRoot: string): string[] {
-  syncSdkFile(scriptsRoot);
   const target = join(scriptsRoot, "jobs");
   if (resolve(target) === JOB_SOURCE_ROOT) return plantSdk(scriptsRoot);
   mkdirSync(target, { recursive: true });

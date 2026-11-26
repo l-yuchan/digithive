@@ -122,18 +122,32 @@ export default sdk;
 `;
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
+/** The SDK a script imports from this directory as `../.digithive/sdk.ts`. */
 export function sdkFilePath(scriptsRoot: string): string {
   return join(scriptsRoot, ".digithive", "sdk.ts");
 }
 
+/** The SDK a job imports from this directory as `./.digithive/sdk.ts`. */
+export function jobSdkFilePath(jobsDir: string): string {
+  return join(jobsDir, ".digithive", "sdk.ts");
+}
+
 /** Rewrites the generated SDK only when its content changed. */
 export function syncSdkFile(scriptsRoot: string): string {
-  const path = sdkFilePath(scriptsRoot);
-  mkdirSync(join(scriptsRoot, ".digithive"), { recursive: true });
-  if (!existsSync(path) || readFileSync(path, "utf8") !== SCRIPT_SDK_SOURCE) {
-    writeFileSync(path, SCRIPT_SDK_SOURCE, "utf8");
+  return writeSdk(sdkFilePath(scriptsRoot), SCRIPT_SDK_SOURCE);
+}
+
+/** Writes the same generated SDK where a job imports it. */
+export function syncJobSdkFile(jobsDir: string): string {
+  return writeSdk(jobSdkFilePath(jobsDir), SCRIPT_SDK_SOURCE);
+}
+
+function writeSdk(path: string, source: string): string {
+  mkdirSync(dirname(path), { recursive: true });
+  if (!existsSync(path) || readFileSync(path, "utf8") !== source) {
+    writeFileSync(path, source, "utf8");
   }
   return path;
 }
