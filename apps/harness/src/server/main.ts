@@ -34,6 +34,8 @@ export function createHarness(config: HarnessConfig): {
   handler: (request: Request) => Promise<Response>;
   close: () => void;
   work: AppDeps["work"];
+  /** The provider store itself, for a test that drives the router against a stand-in server. */
+  providers: AppDeps["providers"];
   conversationDeps: () => ConversationDeps;
 } {
   const runtime = createRuntime(config);
@@ -112,6 +114,7 @@ export function createHarness(config: HarnessConfig): {
   return {
     deps,
     handler: createApp(deps),
+    providers: runtime.providers,
     close: () => {
       conversation.close();
       runtime.close();

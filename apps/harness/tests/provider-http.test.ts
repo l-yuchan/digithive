@@ -6,6 +6,7 @@ import { z } from "zod";
 import { catalogOf, probeProvider } from "../src/providers/catalog";
 import { ProviderStore } from "../src/providers/store";
 import { createHarness, loadConfig } from "../src/server/main";
+import { handleProviderRequest } from "../src/server/provider-routes";
 import { openDatabase } from "../src/store/db";
 import { answerProviderCall, type ProviderCall } from "../scripts/qa/provider-fixture";
 
@@ -84,14 +85,17 @@ function setup() {
     }),
   );
   const call = (path: string, method = "GET", body?: unknown) =>
-    harness.handler(
-      new Request(`http://local${path}`, {
-        method,
-        ...(body === undefined
-          ? {}
-          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-      }),
-    );
+    harness.deps.providers === undefined
+      ? Promise.reject(new Error("provider store missing"))
+      : handleProviderRequest(
+          new Request(`http://local${path}`, {
+            method,
+            ...(body === undefined
+              ? {}
+              : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+          }),
+          { db: harness.deps.db, providers: harness.deps.providers },
+        ).then((response) => response ?? new Response(null, { status: 404 }));
   return {
     harness,
     call,
@@ -168,41 +172,62 @@ test("an OpenAI-compatible provider's catalog is read with its key and stored", 
 });
 
 test("an OpenAI-compatible provider is added, chained, switched off and deleted", async () => {
-  const { call, cleanup } = setup();
+  // The harness opens its own provider store now, so the app's real reads use it.
+  const { harness, call, cleanup } = setup();
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: answerProviderCall });
+  const baseUrl = `http://127.0.0.1:${server.port}/v1`;
   try {
     const created = await call("/api/providers", "POST", {
       catalogId: "custom",
       label: "내 로컬",
-      baseUrl: "https://custom.example/v1",
+      baseUrl,
       apiKey: "custom-key-9999",
     });
-    // Without a reachable network the creation still succeeds and records why the read failed.
     expect(created.status).toBe(201);
     const createdBody = z
       .object({
-        provider: z.object({ id: z.string(), label: z.string(), keyHint: z.string().nullable() }),
+        provider: z.object({
+          id: z.string(),
+          label: z.string(),
+          keyHint: z.string().nullable(),
+          models: z.array(z.object({ id: z.string() })),
+        }),
         probe: z.object({ modelsError: z.string().nullable(), stored: z.boolean() }),
       })
       .parse(await created.json());
     expect(createdBody.provider.label).toBe("내 로컬");
     expect(createdBody.provider.keyHint).toBe("••••9999");
-    expect(createdBody.probe.stored).toBe(true);
+    // The provider answered with its catalog, and the app asked with the key it stored.
+    expect(createdBody.probe.modelsError).toBeNull();
+    expect(createdBody.provider.models.map((model) => model.id)).toEqual([
+      "qa-model-broken",
+      "qa-model-fast",
+      "qa-model-strong",
+    ]);
 
     const added = await call("/api/settings/models", "POST", {
       providerId: createdBody.provider.id,
-      modelId: "manual-model",
+      modelId: "qa-model-strong",
     });
     expect(added.status).toBe(201);
     const chain = z
       .object({ chain: z.array(z.object({ modelId: z.string() })) })
       .parse(await added.json());
-    expect(chain.chain.map((entry) => entry.modelId)).toEqual(["seed-model", "manual-model"]);
+    expect(chain.chain.map((entry) => entry.modelId)).toEqual(["seed-model", "qa-model-strong"]);
 
+    // The routing stream follows the saved chain: the added model moved first answers.
+    const store = harness.providers;
+    if (!store) throw new Error("provider store missing");
+    const entries = store.chain();
+    const reversed = entries.toReversed();
+    const reordered = await call("/api/settings/models", "PUT", {
+      entries: reversed.map((entry) => ({ providerId: entry.providerId, modelId: entry.modelId })),
+    });
+    expect(reordered.status).toBe(200);
     const read = Overview.parse(await (await call("/api/providers")).json());
-    expect(read.chain.map((entry) => entry.modelId)).toEqual(["seed-model", "manual-model"]);
-    expect(read.routes.map((route) => route.modelId)).toEqual(["seed-model", "manual-model"]);
+    expect(read.routes.map((route) => route.modelId)).toEqual(["qa-model-strong", "seed-model"]);
 
-    // Disabling a provider removes it from the routes without touching its definition.
+    // Disabling the provider leaves it defined but out of the routes.
     const patched = await call(`/api/providers/${createdBody.provider.id}`, "PATCH", {
       enabled: false,
     });
@@ -217,6 +242,7 @@ test("an OpenAI-compatible provider is added, chained, switched off and deleted"
     expect(afterDelete.providers.map((provider) => provider.label)).toEqual(["seed-model"]);
     expect(afterDelete.chain.map((entry) => entry.modelId)).toEqual(["seed-model"]);
   } finally {
+    await server.stop(true);
     cleanup();
   }
 });

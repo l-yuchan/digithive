@@ -156,6 +156,7 @@ function SettingsOverview({ onChild }: { readonly onChild: (child: SettingsChild
 
   useEffect(() => {
     let cancelled = false;
+    // Every outcome is handled: a failed read is shown beside the others, never thrown away.
     Promise.allSettled([
       getJson("/api/settings/models", ChainSchema),
       getJson("/api/connections", ConnectionsSchema),
@@ -184,6 +185,20 @@ function SettingsOverview({ onChild }: { readonly onChild: (child: SettingsChild
 
   return (
     <div className="card" data-testid="settings-overview">
+      <div className="card-head">
+        <h3>상태 요약</h3>
+        <button
+          className="ghost"
+          type="button"
+          data-testid="overview-refresh"
+          onClick={() => {
+            setLoading(true);
+            window.location.reload();
+          }}
+        >
+          새로고침
+        </button>
+      </div>
       {errors.map((error) => (
         <p key={error} className="error" role="alert">
           {error}
@@ -194,7 +209,7 @@ function SettingsOverview({ onChild }: { readonly onChild: (child: SettingsChild
         <p className="run-meta">불러오는 중…</p>
       ) : routes.length === 0 ? (
         <p className="run-meta" data-testid="overview-routes-empty">
-          아직 모델 경로가 없습니다. “모델 공급자”에서 하나 추가하세요.
+          아직 모델 경로가 없습니다. 아래 “모델 공급자”에서 하나 추가하세요.
         </p>
       ) : (
         <ol className="settings-list" data-testid="overview-routes">
@@ -211,8 +226,13 @@ function SettingsOverview({ onChild }: { readonly onChild: (child: SettingsChild
           ))}
         </ol>
       )}
-      <h3>연결 상태</h3>
-      <ul className="settings-links" data-testid="overview-connections">
+      <ul className="settings-links" data-testid="overview-links">
+        <li>
+          <button className="link" type="button" onClick={() => onChild("providers")}>
+            모델 공급자
+          </button>
+          <span className="run-meta"> 공급자·모델·사용량을 관리합니다.</span>
+        </li>
         <li>
           <button className="link" type="button" onClick={() => onChild("accounts")}>
             계정
@@ -224,6 +244,11 @@ function SettingsOverview({ onChild }: { readonly onChild: (child: SettingsChild
               : connections.googleConnected
                 ? "Google 연결됨"
                 : "Google 미연결"}
+            {connections === null
+              ? ""
+              : connections.canvasConfigured
+                ? " · Canvas 설정됨"
+                : " · Canvas 미설정"}
           </span>
         </li>
         <li>
