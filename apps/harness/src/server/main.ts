@@ -6,7 +6,7 @@ import { settleExpiredRuns } from "../core/run-state";
 import { reconcileWork } from "../surfaces/work/runner";
 import { ensureCollectionWorkflows } from "../workflows/collection";
 import { createApp, type AppDeps } from "./app";
-import { modelRouteCatalog } from "../providers/settings";
+import { chainCatalog } from "../providers/chain";
 import { createConversation } from "../surfaces/conversation/surface";
 import { startTitleRun, titleHooks } from "../workflows/title-run";
 import type { ConversationDeps } from "../surfaces/conversation/loop";
@@ -104,8 +104,10 @@ export function createHarness(config: HarnessConfig): {
     filesRoot: config.filesRoot,
     maxUploadBytes: config.maxUploadBytes,
     auth: { passphrase: config.passphrase, secret: config.sessionSecret },
-    // The settings screen sees this catalogue, never the keys the routes authenticate with.
-    modelRoutes: modelRouteCatalog(config),
+    // The settings screen sees the provider rows and the chain they serve; the keys stay
+    // sealed in the store and are decrypted only inside an upstream call.
+    modelRoutes: chainCatalog(runtime.providers),
+    providers: runtime.providers,
   };
   return {
     deps,

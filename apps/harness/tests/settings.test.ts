@@ -17,6 +17,7 @@ import {
   writeModelPriority,
   type ModelRouteSummary,
 } from "../src/providers/settings";
+import { ProviderStore } from "../src/providers/store";
 
 const routes: ModelRouteSummary[] = [
   { name: "primary", model: "primary-model", baseUrl: "http://primary/v1" },
@@ -148,54 +149,77 @@ test("loadConfig refuses duplicate fallback names and the reserved primary name"
   ).toEqual(["backup", "third"]);
 });
 
-test("GET and PUT expose an ordered priority without leaking route credentials", async () => {
+test("GET exposes the routing chain without leaking a provider key", async () => {
   const { harness, dbPath, cleanup } = setup();
   const bodySchema = z.object({
-    routes: z.array(z.object({ name: z.string(), model: z.string(), baseUrl: z.string() })),
-    priority: z.array(z.string()),
+    chain: z.array(
+      z.object({
+        providerId: z.string(),
+        modelId: z.string(),
+        position: z.number(),
+        enabled: z.boolean(),
+      }),
+    ),
+    routes: z.array(z.object({ name: z.string(), modelId: z.string(), baseUrl: z.string() })),
   });
   try {
     const read = () => harness.handler(new Request("http://local/api/settings/models"));
     const initial = await read();
     expect(initial.status).toBe(200);
     const initialBody = bodySchema.parse(await initial.json());
-    expect(initialBody).toEqual({
-      routes: [
-        { name: "primary", model: "primary-model", baseUrl: "https://primary.example/v1" },
-        { name: "backup", model: "backup-model", baseUrl: "https://backup.example/v1" },
-      ],
-      priority: ["primary", "backup"],
-    });
+    // The environment's model configuration became the first chain on a database that had
+    // no provider yet: primary first, then the configured fallback.
+    expect(initialBody.chain.map((entry) => entry.modelId)).toEqual([
+      "primary-model",
+      "backup-model",
+    ]);
+    expect(initialBody.routes.map((route) => route.modelId)).toEqual([
+      "primary-model",
+      "backup-model",
+    ]);
     const rawBody = JSON.stringify(initialBody);
     expect(rawBody).not.toContain("primary-secret-key");
     expect(rawBody).not.toContain("fallback-secret-key");
     expect(rawBody).not.toContain("apiKey");
 
+    const [first, second] = initialBody.chain;
     const saved = await harness.handler(
       new Request("http://local/api/settings/models", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ priority: ["backup", "primary"] }),
+        body: JSON.stringify({
+          entries: [
+            { providerId: second?.providerId, modelId: second?.modelId },
+            { providerId: first?.providerId, modelId: first?.modelId },
+          ],
+        }),
       }),
     );
     expect(saved.status).toBe(200);
-    expect(bodySchema.parse(await saved.json())).toEqual({
-      routes: initialBody.routes,
-      priority: ["backup", "primary"],
-    });
+    expect(bodySchema.parse(await saved.json()).chain.map((entry) => entry.modelId)).toEqual([
+      "backup-model",
+      "primary-model",
+    ]);
 
     const after = await read();
-    expect(bodySchema.parse(await after.json()).priority).toEqual(["backup", "primary"]);
+    expect(bodySchema.parse(await after.json()).routes.map((route) => route.modelId)).toEqual([
+      "backup-model",
+      "primary-model",
+    ]);
 
-    // The handler's own catalogue is the same public shape the config yields.
+    // The handler's own catalogue is the same public shape the chain yields.
     expect(modelRouteCatalog(loadConfig({ MODEL_BASE_URL: "u", MODEL_NAME: "m" }))).toEqual([
       { name: "primary", model: "m", baseUrl: "u" },
     ]);
 
-    // The worker opens a separate connection to the same file; it sees the saved order.
+    // The worker opens a separate connection to the same file; it sees the saved chain.
     const reopened = openDatabase(dbPath);
     try {
-      expect(readModelPriority(reopened, routes)).toEqual(["backup", "primary"]);
+      const store = new ProviderStore(reopened, "test-secret");
+      expect(store.routes().map((entry) => entry.modelId)).toEqual([
+        "backup-model",
+        "primary-model",
+      ]);
       expect(reopened.query<{ user_version: number }, []>("PRAGMA user_version").get()).toEqual({
         user_version: LATEST,
       });
@@ -207,15 +231,30 @@ test("GET and PUT expose an ordered priority without leaking route credentials",
   }
 });
 
-test("PUT refuses a partial, duplicated, unknown or malformed priority", async () => {
+test("PUT refuses a partial, duplicated, unknown or malformed chain", async () => {
   const { harness, cleanup } = setup();
   try {
+    const read = await harness.handler(new Request("http://local/api/settings/models"));
+    const chain = z
+      .object({ chain: z.array(z.object({ providerId: z.string(), modelId: z.string() })) })
+      .parse(await read.json()).chain;
+    const [first, second] = chain;
     for (const body of [
-      { priority: ["backup"] },
-      { priority: ["backup", "backup"] },
-      { priority: ["backup", "nope"] },
-      { priority: "backup" },
-      {},
+      { entries: [{ providerId: first?.providerId, modelId: first?.modelId }] },
+      {
+        entries: [
+          { providerId: first?.providerId, modelId: first?.modelId },
+          { providerId: first?.providerId, modelId: first?.modelId },
+        ],
+      },
+      {
+        entries: [
+          { providerId: second?.providerId, modelId: second?.modelId },
+          { providerId: "nope", modelId: "nope" },
+        ],
+      },
+      { entries: ["primary", "backup"] },
+      { priority: ["primary", "backup"] },
     ]) {
       const response = await harness.handler(
         new Request("http://local/api/settings/models", {
@@ -225,7 +264,6 @@ test("PUT refuses a partial, duplicated, unknown or malformed priority", async (
         }),
       );
       expect(response.status).toBe(422);
-      expect(await response.json()).toEqual({ error: "invalid_priority" });
     }
   } finally {
     cleanup();

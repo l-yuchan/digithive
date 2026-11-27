@@ -18,6 +18,14 @@ function v10Database(): Database {
     // arrived in v11..v13. Removing them is what makes this fixture a real v10 instead of
     // a copy of the current schema wearing an older version number.
     db.exec("DROP TABLE IF EXISTS session_queue");
+    // The provider tables arrived in v17; a v10 database has none of them.
+    for (const table of [
+      "provider_state",
+      "model_chain",
+      "provider_models",
+      "provider_connections",
+    ])
+      db.exec(`DROP TABLE IF EXISTS ${table}`);
     db.exec("ALTER TABLE sessions DROP COLUMN title_source");
     db.exec("ALTER TABLE sessions DROP COLUMN queue_paused");
     db.query(

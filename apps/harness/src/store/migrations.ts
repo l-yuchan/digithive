@@ -1,6 +1,7 @@
 // allow: SIZE_OK — migration reset and transitions are one ordered schema ledger.
 import type { Database } from "bun:sqlite";
 import { V16 } from "./whiteboard-v16";
+import { V17, restoreConversationSchema } from "./providers-v17";
 
 /**
  * How a database reaches the current schema.
@@ -455,39 +456,17 @@ INSERT INTO workflows_fts (workflow_id, text)
   },
 };
 
-/**
- * The repairs the reset already carries, for a database that predates them.
- *
- * `session_queue` and the two conversation columns arrived in v11..v13; those steps are
- * retired or unreachable for an older database, so the newest step ensures them itself
- * before it touches anything that assumes them. Running it again is harmless.
- */
-export function restoreConversationSchema(db: Database): void {
-  const columns = db
-    .query<{ name: string }, []>("SELECT name FROM pragma_table_info('sessions')")
-    .all()
-    .map((column) => column.name);
-  if (!columns.includes("title_source"))
-    db.run("ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT 'initial'");
-  if (!columns.includes("queue_paused"))
-    db.run("ALTER TABLE sessions ADD COLUMN queue_paused INTEGER NOT NULL DEFAULT 0");
-  db.run(`CREATE TABLE IF NOT EXISTS session_queue (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL REFERENCES sessions(id),
-  text TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-`);
-}
+/** The repairs the reset already carries, for a database that predates them. */
+export { restoreConversationSchema };
 
 /** The newest version this build writes. */
-export const LATEST = V16.version;
+export const LATEST = V17.version;
 
 /**
  * The two most recent steps, per the owner's migration rule. A fresh database gets the
  * reset and both steps; older ones are repaired by the steps themselves.
  */
-export const TRANSITIONS: readonly Transition[] = [V15, V16];
+export const TRANSITIONS: readonly Transition[] = [V16, V17];
 
 /** The executor a shipped job carries: the path, the account, the grant. */
 export function shippedExecutor(

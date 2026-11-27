@@ -116,9 +116,17 @@ describe("the kept schema steps", () => {
 
   test("a database one version behind runs exactly the step it lacks", () => {
     const db = fresh();
+    // A database that really is one version behind does not have that step's tables yet.
+    db.exec("DROP TABLE provider_state");
+    db.exec("DROP TABLE model_chain");
+    db.exec("DROP TABLE provider_models");
+    db.exec("DROP TABLE provider_connections");
     db.exec(`PRAGMA user_version = ${LATEST - 1}`);
     expect(migrate(db)).toBe(1);
     expect(version(db)).toBe(LATEST);
+    expect(
+      db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='provider_connections'").get(),
+    ).toEqual({ n: 1 });
   });
 
   test("a database recorded before the reset gets the queue table it lacks", () => {
@@ -126,6 +134,13 @@ describe("the kept schema steps", () => {
     // the case that used to be stamped to the newest version without being repaired.
     const db = fresh();
     db.exec("DROP TABLE session_queue");
+    for (const table of [
+      "provider_state",
+      "model_chain",
+      "provider_models",
+      "provider_connections",
+    ])
+      db.exec(`DROP TABLE ${table}`);
     db.exec(`PRAGMA user_version = ${V13.version - 1}`);
     const ran = migrate(db);
     expect(ran).toBe(TRANSITIONS.length);

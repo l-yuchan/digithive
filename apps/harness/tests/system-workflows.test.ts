@@ -61,6 +61,14 @@ test("V16 moves a shipped briefing's existing schedule to the canonical agent", 
       );
       db.query("DROP TABLE IF EXISTS whiteboard_fts").run();
       db.query("DROP TABLE IF EXISTS whiteboard_documents").run();
+      // The provider tables arrived in v17; a v15 database does not have them either.
+      for (const table of [
+        "provider_state",
+        "model_chain",
+        "provider_models",
+        "provider_connections",
+      ])
+        db.query(`DROP TABLE IF EXISTS ${table}`).run();
       db.exec("PRAGMA user_version = 15");
       db.query(
         `INSERT INTO schedules (id,enabled,trigger_json,next_run_at,created_at,updated_at,workflow_id,args_json)

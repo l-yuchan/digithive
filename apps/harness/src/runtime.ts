@@ -13,8 +13,10 @@ import { memoryTools } from "./tools/memory";
 import { fileTools } from "./tools/files";
 import { jobTools } from "./tools/jobs";
 import { installJobs } from "./jobs/install";
-import { createRoutingStream, type ProviderRouteConfig } from "./providers/router";
-import { ensureSettingsTable, readModelPriority, PRIMARY_ROUTE_NAME } from "./providers/settings";
+import type { ProviderRouteConfig } from "./providers/router";
+import { seedProvidersFromEnv, createChainStream } from "./providers/chain";
+import { ProviderStore } from "./providers/store";
+import { ensureSettingsTable, PRIMARY_ROUTE_NAME } from "./providers/settings";
 import { fetchUsageResume } from "./providers/usage";
 import { settleExpiredRuns } from "./core/run-state";
 import {
@@ -120,6 +122,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 export function createRuntime(config: HarnessConfig): {
   work: WorkDeps;
   whiteboard: WhiteboardStore;
+  providers: ProviderStore;
   close: () => void;
 } {
   if (config.dbPath !== ":memory:") mkdirSync(resolve(config.dbPath, ".."), { recursive: true });
@@ -142,33 +145,33 @@ export function createRuntime(config: HarnessConfig): {
   // Additive store, created outside the migration chain; both server and worker open
   // this same database, so either process can read the owner's order on every call.
   ensureSettingsTable(db);
-  const primary: ProviderRouteConfig = {
-    name: "primary",
+  // Providers are rows. A database that has none yet (an existing deployment upgrading
+  // to this build) takes its environment configuration once; after that the settings
+  // screen is the only place a route comes from.
+  const providers = new ProviderStore(db, config.sessionSecret);
+  const seeded = seedProvidersFromEnv(providers, {
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: config.model,
     headers: parseHeaders(config.modelHeaders),
-  };
-  const configuredRoutes = [primary, ...config.fallbackProviders];
-  const stream = createRoutingStream(
-    { primary, fallbacks: config.fallbackProviders },
-    {
-      cooldownMs: config.providerCooldownMs,
-      retries: config.providerRetries,
-      // Read per call, not once at startup: a saved order reaches the next model call
-      // in this process and in the worker without restarting either.
-      priority: () => readModelPriority(db, configuredRoutes),
-      // A quota failure that names no reset asks the provider's usage windows; any
-      // route whose /usage is not a usage document simply keeps the fixed cooldown.
-      usageProbe: (route) =>
-        fetchUsageResume({
-          baseUrl: route.baseUrl,
-          apiKey: route.apiKey,
-          ...(route.headers === undefined ? {} : { headers: route.headers }),
-          now: Date.now(),
-        }),
-    },
-  );
+    fallbacks: config.fallbackProviders,
+    cooldownMs: config.providerCooldownMs,
+    retries: config.providerRetries,
+  });
+  if (seeded > 0) console.log(`seeded ${seeded} model provider(s) from the environment`);
+  const stream = createChainStream(providers, {
+    cooldownMs: config.providerCooldownMs,
+    retries: config.providerRetries,
+    // A quota failure that names no reset asks the provider's usage windows; any
+    // route whose /usage is not a usage document simply keeps the fixed cooldown.
+    usageProbe: (route) =>
+      fetchUsageResume({
+        baseUrl: route.baseUrl,
+        apiKey: route.apiKey,
+        ...(route.headers === undefined ? {} : { headers: route.headers }),
+        now: Date.now(),
+      }),
+  });
   // `workflow_run` executes inline and therefore needs the work layer that owns
   // the registry; the getter reads the holder once the runtime object exists.
   const holder: { work: WorkDeps | null } = { work: null };
@@ -249,6 +252,7 @@ export function createRuntime(config: HarnessConfig): {
   return {
     work,
     whiteboard,
+    providers,
     close: () => {
       sdk.close();
       db.close();

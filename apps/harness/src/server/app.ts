@@ -52,12 +52,9 @@ import { handleScheduleRequest } from "./schedule-routes";
 import { handleWorkflowRequest } from "./workflow-routes";
 import { handleKnowledgeRequest } from "./knowledge-routes";
 import { addSubscription, pushConfigured, sendPush, type PushConfig } from "../scheduler/push";
-import {
-  isModelPriority,
-  readModelPriority,
-  writeModelPriority,
-  type ModelRouteSummary,
-} from "../providers/settings";
+import { readModelPriority, type ModelRouteSummary } from "../providers/settings";
+import { handleProviderRequest } from "./provider-routes";
+import type { ProviderStore } from "../providers/store";
 
 export type AppDeps = {
   readonly db: Database;
@@ -79,6 +76,8 @@ export type AppDeps = {
   readonly auth: AuthConfig;
   /** Public route metadata for the settings screen: never a key or custom header. */
   readonly modelRoutes: readonly ModelRouteSummary[];
+  /** The owner's providers and routing chain; absent only in lightweight fixtures. */
+  readonly providers?: ProviderStore;
   /** Real apps always provide it; lightweight legacy route fixtures may not. */
   readonly whiteboard?: WhiteboardStore;
 };
@@ -269,22 +268,21 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
 
-    if (path === "/api/settings/models") {
+    if (path === "/api/settings/models" && deps.providers === undefined) {
       if (request.method === "GET")
         return json({
           routes: deps.modelRoutes,
           priority: readModelPriority(deps.db, deps.modelRoutes),
         });
-      if (request.method === "PUT") {
-        const raw = z
-          .object({ priority: z.array(z.string()) })
-          .safeParse(await request.json().catch(() => null));
-        if (!raw.success || !isModelPriority(raw.data.priority, deps.modelRoutes))
-          return json({ error: "invalid_priority" }, 422);
-        const priority = writeModelPriority(deps.db, raw.data.priority, deps.modelRoutes);
-        return json({ routes: deps.modelRoutes, priority });
-      }
       return json({ error: "method_not_allowed" }, 405);
+    }
+
+    if (deps.providers !== undefined) {
+      const providerResponse = await handleProviderRequest(request, {
+        db: deps.db,
+        providers: deps.providers,
+      });
+      if (providerResponse) return providerResponse;
     }
 
     const whiteboard = deps.whiteboard;
