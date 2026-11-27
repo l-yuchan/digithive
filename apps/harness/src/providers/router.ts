@@ -45,6 +45,14 @@ export type RouterOptions = {
   readonly onDiagnostic?: (diagnostic: ProviderDiagnostic) => void;
   /** Transport for every route, overriding the per-route hook (routing tests). */
   readonly fetchImplOverride?: typeof fetch;
+  /**
+   * Saved route order by route name (the owner's settings). Read on every model
+   * call, so a change applies to the next call. A listed name comes in that order;
+   * a route the list does not name keeps config order after the listed ones, and a
+   * name no route carries is ignored. When the order changes, a context's saved
+   * affinity is dropped so the order the owner just saved decides the next call.
+   */
+  readonly priority?: () => readonly string[];
 };
 
 /**
@@ -121,8 +129,9 @@ export function formatWait(ms: number): string {
  * provider. Transient failures retry the same route and then fall back for this
  * call only. Quota and authentication failures suspend the route — until the reset
  * the provider reports, or a fixed cooldown when it reports none — and the context
- * moves to the next healthy route. A response that already streamed text or tool
- * calls is never replayed elsewhere.
+ * moves to the next healthy route. The owner's saved route order decides which
+ * route is next. A response that already streamed text or tool calls is never
+ * replayed elsewhere.
  */
 export function createRoutingStream(
   config: ProvidersConfig,
@@ -164,11 +173,15 @@ export function createRoutingStream(
   const cooldownMs = options.cooldownMs ?? DEFAULT_COOLDOWN_MS;
   const retries = options.retries ?? DEFAULT_RETRIES;
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const cooldownUntil = new Map<number, number>();
-  const preferred = new Map<string, number>();
+  // Cooldowns and failures belong to the route's identity (its name), never to its
+  // position: reordering routes in settings must not move a suspension onto a
+  // healthy route or lose one from the route that earned it.
+  const cooldownUntil = new Map<string, number>();
+  const preferred = new Map<string, string>();
   /** The last failure per route, kept so an exhausted answer says why. */
-  const lastError = new Map<number, ProviderError>();
+  const lastError = new Map<string, ProviderError>();
   const history: ProviderDiagnostic[] = [];
+  let lastPrioritySignature: string | null = null;
 
   /** Per-call sink from StreamOptions, so a run's decisions reach its own log. */
   let callSink: ((diagnostic: ProviderDiagnostic) => void) | undefined;
@@ -192,21 +205,41 @@ export function createRoutingStream(
     return resume === null ? cooldownMs : Math.max(0, resume.resumeAt - now());
   };
 
-  /** Healthy routes in preference order: the context's route first, then config order. */
+  /**
+   * Healthy routes in preference order: the saved order (when settings name one),
+   * config order for the rest, and the context's route first while the saved order
+   * stands. A changed saved order starts a fresh ranking, so an affinity formed
+   * under the old order cannot keep a route the owner moved down the list.
+   */
   const ranked = (contextKey: string): Route[] => {
     const at = now();
-    const home = preferred.get(contextKey);
-    const healthy = routes.filter((route) => (cooldownUntil.get(route.index) ?? 0) <= at);
-    return healthy.toSorted((a, b) => {
-      const rank = (route: Route) => (route.index === home ? 0 : route.index + 1);
-      return rank(a) - rank(b);
+    const priority = options.priority?.() ?? [];
+    const signature = priority.join("\u0000");
+    if (lastPrioritySignature !== null && signature !== lastPrioritySignature) {
+      preferred.clear();
+    }
+    lastPrioritySignature = signature;
+    // The first mention of a name wins, so a duplicated entry cannot reorder twice.
+    const saved = new Map<string, number>();
+    for (const [position, name] of priority.entries()) {
+      if (!saved.has(name)) saved.set(name, position);
+    }
+    const ordered = routes.toSorted((left, right) => {
+      const leftRank = saved.get(left.name) ?? priority.length + left.index;
+      const rightRank = saved.get(right.name) ?? priority.length + right.index;
+      return leftRank - rightRank;
     });
+    const home = preferred.get(contextKey);
+    const healthy = ordered.filter((route) => (cooldownUntil.get(route.name) ?? 0) <= at);
+    return healthy.toSorted(
+      (left, right) => Number(left.name !== home) - Number(right.name !== home),
+    );
   };
 
   /** The route a caller should be told about next: the first one out of cooldown. */
   const soonest = (): { route: Route; waitMs: number } | null => {
     const open = routes
-      .map((route) => ({ route, until: cooldownUntil.get(route.index) ?? 0 }))
+      .map((route) => ({ route, until: cooldownUntil.get(route.name) ?? 0 }))
       .filter((entry) => entry.until > now())
       .toSorted((left, right) => left.until - right.until);
     const next = open[0];
@@ -258,6 +291,7 @@ export function createRoutingStream(
     // Fixed before any suspension, so "the next route" stays the route after this one.
     const candidates = ranked(contextKey);
     for (const [position, route] of candidates.entries()) {
+      const next = candidates[position + 1];
       let attempt = 0;
       while (true) {
         if (streamOptions.signal?.aborted) throw new ProviderError("aborted");
@@ -274,7 +308,7 @@ export function createRoutingStream(
             if (event.type !== "done") emitted.push(event);
             yield event;
           }
-          preferred.set(contextKey, route.index);
+          preferred.set(contextKey, route.name);
           return;
         } catch (error) {
           const providerError =
@@ -288,22 +322,27 @@ export function createRoutingStream(
             throw providerError;
           }
           if (visible) throw providerError;
-          lastError.set(route.index, providerError);
+          lastError.set(route.name, providerError);
           if (providerError.unhealthy) {
             const held = await suspendFor(route, providerError);
-            cooldownUntil.set(route.index, now() + held);
+            cooldownUntil.set(route.name, now() + held);
             preferred.delete(contextKey);
-            report({
-              kind: "provider.fallback",
-              provider: candidates[position + 1]?.name ?? route.name,
-              model: candidates[position + 1]?.model ?? route.model,
-              reason: providerError.kind,
-              retryInMs: held,
-              until: new Date(now() + held).toISOString(),
-              failedProvider: route.name,
-              contextKey,
-              error: describe(providerError),
-            });
+            // A "switch" needs a route to switch to. With none left, the exhaustion
+            // below is the one honest answer; naming this route as its own fallback
+            // is what made a single-route setup read as "primary → primary".
+            if (next !== undefined) {
+              report({
+                kind: "provider.fallback",
+                provider: next.name,
+                model: next.model,
+                reason: providerError.kind,
+                retryInMs: held,
+                until: new Date(now() + held).toISOString(),
+                failedProvider: route.name,
+                contextKey,
+                error: describe(providerError),
+              });
+            }
             break;
           }
           if (providerError.transient && attempt <= retries) {
@@ -318,16 +357,18 @@ export function createRoutingStream(
             await sleep(retryDelayMs * attempt);
             continue;
           }
-          report({
-            kind: "provider.fallback",
-            provider: candidates[position + 1]?.name ?? route.name,
-            model: candidates[position + 1]?.model ?? route.model,
-            reason: providerError.kind,
-            retryInMs: 0,
-            failedProvider: route.name,
-            contextKey,
-            error: describe(providerError),
-          });
+          if (next !== undefined) {
+            report({
+              kind: "provider.fallback",
+              provider: next.name,
+              model: next.model,
+              reason: providerError.kind,
+              retryInMs: 0,
+              failedProvider: route.name,
+              contextKey,
+              error: describe(providerError),
+            });
+          }
           break;
         }
       }
@@ -354,12 +395,7 @@ export function createRoutingStream(
 
   return Object.assign(routed, {
     diagnostics: () => history,
-    activeRoute: (contextKey: string) => {
-      const home = preferred.get(contextKey);
-      return home === undefined
-        ? null
-        : (routes.find((route) => route.index === home)?.name ?? null);
-    },
+    activeRoute: (contextKey: string) => preferred.get(contextKey) ?? null,
   });
 }
 

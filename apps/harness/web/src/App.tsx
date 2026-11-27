@@ -17,6 +17,7 @@ import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { WhiteboardPanel } from "./whiteboard/WhiteboardPanel";
+import { SettingsPanel } from "./settings/SettingsPanel";
 import { Login } from "./auth/Login";
 import { Version } from "./AppVersion";
 import { watchBuild } from "./buildCheck";
@@ -237,7 +238,14 @@ function readLocation(): { tab: Tab; sessionId: string | null } {
   const query = new URLSearchParams(window.location.search);
   if (query.get("oauth") !== null) return { tab: "connections", sessionId: null };
   const tab = query.get("tab");
-  const known: readonly Tab[] = ["chat", "work", "workflows", "connections", "knowledge"];
+  const known: readonly Tab[] = [
+    "chat",
+    "work",
+    "workflows",
+    "connections",
+    "knowledge",
+    "settings",
+  ];
   const found = known.find((candidate) => candidate === tab);
   return { tab: found ?? "chat", sessionId: query.get("session") };
 }
@@ -631,6 +639,7 @@ export function App() {
     { tab: "connections", label: "연결", testId: "tab-connections" },
     { tab: "knowledge", label: "기억", testId: "tab-knowledge" },
     { tab: "whiteboard", label: "화이트보드", testId: "tab-whiteboard" },
+    { tab: "settings", label: "설정", testId: "tab-settings" },
   ];
 
   return (
@@ -666,6 +675,8 @@ export function App() {
           <KnowledgePanel />
         ) : route.tab === "whiteboard" ? (
           <WhiteboardPanel />
+        ) : route.tab === "settings" ? (
+          <SettingsPanel />
         ) : (
           <ChatView
             sessions={state.sessions}

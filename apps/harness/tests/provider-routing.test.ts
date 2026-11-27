@@ -5,6 +5,7 @@ import {
   createRoutingStream,
   type ProviderDiagnostic,
   type ProviderRouteConfig,
+  type RouterOptions,
 } from "../src/providers/router";
 
 type Reply = Response | (() => Response) | Error;
@@ -73,7 +74,12 @@ async function collect(iterable: AsyncIterable<AdapterEvent>): Promise<string> {
   return text;
 }
 
-function routed(routes: ProviderRouteConfig[], fetchImpl: typeof fetch, clock = () => 0) {
+function routed(
+  routes: ProviderRouteConfig[],
+  fetchImpl: typeof fetch,
+  clock = () => 0,
+  extra: Partial<RouterOptions> = {},
+) {
   const [primary, ...fallbacks] = routes;
   if (!primary) throw new Error("a routing test needs at least one route");
   const diagnostics: ProviderDiagnostic[] = [];
@@ -85,6 +91,7 @@ function routed(routes: ProviderRouteConfig[], fetchImpl: typeof fetch, clock = 
       retryDelayMs: 0,
       fetchImplOverride: fetchImpl,
       onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+      ...extra,
     },
   );
   return { stream, diagnostics };
@@ -166,6 +173,18 @@ describe("provider routing", () => {
     const failure = collect(stream([], [], options(fetchImpl)));
     expect(failure).rejects.toThrow(/usage limit A[\s\S]*usage limit B/);
     expect(failure).rejects.toMatchObject({ kind: "quota_exhausted" });
+  });
+
+  test("a single route that fails says no route is available, not that it switches to itself", async () => {
+    // The reported turn read "primary → primary/deepseek, then no route": with no
+    // configured fallback the router named the failed route as its own fallback.
+    const { fetchImpl } = transport(quotaBody("usage limit reached"));
+    const { stream, diagnostics } = routed([route("primary")], fetchImpl);
+    const failure = collect(stream([], [], options(fetchImpl)));
+    expect(failure).rejects.toThrow(/usage limit reached/);
+    expect(diagnostics.map((record) => record.kind)).toEqual(["provider.exhausted"]);
+    expect(diagnostics[0]).toMatchObject({ provider: "primary", reason: "every route failed" });
+    expect(diagnostics[0]?.failedProvider).toBeUndefined();
   });
 
   test("output already streamed is never replayed on another route", async () => {
@@ -310,5 +329,73 @@ describe("a quota failure suspends its route until the reset it reports", () => 
     now = 1_000;
     expect(await run()).toBe("백업 둘째");
     expect(calls.map((url) => new URL(url).host)).toEqual(["primary", "backup", "backup"]);
+  });
+});
+
+/**
+ * The owner's saved route order is the order the router must try. A saved name
+ * no route carries is stale settings, not a route: it is ignored. Reordering while
+ * a route is suspended must move the order, never the suspension.
+ */
+describe("saved route order", () => {
+  test("the saved order leads and unnamed routes keep config order after it", async () => {
+    const { fetchImpl, calls } = transport(quotaBody("usage limit reached"), answer("프라이머리"));
+    const { stream } = routed(
+      [route("primary"), route("backup"), route("third")],
+      fetchImpl,
+      () => 0,
+      { priority: () => ["third", "ghost"] },
+    );
+    expect(await collect(stream([], [], { ...options(fetchImpl), contextKey: "s-1" }))).toBe(
+      "프라이머리",
+    );
+    // third first (saved), then the unnamed routes in their configured order.
+    expect(calls.map((url) => new URL(url).host)).toEqual(["third", "primary"]);
+  });
+
+  test("a changed order overrides the route this context already settled on", async () => {
+    let priority = ["primary", "backup"];
+    const { fetchImpl, calls } = transport(answer("프라이머리 답"), answer("백업 답"));
+    const { stream } = routed([route("primary"), route("backup")], fetchImpl, () => 0, {
+      priority: () => priority,
+    });
+    const run = () => collect(stream([], [], { ...options(fetchImpl), contextKey: "s-1" }));
+    expect(await run()).toBe("프라이머리 답");
+    expect(stream.activeRoute("s-1")).toBe("primary");
+    // The owner moves backup up; the conversation must follow on the very next call.
+    priority = ["backup", "primary"];
+    expect(await run()).toBe("백업 답");
+    expect(stream.activeRoute("s-1")).toBe("backup");
+    expect(calls.map((url) => new URL(url).host)).toEqual(["primary", "backup"]);
+  });
+
+  test("a reorder keeps each route's suspension on the route that earned it", async () => {
+    let priority = ["primary", "backup"];
+    const { fetchImpl, calls } = transport(
+      quotaBody("usage limit reached"),
+      answer("백업"),
+      answer("백업 유지"),
+    );
+    const { stream } = routed([route("primary"), route("backup")], fetchImpl, () => 0, {
+      priority: () => priority,
+    });
+    const run = () => collect(stream([], [], { ...options(fetchImpl), contextKey: "s-1" }));
+    expect(await run()).toBe("백업");
+    // Put the suspended primary first again: it must not be retried before its reset.
+    priority = ["backup", "primary"];
+    expect(await run()).toBe("백업 유지");
+    expect(calls.map((url) => new URL(url).host)).toEqual(["primary", "backup", "backup"]);
+  });
+
+  test("the order is read on every call, not captured when the router is built", async () => {
+    let saved: string[] = [];
+    const { fetchImpl } = transport(answer("백업"), answer("백업 둘째"));
+    const { stream } = routed([route("primary"), route("backup")], fetchImpl, () => 0, {
+      priority: () => saved,
+    });
+    saved = ["backup"];
+    expect(await collect(stream([], [], { ...options(fetchImpl), contextKey: "s-1" }))).toBe(
+      "백업",
+    );
   });
 });

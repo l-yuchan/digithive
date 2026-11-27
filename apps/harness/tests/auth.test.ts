@@ -52,6 +52,7 @@ function deps(overrides: { passphrase?: string } = {}): AppDeps {
     webRoot,
     buildId: "test-build",
     auth: { passphrase: overrides.passphrase ?? auth.passphrase, secret: auth.secret },
+    modelRoutes: [],
     google: {
       db,
       events,

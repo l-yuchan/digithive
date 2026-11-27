@@ -14,6 +14,7 @@ import { fileTools } from "./tools/files";
 import { jobTools } from "./tools/jobs";
 import { installJobs } from "./jobs/install";
 import { createRoutingStream, type ProviderRouteConfig } from "./providers/router";
+import { ensureSettingsTable, readModelPriority, PRIMARY_ROUTE_NAME } from "./providers/settings";
 import { fetchUsageResume } from "./providers/usage";
 import { settleExpiredRuns } from "./core/run-state";
 import {
@@ -138,6 +139,9 @@ export function createRuntime(config: HarnessConfig): {
     root: config.whiteboardRoot,
     search: config.search,
   });
+  // Additive store, created outside the migration chain; both server and worker open
+  // this same database, so either process can read the owner's order on every call.
+  ensureSettingsTable(db);
   const primary: ProviderRouteConfig = {
     name: "primary",
     baseUrl: config.baseUrl,
@@ -145,11 +149,15 @@ export function createRuntime(config: HarnessConfig): {
     model: config.model,
     headers: parseHeaders(config.modelHeaders),
   };
+  const configuredRoutes = [primary, ...config.fallbackProviders];
   const stream = createRoutingStream(
     { primary, fallbacks: config.fallbackProviders },
     {
       cooldownMs: config.providerCooldownMs,
       retries: config.providerRetries,
+      // Read per call, not once at startup: a saved order reaches the next model call
+      // in this process and in the worker without restarting either.
+      priority: () => readModelPriority(db, configuredRoutes),
       // A quota failure that names no reset asks the provider's usage windows; any
       // route whose /usage is not a usage document simply keeps the fixed cooldown.
       usageProbe: (route) =>
@@ -271,6 +279,19 @@ function parseFallbackProviders(raw: string): ProviderRouteConfig[] {
     .safeParse(parsed);
   if (!routes.success) {
     throw new Error(`MODEL_FALLBACKS_JSON is invalid: ${routes.error.message}`);
+  }
+  // Route identity keys the router's cooldown, error and affinity maps. A repeated
+  // name would move one route's suspension onto another; `primary` already names the
+  // MODEL_BASE_URL route and cannot be used again.
+  const names = routes.data.map((route) => route.name);
+  if (names.includes(PRIMARY_ROUTE_NAME)) {
+    throw new Error(
+      `MODEL_FALLBACKS_JSON is invalid: route name "${PRIMARY_ROUTE_NAME}" is reserved for MODEL_BASE_URL`,
+    );
+  }
+  const duplicate = names.find((name, index) => names.indexOf(name) !== index);
+  if (duplicate !== undefined) {
+    throw new Error(`MODEL_FALLBACKS_JSON is invalid: duplicate route name "${duplicate}"`);
   }
   return routes.data.map(({ headers, ...route }) =>
     headers === undefined ? route : { ...route, headers },

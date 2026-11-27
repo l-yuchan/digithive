@@ -17,6 +17,7 @@ describe("the tab routes", () => {
       "/connections",
       "/knowledge",
       "/whiteboard",
+      "/settings",
     ];
     for (const path of paths) {
       expect(TAB_ROUTE.test(path)).toBe(true);
@@ -40,6 +41,7 @@ describe("the tab routes", () => {
     expect(routeOf("/connections")).toEqual({ tab: "connections", sessionId: null });
     expect(routeOf("/knowledge")).toEqual({ tab: "knowledge", sessionId: null });
     expect(routeOf("/whiteboard")).toEqual({ tab: "whiteboard", sessionId: null });
+    expect(routeOf("/settings")).toEqual({ tab: "settings", sessionId: null });
     // Anything else falls back to the chat tab rather than a blank screen.
     expect(routeOf("/nope")).toEqual({ tab: "chat", sessionId: null });
     expect(routeOf("/chat/a/b")).toEqual({ tab: "chat", sessionId: null });
@@ -62,6 +64,8 @@ describe("the tab routes", () => {
     expect(tabPath("connections")).toBe("/connections");
     expect(tabPath("knowledge")).toBe("/knowledge");
     expect(tabPath("whiteboard")).toBe("/whiteboard");
+    expect(tabPath("settings")).toBe("/settings");
+    expect(tabPath("settings")).toBe(TAB_PATHS.settings);
     expect(tabPath("chat", "x")).toBe("/chat/x");
     expect(tabPath("chat")).toBe("/chat");
   });
