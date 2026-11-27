@@ -449,7 +449,11 @@ describe("routing from the chain", () => {
     });
     store.addToChain(b, "b-model");
     const entries = store.chain();
-    store.reorderChain(entries.toReversed().map((entry) => ({ providerId: entry.providerId, modelId: entry.modelId })));
+    store.reorderChain(
+      entries
+        .toReversed()
+        .map((entry) => ({ providerId: entry.providerId, modelId: entry.modelId })),
+    );
     expect(await ask()).toBe("B");
   });
 
