@@ -1,244 +1,251 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { z } from "zod";
-import { getJson, sendJson } from "../api";
-
-const ModelRouteSchema = z.object({
-  name: z.string().min(1),
-  model: z.string(),
-  baseUrl: z.string(),
-});
-const ModelsSchema = z.object({
-  routes: z.array(ModelRouteSchema),
-  priority: z.array(z.string()),
-});
-type ModelRoute = z.infer<typeof ModelRouteSchema>;
-type ModelSettings = z.infer<typeof ModelsSchema>;
+import { getJson } from "../api";
 
 /**
- * The server accepts only an exact permutation: every route named once, nothing
- * else. Rejecting a mismatch here keeps a bad answer from being edited and saved
- * back as a list the server would have to refuse anyway.
+ * What one part of the settings tab is: the parts that used to be the 연결 tab beside it,
+ * and the model providers. Each part has its own address, so it can be linked and reloaded
+ * on its own; the overview answers "what is set up" without opening any of them.
  */
-function isPermutation(priority: readonly string[], routes: readonly ModelRoute[]): boolean {
-  if (priority.length !== routes.length) return false;
-  const names = new Set(routes.map((route) => route.name));
-  if (names.size !== routes.length) return false;
-  const seen = new Set<string>();
-  for (const name of priority) {
-    if (!names.has(name) || seen.has(name)) return false;
-    seen.add(name);
-  }
-  return true;
-}
+export type SettingsChild = "providers" | "accounts" | "push" | "briefings";
 
-/** The routes in the order they are tried, keyed by the draft order the list edits. */
-function orderedRoutes(routes: readonly ModelRoute[], priority: readonly string[]): ModelRoute[] {
-  const byName = new Map(routes.map((route) => [route.name, route]));
-  const ordered: ModelRoute[] = [];
-  for (const name of priority) {
-    const route = byName.get(name);
-    if (route !== undefined && !ordered.includes(route)) ordered.push(route);
-  }
-  for (const route of routes) if (!ordered.includes(route)) ordered.push(route);
-  return ordered;
-}
+export const SETTINGS_CHILD_LABELS: readonly {
+  readonly id: SettingsChild;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  {
+    id: "providers",
+    label: "모델 공급자",
+    description: "공급자를 추가하고 어떤 모델을 어떤 순서로 쓸지 정합니다.",
+  },
+  {
+    id: "accounts",
+    label: "계정",
+    description: "Google, Canvas 계정을 연결하고 어떤 자료를 모을지 정합니다.",
+  },
+  {
+    id: "push",
+    label: "알림",
+    description: "이 기기로 오는 브리핑 알림을 켜거나 상태를 확인합니다.",
+  },
+  {
+    id: "briefings",
+    label: "브리핑",
+    description: "최근 브리핑을 보고 지금 하나 만들어 봅니다.",
+  },
+];
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+export function SettingsPanel({
+  child,
+  onChild,
+}: {
+  readonly child: SettingsChild | null;
+  readonly onChild: (child: SettingsChild) => void;
+}) {
+  return (
+    <section className="settings" aria-label="설정">
+      <header className="card card-head">
+        <h2>설정</h2>
+      </header>
+      <p className="panel-intro">
+        모델 공급자, 계정 연결, 알림, 브리핑이 한 곳에 모여 있습니다. 옆 항목을 고르면 그 화면의
+        주소로 이동합니다.
+      </p>
+      <nav className="settings-menu" aria-label="설정 항목">
+        {SETTINGS_CHILD_LABELS.map((entry) => (
+          <a
+            key={entry.id}
+            href={`/settings/${entry.id}`}
+            aria-current={child === entry.id ? "page" : undefined}
+            data-testid={`settings-child-${entry.id}`}
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+              event.preventDefault();
+              onChild(entry.id);
+            }}
+          >
+            {entry.label}
+          </a>
+        ))}
+      </nav>
+      {child === null ? (
+        <SettingsOverview onChild={onChild} />
+      ) : child === "providers" ? (
+        <Lazy
+          importPanel={() => import("./ProvidersPanel")}
+          pick={(module) => module.ProvidersPanel}
+        />
+      ) : child === "accounts" ? (
+        <Lazy
+          importPanel={() => import("./AccountsSection")}
+          pick={(module) => module.AccountsSection}
+        />
+      ) : child === "push" ? (
+        <Lazy importPanel={() => import("./PushSection")} pick={(module) => module.PushSection} />
+      ) : (
+        <Lazy
+          importPanel={() => import("./BriefingsSection")}
+          pick={(module) => module.BriefingsSection}
+        />
+      )}
+    </section>
+  );
 }
 
 /**
- * Model priority settings. The list is the order routes are tried in: the first one
- * answers while healthy, and a suspended route hands the context to the next one.
+ * A part is fetched when its address is opened, so reloading one part does not load the
+ * others. A failed chunk (a new build replaced it) is said plainly instead of a blank.
  */
-export function SettingsPanel() {
-  const [settings, setSettings] = useState<ModelSettings | null>(null);
-  const [order, setOrder] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const accept = useCallback((body: ModelSettings) => {
-    if (!isPermutation(body.priority, body.routes)) {
-      throw new Error("경로 우선순위가 경로 목록과 일치하지 않습니다.");
-    }
-    setSettings(body);
-    setOrder(body.priority);
-  }, []);
-
-  const refresh = () => {
-    setLoading(true);
-    setLoadError(null);
-    getJson("/api/settings/models", ModelsSchema)
-      .then((body) => {
-        accept(body);
-        setLoadError(null);
-        setLoading(false);
-      })
-      .catch((error: unknown) => {
-        setLoadError(messageOf(error));
-        setLoading(false);
-      });
-  };
-
+function Lazy<T>({
+  importPanel,
+  pick,
+}: {
+  readonly importPanel: () => Promise<T>;
+  readonly pick: (module: T) => () => ReactNode;
+}) {
+  const [part, setPart] = useState<{ Panel: () => ReactNode } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    getJson("/api/settings/models", ModelsSchema)
-      .then((body) => {
-        if (cancelled) return;
-        accept(body);
-        setLoadError(null);
-        setLoading(false);
+    importPanel()
+      .then((module) => {
+        if (!cancelled) setPart({ Panel: pick(module) });
       })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setLoadError(messageOf(error));
-        setLoading(false);
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
       });
     return () => {
       cancelled = true;
     };
-  }, [accept]);
+  }, [importPanel, pick]);
+  if (error !== null)
+    return (
+      <p className="error" role="alert">
+        화면을 불러오지 못했습니다: {error}. 페이지를 새로고침해 주세요.
+      </p>
+    );
+  if (part === null)
+    return (
+      <p className="run-meta" role="status">
+        불러오는 중…
+      </p>
+    );
+  const Panel = part.Panel;
+  return <Panel />;
+}
 
-  const move = (name: string, direction: -1 | 1) => {
-    setMessage(null);
-    setSaveError(null);
-    setOrder((current) => {
-      const index = current.indexOf(name);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      const [moved] = next.splice(index, 1);
-      if (moved === undefined) return current;
-      next.splice(target, 0, moved);
-      return next;
-    });
-  };
+const ConnectionsSchema = z.object({
+  googleConnected: z.boolean(),
+  canvasConfigured: z.boolean(),
+  pushConfigured: z.boolean(),
+});
+const ChainSchema = z.object({
+  routes: z.array(z.object({ providerLabel: z.string(), modelId: z.string() })),
+});
 
-  const save = async () => {
-    if (settings === null || saving) return;
-    setSaving(true);
-    setSaveError(null);
-    setMessage(null);
-    try {
-      // The server answers with what it stored, so the list shows the saved order
-      // without a second request.
-      accept(await sendJson("PUT", "/api/settings/models", { priority: order }, ModelsSchema));
-      setMessage("저장했습니다.");
-    } catch (error) {
-      setSaveError(messageOf(error));
-    } finally {
-      setSaving(false);
-    }
-  };
+/**
+ * The overview answers what is set up and which model would answer, without opening any
+ * part; each line is a link to the part that changes it.
+ */
+function SettingsOverview({ onChild }: { readonly onChild: (child: SettingsChild) => void }) {
+  const [loading, setLoading] = useState(true);
+  const [routes, setRoutes] = useState<{ providerLabel: string; modelId: string }[]>([]);
+  const [connections, setConnections] = useState<z.infer<typeof ConnectionsSchema> | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
 
-  const shown = settings === null ? [] : orderedRoutes(settings.routes, order);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.allSettled([
+      getJson("/api/settings/models", ChainSchema),
+      getJson("/api/connections", ConnectionsSchema),
+    ])
+      .then(([chain, connected]) => {
+        if (cancelled) return;
+        const failures: string[] = [];
+        if (chain.status === "fulfilled") setRoutes(chain.value.routes);
+        else
+          failures.push(
+            `모델 경로를 불러오지 못했습니다: ${chain.reason instanceof Error ? chain.reason.message : String(chain.reason)}`,
+          );
+        if (connected.status === "fulfilled") setConnections(connected.value);
+        else
+          failures.push(
+            `연결 상태를 불러오지 못했습니다: ${connected.reason instanceof Error ? connected.reason.message : String(connected.reason)}`,
+          );
+        setErrors(failures);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
-    <section className="settings" aria-labelledby="settings-title">
-      <header className="card card-head">
-        <h2 id="settings-title">모델 우선순위</h2>
-        <button
-          className="ghost"
-          type="button"
-          data-testid="settings-refresh"
-          disabled={loading || saving}
-          onClick={refresh}
-        >
-          새로고침
-        </button>
-      </header>
-      <p className="panel-intro">
-        위에 있는 경로를 먼저 사용합니다. 할당량이 소진된 경로는 잠시 건너뛰고 다음 경로로
-        넘어갑니다.
-      </p>
-
+    <div className="card" data-testid="settings-overview">
+      {errors.map((error) => (
+        <p key={error} className="error" role="alert">
+          {error}
+        </p>
+      ))}
+      <h3>모델 경로</h3>
       {loading ? (
-        <p className="run-meta" role="status" data-testid="settings-loading">
-          불러오는 중…
+        <p className="run-meta">불러오는 중…</p>
+      ) : routes.length === 0 ? (
+        <p className="run-meta" data-testid="overview-routes-empty">
+          아직 모델 경로가 없습니다. “모델 공급자”에서 하나 추가하세요.
         </p>
-      ) : null}
-      {loadError !== null ? (
-        <p className="error" role="alert" data-testid="settings-load-error">
-          설정을 불러오지 못했습니다: {loadError}
-        </p>
-      ) : null}
-
-      {settings !== null && !loading ? (
-        <div className="card">
-          {shown.length === 0 ? (
-            <p className="run-meta" data-testid="settings-empty">
-              등록된 모델 경로가 없습니다.
-            </p>
-          ) : (
-            <ol className="settings-list" data-testid="settings-priority">
-              {shown.map((route, index) => (
-                <li
-                  key={route.name}
-                  className="settings-route"
-                  data-testid={`settings-route-${route.name}`}
-                >
-                  <span className="settings-position" aria-hidden="true">
-                    {index + 1}
-                  </span>
-                  <div className="settings-route-body">
-                    <span className="settings-route-name">{route.name}</span>
-                    <span className="settings-route-meta">
-                      {route.model} · {route.baseUrl}
-                    </span>
-                  </div>
-                  <div className="settings-route-actions">
-                    <button
-                      className="ghost"
-                      type="button"
-                      aria-label={`${route.name} 위로 이동`}
-                      data-testid={`settings-up-${route.name}`}
-                      disabled={saving || index === 0}
-                      onClick={() => move(route.name, -1)}
-                    >
-                      위로
-                    </button>
-                    <button
-                      className="ghost"
-                      type="button"
-                      aria-label={`${route.name} 아래로 이동`}
-                      data-testid={`settings-down-${route.name}`}
-                      disabled={saving || index === shown.length - 1}
-                      onClick={() => move(route.name, 1)}
-                    >
-                      아래로
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          )}
-          <div className="settings-save">
-            <button
-              className="primary"
-              type="button"
-              data-testid="settings-save"
-              disabled={saving}
-              onClick={() => void save()}
-            >
-              {saving ? "저장 중…" : "저장"}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {saveError !== null ? (
-        <p className="error" role="alert" data-testid="settings-save-error">
-          저장하지 못했습니다: {saveError}
-        </p>
-      ) : null}
-      {message !== null ? (
-        <p className="run-meta" role="status" data-testid="settings-message">
-          {message}
-        </p>
-      ) : null}
-    </section>
+      ) : (
+        <ol className="settings-list" data-testid="overview-routes">
+          {routes.map((route, index) => (
+            <li key={`${index}:${route.providerLabel}:${route.modelId}`} className="settings-route">
+              <span className="settings-position" aria-hidden="true">
+                {index + 1}
+              </span>
+              <div className="settings-route-body">
+                <span className="settings-route-name">{route.modelId}</span>
+                <span className="settings-route-meta">{route.providerLabel}</span>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <h3>연결 상태</h3>
+      <ul className="settings-links" data-testid="overview-connections">
+        <li>
+          <button className="link" type="button" onClick={() => onChild("accounts")}>
+            계정
+          </button>
+          <span className="run-meta">
+            {" "}
+            {connections === null
+              ? "확인 중/확인 불가"
+              : connections.googleConnected
+                ? "Google 연결됨"
+                : "Google 미연결"}
+          </span>
+        </li>
+        <li>
+          <button className="link" type="button" onClick={() => onChild("push")}>
+            알림
+          </button>
+          <span className="run-meta">
+            {" "}
+            {connections === null
+              ? "확인 중/확인 불가"
+              : connections.pushConfigured
+                ? "푸시 설정됨"
+                : "푸시 미설정"}
+          </span>
+        </li>
+        <li>
+          <button className="link" type="button" onClick={() => onChild("briefings")}>
+            브리핑
+          </button>
+          <span className="run-meta"> 최근 브리핑 보기</span>
+        </li>
+      </ul>
+    </div>
   );
 }

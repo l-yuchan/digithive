@@ -1944,3 +1944,237 @@ button.ghost.danger-button {
     max-height: 32vh;
   }
 }
+
+/* ── Settings: one tab, each part under its own address ───────────────────────── */
+.settings-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.settings-menu a {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.settings-menu a:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.settings-menu a[aria-current="page"] {
+  color: var(--text);
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.settings-part {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.settings-links {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-links li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.provider-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.provider-section h4 {
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.provider-section .card-head {
+  gap: var(--space-2);
+}
+
+.provider-filter {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.provider-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.provider-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.provider-fields input,
+.provider-fields select,
+.provider-fields textarea {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.provider-fields p,
+.provider-fields .run-meta {
+  grid-column: 1 / -1;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.usage-meters {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.usage-meter {
+  display: grid;
+  grid-template-columns: minmax(5rem, 9rem) minmax(4rem, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--font-sm);
+}
+
+.usage-meter-label {
+  color: var(--muted);
+}
+
+.usage-meter-value {
+  overflow-wrap: anywhere;
+}
+
+.usage-bar {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.usage-bar-fill.warn {
+  background: var(--warning);
+}
+
+.usage-bar-fill.spent {
+  background: var(--danger);
+}
+
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+.model-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+
+.model-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 16rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.model-id {
+  font-weight: 600;
+}
+
+.model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+@media (max-width: 640px) {
+  .usage-meter {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-route {
+    flex-wrap: wrap;
+  }
+
+  /* On a narrow screen the actions take their own row, so the name keeps its width. */
+  .settings-route-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding-left: calc(1.5rem + var(--space-2));
+  }
+
+  .settings-route-body {
+    flex: 1 1 60%;
+    overflow-wrap: anywhere;
+  }
+}

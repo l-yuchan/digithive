@@ -13,7 +13,6 @@ import {
   type Session,
 } from "./api";
 import { WorkPanel } from "./work/WorkPanel";
-import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { WhiteboardPanel } from "./whiteboard/WhiteboardPanel";
@@ -21,7 +20,15 @@ import { SettingsPanel } from "./settings/SettingsPanel";
 import { Login } from "./auth/Login";
 import { Version } from "./AppVersion";
 import { watchBuild } from "./buildCheck";
-import { TAB_PATHS, routeOf, tabPath, type Tab } from "./routes";
+import {
+  settingsChildOf,
+  settingsPath,
+  TAB_PATHS,
+  routeOf,
+  tabPath,
+  type SettingsChild,
+  type Tab,
+} from "./routes";
 import { ChatView, cancelQueued, resumeQueue, useQueue } from "./chat/ChatView";
 import type { RenameTarget } from "./sidebar/ConversationSidebar";
 
@@ -223,43 +230,73 @@ function appPath(): string {
   return new URL(window.location.href).pathname;
 }
 
+/** Where the app is: the tab, a settings child, and the conversation the address names. */
+type Route = {
+  readonly tab: Tab;
+  readonly settingsChild: SettingsChild | null;
+  readonly sessionId: string | null;
+};
+
 /**
- * The tab comes from the address, so a reload or a shared link opens the same screen and
- * back/forward move between tabs. A static host (a file:// preview, an `/assets/` shell)
- * cannot route paths, so there the address is a `?tab=` query instead; the app uses
- * whichever form its own location already uses.
+ * The tab and the settings child come from the address, so a reload or a shared link opens
+ * the same screen and back/forward move between screens. A static host (a file:// preview,
+ * an `/assets/` shell) cannot route paths, so there the address is a `?tab=` query instead;
+ * the app uses whichever form its own location already uses.
  */
-function readLocation(): { tab: Tab; sessionId: string | null } {
+function readLocation(): Route {
   const path = appPath();
+  // The address `연결` used to live at is now the accounts part of the settings tab.
+  if (/^\/connections\/?$/.test(path))
+    return { tab: "settings", settingsChild: "accounts", sessionId: null };
   // A query address is the static host's form; otherwise the path is the answer.
-  if (!new URLSearchParams(window.location.search).has("tab")) return routeOf(path);
+  if (!new URLSearchParams(window.location.search).has("tab")) {
+    const route = routeOf(path);
+    return { tab: route.tab, settingsChild: settingsChildOf(path), sessionId: route.sessionId };
+  }
   const route = routeOf(path);
-  if (route.sessionId !== null) return route;
   const query = new URLSearchParams(window.location.search);
-  if (query.get("oauth") !== null) return { tab: "connections", sessionId: null };
-  const tab = query.get("tab");
   const known: readonly Tab[] = [
     "chat",
     "work",
     "workflows",
-    "connections",
     "knowledge",
+    "whiteboard",
     "settings",
   ];
-  const found = known.find((candidate) => candidate === tab);
-  return { tab: found ?? "chat", sessionId: query.get("session") };
+  // The old tab names reach the settings child that took them over.
+  const renamed = query.get("tab") === "connections" ? "settings" : query.get("tab");
+  const tab = known.find((candidate) => candidate === renamed) ?? route.tab;
+  if (tab !== "settings") return { tab, settingsChild: null, sessionId: query.get("session") };
+  // `?section=` is the static host's spelling of a settings child.
+  const child = query.get("section");
+  return {
+    tab: "settings",
+    settingsChild:
+      child === "providers" || child === "accounts" || child === "push" || child === "briefings"
+        ? child
+        : null,
+    sessionId: null,
+  };
 }
 
 function locationUsingQuery(): boolean {
   return new URLSearchParams(window.location.search).has("tab");
 }
 
-function addressFor(tab: Tab, sessionId: string | null): string {
-  const target = tabPath(tab, tab === "chat" ? sessionId : null).replace(/^\//, "");
+function addressFor(
+  tab: Tab,
+  sessionId: string | null,
+  child: SettingsChild | null = null,
+): string {
+  const target =
+    tab === "settings"
+      ? settingsPath(child).replace(/^\//, "")
+      : tabPath(tab, tab === "chat" ? sessionId : null).replace(/^\//, "");
   if (locationUsingQuery()) {
     const query = new URLSearchParams();
     if (tab !== "chat") query.set("tab", tab);
     if (tab === "chat" && sessionId) query.set("session", sessionId);
+    if (tab === "settings" && child !== null) query.set("section", child);
     const suffix = query.toString();
     return `${window.location.origin}${appRoot()}${suffix.length > 0 ? `?${suffix}` : ""}`;
   }
@@ -316,12 +353,15 @@ export function App() {
   });
 
   /** Moves to a tab (and conversation) and records it in the address. */
-  const go = useCallback((tab: Tab, sessionId: string | null, replace = false) => {
-    const address = addressFor(tab, sessionId);
-    if (window.location.href !== address)
-      window.history[replace ? "replaceState" : "pushState"](null, "", address);
-    setRoute({ tab, sessionId });
-  }, []);
+  const go = useCallback(
+    (tab: Tab, sessionId: string | null, replace = false, child: SettingsChild | null = null) => {
+      const address = addressFor(tab, sessionId, child);
+      if (window.location.href !== address)
+        window.history[replace ? "replaceState" : "pushState"](null, "", address);
+      setRoute({ tab, settingsChild: tab === "settings" ? child : null, sessionId });
+    },
+    [],
+  );
 
   useEffect(() => {
     const onPop = () => setRoute(readLocation());
@@ -333,7 +373,7 @@ export function App() {
   // `//chat//chat/<id>` becomes `/chat/<id>` without a second entry in history.
   useEffect(() => {
     const current = readLocation();
-    const canonical = addressFor(current.tab, current.sessionId);
+    const canonical = addressFor(current.tab, current.sessionId, current.settingsChild);
     if (window.location.href !== canonical) window.history.replaceState(null, "", canonical);
   }, []);
 
@@ -636,7 +676,6 @@ export function App() {
     { tab: "chat", label: "대화", testId: "tab-chat" },
     { tab: "work", label: "실행 로그", testId: "tab-work" },
     { tab: "workflows", label: "워크플로", testId: "tab-workflows" },
-    { tab: "connections", label: "연결", testId: "tab-connections" },
     { tab: "knowledge", label: "기억", testId: "tab-knowledge" },
     { tab: "whiteboard", label: "화이트보드", testId: "tab-whiteboard" },
     { tab: "settings", label: "설정", testId: "tab-settings" },
@@ -669,14 +708,15 @@ export function App() {
           <WorkPanel />
         ) : route.tab === "workflows" ? (
           <WorkflowsPanel />
-        ) : route.tab === "connections" ? (
-          <ConnectionsPanel />
         ) : route.tab === "knowledge" ? (
           <KnowledgePanel />
         ) : route.tab === "whiteboard" ? (
           <WhiteboardPanel />
         ) : route.tab === "settings" ? (
-          <SettingsPanel />
+          <SettingsPanel
+            child={route.settingsChild}
+            onChild={(child) => go("settings", null, false, child)}
+          />
         ) : (
           <ChatView
             sessions={state.sessions}

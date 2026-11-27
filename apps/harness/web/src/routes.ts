@@ -2,34 +2,47 @@
  * The app's tab routes, dependency-free so both the client and a contract test can
  * read them. The server holds the same list (`TAB_ROUTE` in `src/server/auth.ts`) and
  * serves the shell behind each of them.
+ *
+ * 연결 used to be its own tab beside 설정; they are one settings tab now, and each part
+ * of it is a child route (`/settings/providers`, `/settings/accounts`, …) so a part can
+ * be linked, bookmarked and reloaded on its own.
  */
-export type Tab =
-  | "chat"
-  | "work"
-  | "workflows"
-  | "connections"
-  | "knowledge"
-  | "whiteboard"
-  | "settings";
+export type Tab = "chat" | "work" | "workflows" | "knowledge" | "whiteboard" | "settings";
+
+export type SettingsChild = "providers" | "accounts" | "push" | "briefings";
+
+export const SETTINGS_CHILDREN: Readonly<Record<SettingsChild, string>> = {
+  providers: "모델 공급자",
+  accounts: "계정",
+  push: "알림",
+  briefings: "브리핑",
+};
 
 export const TAB_PATHS: Record<Tab, string> = {
   chat: "/chat",
   work: "/work",
   workflows: "/workflows",
-  connections: "/connections",
   knowledge: "/knowledge",
   whiteboard: "/whiteboard",
   settings: "/settings",
 };
 
-const FIXED_TABS: readonly Tab[] = [
-  "work",
-  "workflows",
-  "connections",
-  "knowledge",
-  "whiteboard",
-  "settings",
-];
+const FIXED_TABS: readonly Tab[] = ["work", "workflows", "knowledge", "whiteboard", "settings"];
+
+/** The part of the settings tab an address names; the overview when it names none. */
+export function settingsChildOf(pathname: string): SettingsChild | null {
+  const pieces = collapsePath(pathname);
+  if (pieces[0] !== "settings") return null;
+  const word = pieces[1];
+  if (word === "providers" || word === "accounts" || word === "push" || word === "briefings")
+    return word;
+  return null;
+}
+
+/** The address of a settings child; no child is the overview. */
+export function settingsPath(child: SettingsChild | null): string {
+  return child === null ? TAB_PATHS.settings : `${TAB_PATHS.settings}/${child}`;
+}
 
 /**
  * The problem this solves, recorded because it was reported from the live site: the
@@ -96,7 +109,7 @@ export function tabPath(tab: Tab, sessionId?: string | null): string {
   return tab === "chat" ? chatPath(sessionId) : TAB_PATHS[tab];
 }
 
-/** True for the paths the shell answers: the root and every tab route. */
+/** True for the paths the shell answers: the root, every tab, and the settings children. */
 export function isTabPath(pathname: string): boolean {
   if (pathname === "/") return true;
   return TAB_ROUTE_MIRROR.test(pathname);
@@ -104,9 +117,10 @@ export function isTabPath(pathname: string): boolean {
 
 /**
  * Kept byte-identical in shape to the server's pattern; `tests/router-contract.test.ts`
- * fails when the two disagree.
+ * fails when the two disagree. `/connections` is no longer a tab, but its address still
+ * answers so an old link reaches the accounts it used to show.
  */
 const TAB_ROUTE_MIRROR =
-  /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge|whiteboard|settings)\/?$/;
+  /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge|whiteboard|settings(?:\/(?:providers|accounts|push|briefings))?)\/?$/;
 
 export const TAB_ROUTE_PATTERN = TAB_ROUTE_MIRROR.source;

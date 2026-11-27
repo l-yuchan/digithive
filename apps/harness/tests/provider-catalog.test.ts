@@ -14,6 +14,36 @@ import {
 import { createChainStream } from "../src/providers/chain";
 import { ProviderStore } from "../src/providers/store";
 
+/**
+ * A transport the app's upstream reads go through. `answer` decides each response by the
+ * request, and every request is recorded, so a test can say which endpoints were called
+ * and which route answered.
+ */
+function recordingFetch(answer: (request: Request) => Response | Promise<Response>): {
+  fetch: typeof fetch;
+  calls: string[];
+} {
+  const calls: string[] = [];
+  const inner = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    calls.push(`${request.method} ${request.url}`);
+    return answer(request);
+  };
+  // Bun's fetch type also carries `preconnect`; this transport only answers requests.
+  return { fetch: Object.assign(inner, { preconnect: () => undefined }), calls };
+}
+
+/** A streamed chat answer carrying one word, the form the adapter reads. */
+function answerWith(word: string): Response {
+  const body = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: word } }] })}`,
+    "data: [DONE]",
+    "",
+    "",
+  ].join("\n");
+  return new Response(body, { headers: { "content-type": "text/event-stream" } });
+}
+
 /** Shaped from the live endpoints (2026-11-28), trimmed to the fields the app reads. */
 const goModels = {
   object: "list",
@@ -156,36 +186,43 @@ describe("provider catalogs", () => {
     );
   });
 
-  test("a probe keeps a good reading when the other side fails, and names both failures", async () => {
+  test("a probe reads both sides, and one side failing keeps the other", async () => {
     const go = catalogOf("opencode-go");
     if (!go) throw new Error("opencode-go catalog missing");
-    const fetchImpl = (async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.endsWith("/models")) return new Response(JSON.stringify(goModels), { status: 200 });
-      return new Response(
-        JSON.stringify({ type: "error", error: { type: "AuthError", message: "Unauthorized" } }),
-        {
-          status: 401,
-        },
-      );
-    }) as unknown as typeof fetch;
+    const network = recordingFetch((request) =>
+      new URL(request.url).pathname.endsWith("/models")
+        ? Response.json(goModels)
+        : Response.json(
+            { type: "error", error: { type: "AuthError", message: "Unauthorized" } },
+            { status: 401 },
+          ),
+    );
     const result = await probeProvider(go, {
       baseUrl: "https://opencode.ai/inference/go/v1",
       apiKey: "k",
       headers: {},
-      fetchImpl,
+      fetchImpl: network.fetch,
     });
-    expect(result.models).toHaveLength(3);
+    expect(network.calls).toEqual([
+      "GET https://opencode.ai/inference/go/v1/models",
+      "GET https://opencode.ai/inference/go/v1/usage",
+    ]);
+    expect(result.models.map((model) => model.id)).toEqual([
+      "kimi-k3",
+      "jev-1.14",
+      "text-embedding-3-small",
+    ]);
     expect(result.modelsError).toBeNull();
     expect(result.usage).toBeNull();
+    // The failed side keeps the provider's own words.
     expect(result.usageError).toBe("HTTP 401 · Unauthorized");
 
-    const broken = await probeProvider(catalogOf("custom") ?? go, {
-      baseUrl: "http://127.0.0.1:1/v1",
+    const missing = recordingFetch(() => new Response("not found", { status: 404 }));
+    const broken = await probeProvider(go, {
+      baseUrl: "https://opencode.ai/inference/go/v1",
       apiKey: "k",
       headers: {},
-      fetchImpl: (async () =>
-        new Response("not found", { status: 404 })) as unknown as typeof fetch,
+      fetchImpl: missing.fetch,
     });
     expect(broken.models).toEqual([]);
     expect(broken.modelsError).toBe("HTTP 404 · not found");
@@ -206,7 +243,6 @@ describe("provider store", () => {
     const view = store.get(id);
     expect(view?.keyHint).toBe("••••1234");
     expect(JSON.stringify(view)).not.toContain("super-secret");
-    expect(store.keyOf(id)).toBe("sk-super-secret-1234");
     // Only the store method decrypts the key, and only for an upstream call.
     expect(store.keyOf(id)).toBe("sk-super-secret-1234");
     // The column holds AES-GCM ciphertext, so the database file alone carries no key.
@@ -254,7 +290,7 @@ describe("provider store", () => {
     expect(store.chain()[0]?.position).toBe(0);
   });
 
-  test("a provider with no chain entry is never a route, and one without a key is skipped", () => {
+  test("a provider with no chain entry is never a route", () => {
     const { store } = memoryStore();
     store.create({
       catalogId: "custom",
@@ -265,6 +301,18 @@ describe("provider store", () => {
       enabled: true,
     });
     expect(store.routes()).toEqual([]);
+    const listed = store.create({
+      catalogId: "custom",
+      label: "off",
+      baseUrl: "https://off.example/v1",
+      apiKey: "k",
+      headers: {},
+      enabled: false,
+    });
+    store.addToChain(listed, "m");
+    // A disabled provider's entry is not a route either.
+    expect(store.routes()).toEqual([]);
+    expect(store.chain()).toHaveLength(1);
   });
 
   test("a probe keeps the good side and records the failed one", () => {
@@ -317,20 +365,6 @@ describe("provider store", () => {
 describe("routing from the chain", () => {
   test("the first chain entry answers, and a disabled one is never called", async () => {
     const { store } = memoryStore();
-    const calls: string[] = [];
-    const respond =
-      (name: string, status: number) =>
-      async (input: string | URL | Request): Promise<Response> => {
-        calls.push(`${name}:${String(input)}`);
-        if (status !== 200) return new Response("upstream says no", { status });
-        const body = [
-          `data: ${JSON.stringify({ choices: [{ delta: { content: name } }] })}`,
-          "data: [DONE]",
-          "",
-          "",
-        ].join("\n");
-        return new Response(body, { headers: { "content-type": "text/event-stream" } });
-      };
     const a = store.create({
       catalogId: "custom",
       label: "A",
@@ -350,44 +384,30 @@ describe("routing from the chain", () => {
     store.addToChain(a, "a-model");
     store.addToChain(b, "b-model");
 
-    const stream = createChainStream(store, {
-      cooldownMs: 0,
-      retries: 0,
-      usageProbe: undefined,
-    });
-    const answer = async (fetchImpl: typeof fetch): Promise<string> => {
+    const byHost = recordingFetch((request) =>
+      request.url.includes("a.example") ? answerWith("A") : answerWith("B"),
+    );
+    const ask = async (stream: ReturnType<typeof createChainStream>): Promise<string> => {
       let text = "";
       for await (const event of stream([{ role: "user", content: "hi" }], [], {
         maxOutputTokens: 8,
         firstTokenTimeoutMs: 2_000,
         idleTimeoutMs: 2_000,
-        fetchImpl,
+        fetchImpl: byHost.fetch,
       })) {
         if (event.type === "text_delta") text += event.text;
       }
       return text;
     };
-    const byHost = ((input: string | URL | Request) =>
-      String(input).includes("a.example")
-        ? respond("A", 200)(input)
-        : respond("B", 200)(input)) as unknown as typeof fetch;
-    expect(await answer(byHost)).toBe("A");
-    expect(calls).toHaveLength(1);
 
+    expect(await ask(createChainStream(store, { cooldownMs: 0, retries: 0 }))).toBe("A");
+    expect(byHost.calls).toEqual(["POST https://a.example/v1/chat/completions"]);
+
+    // A disabled entry is skipped: the next one answers, and only it is called.
     store.setChainEnabled(a, "a-model", false);
-    const callsAfter = calls.length;
-    const restarted = createChainStream(store, { cooldownMs: 0, retries: 0 });
-    let text = "";
-    for await (const event of restarted([{ role: "user", content: "hi" }], [], {
-      maxOutputTokens: 8,
-      firstTokenTimeoutMs: 2_000,
-      idleTimeoutMs: 2_000,
-      fetchImpl: byHost,
-    })) {
-      if (event.type === "text_delta") text += event.text;
-    }
-    expect(text).toBe("B");
-    expect(calls.slice(callsAfter).every((call) => call.startsWith("B:"))).toBe(true);
+    byHost.calls.length = 0;
+    expect(await ask(createChainStream(store, { cooldownMs: 0, retries: 0 }))).toBe("B");
+    expect(byHost.calls).toEqual(["POST https://b.example/v1/chat/completions"]);
   });
 
   test("a failing first route falls back to the next chain entry, in order", async () => {
@@ -410,30 +430,24 @@ describe("routing from the chain", () => {
     });
     store.addToChain(a, "a-model");
     store.addToChain(b, "b-model");
-    const transport = ((input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("a.example")) return Promise.resolve(new Response("boom", { status: 500 }));
-      const body = [
-        `data: ${JSON.stringify({ choices: [{ delta: { content: "B" } }] })}`,
-        "data: [DONE]",
-        "",
-        "",
-      ].join("\n");
-      return Promise.resolve(
-        new Response(body, { headers: { "content-type": "text/event-stream" } }),
-      );
-    }) as unknown as typeof fetch;
+    const network = recordingFetch((request) =>
+      request.url.includes("a.example") ? new Response("boom", { status: 500 }) : answerWith("B"),
+    );
     const stream = createChainStream(store, { cooldownMs: 60_000, retries: 0 });
     let text = "";
     for await (const event of stream([{ role: "user", content: "hi" }], [], {
       maxOutputTokens: 8,
       firstTokenTimeoutMs: 2_000,
       idleTimeoutMs: 2_000,
-      fetchImpl: transport,
+      fetchImpl: network.fetch,
     })) {
       if (event.type === "text_delta") text += event.text;
     }
     expect(text).toBe("B");
+    expect(network.calls).toEqual([
+      "POST https://a.example/v1/chat/completions",
+      "POST https://b.example/v1/chat/completions",
+    ]);
     expect(stream.diagnostics().map((diagnostic) => diagnostic.kind)).toContain(
       "provider.fallback",
     );

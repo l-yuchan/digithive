@@ -7,30 +7,28 @@ import { catalogOf, probeProvider } from "../src/providers/catalog";
 import { ProviderStore } from "../src/providers/store";
 import { createHarness, loadConfig } from "../src/server/main";
 import { openDatabase } from "../src/store/db";
+import { answerProviderCall, type ProviderCall } from "../scripts/qa/provider-fixture";
 
 /**
- * A stand-in OpenAI-compatible server: its catalog, its chat completions, and a record of
- * every path it was asked for, so a test can tell which endpoints the app really calls.
+ * A transport the app's upstream reads go through. `answer` decides each response and every
+ * request is recorded, so a test can say what the app really asked for.
  */
-function fakeServer(routes: Record<string, (request: Request) => Response | Promise<Response>>): {
-  readonly fetchImpl: typeof fetch;
-  readonly calls: { method: string; path: string; headers: Record<string, string> }[];
+function recordingFetch(answer: (request: Request) => Response | Promise<Response>): {
+  fetch: typeof fetch;
+  calls: ProviderCall[];
 } {
-  const calls: { method: string; path: string; headers: Record<string, string> }[] = [];
-  const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-    );
-    const headers: Record<string, string> = {};
-    new Headers(init?.headers ?? {}).forEach((value, key) => {
-      headers[key] = value;
+  const calls: ProviderCall[] = [];
+  const inner = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init);
+    calls.push({
+      path: new URL(request.url).pathname,
+      method: request.method,
+      authorization: request.headers.get("authorization"),
     });
-    calls.push({ method: init?.method ?? "GET", path: url.pathname, headers });
-    const handler = routes[url.pathname];
-    if (!handler) return new Response(`no route ${url.pathname}`, { status: 404 });
-    return handler(new Request(url, init));
-  }) as unknown as typeof fetch;
-  return { fetchImpl, calls };
+    return answer(request);
+  };
+  // Bun's fetch type also carries `preconnect`; this transport only answers requests.
+  return { fetch: Object.assign(inner, { preconnect: () => undefined }), calls };
 }
 
 const Overview = z.object({
@@ -72,43 +70,6 @@ const Overview = z.object({
   routes: z.array(z.object({ name: z.string(), providerId: z.string(), modelId: z.string() })),
 });
 
-test("an OpenAI-compatible provider's catalog is read with its key and stored", async () => {
-  const db = openDatabase(":memory:");
-  const store = new ProviderStore(db, "provider-test-secret");
-  const server = fakeServer({
-    "/v1/models": () =>
-      Response.json({ object: "list", data: [{ id: "local-a" }, { id: "local-b" }] }),
-  });
-  const providerId = store.create({
-    catalogId: "custom",
-    label: "내 로컬",
-    baseUrl: "https://custom.example/v1",
-    apiKey: "custom-key-9999",
-    headers: {},
-    enabled: true,
-  });
-  const catalog = catalogOf("custom");
-  if (!catalog) throw new Error("custom catalog missing");
-  const probe = await probeProvider(catalog, {
-    baseUrl: "https://custom.example/v1",
-    apiKey: "custom-key-9999",
-    headers: {},
-    fetchImpl: server.fetchImpl,
-  });
-  expect(probe.models.map((model) => model.id)).toEqual(["local-a", "local-b"]);
-  expect(server.calls[0]?.path).toBe("/v1/models");
-  expect(server.calls[0]?.headers["authorization"]).toBe("Bearer custom-key-9999");
-  store.recordProbe(providerId, {
-    models: probe.models,
-    modelsError: probe.modelsError,
-    usage: probe.usage,
-    usageError: probe.usageError,
-    fetchedAt: probe.fetchedAt,
-  });
-  expect(store.models(providerId).map((model) => model.id)).toEqual(["local-a", "local-b"]);
-  db.close();
-});
-
 function setup() {
   const root = mkdtempSync(join(tmpdir(), "providers-http-"));
   const dbPath = join(root, "harness.db");
@@ -133,7 +94,6 @@ function setup() {
     );
   return {
     harness,
-    dbPath,
     call,
     cleanup: () => {
       harness.close();
@@ -163,9 +123,52 @@ test("a new database gets the environment's routes as one provider and its chain
   }
 });
 
-test("an OpenAI-compatible provider is added, listed, chained and readable", async () => {
+test("an OpenAI-compatible provider's catalog is read with its key and stored", async () => {
+  const db = openDatabase(":memory:");
+  const store = new ProviderStore(db, "provider-test-secret");
+  const network = recordingFetch(answerProviderCall);
+  const providerId = store.create({
+    catalogId: "custom",
+    label: "내 로컬",
+    baseUrl: "https://custom.example/v1",
+    apiKey: "custom-key-9999",
+    headers: {},
+    enabled: true,
+  });
+  const catalog = catalogOf("custom");
+  if (!catalog) throw new Error("custom catalog missing");
+  const probe = await probeProvider(catalog, {
+    baseUrl: "https://custom.example/v1",
+    apiKey: "custom-key-9999",
+    headers: {},
+    fetchImpl: network.fetch,
+  });
+  expect(probe.models.map((model) => model.id)).toEqual([
+    "qa-model-fast",
+    "qa-model-strong",
+    "qa-model-broken",
+  ]);
+  expect(network.calls).toEqual([
+    { path: "/v1/models", method: "GET", authorization: "Bearer custom-key-9999" },
+  ]);
+  store.recordProbe(providerId, {
+    models: probe.models,
+    modelsError: probe.modelsError,
+    usage: probe.usage,
+    usageError: probe.usageError,
+    fetchedAt: probe.fetchedAt,
+  });
+  // The stored catalog is kept in the order the screen shows it: chat models by name.
+  expect(store.models(providerId).map((model) => model.id)).toEqual([
+    "qa-model-broken",
+    "qa-model-fast",
+    "qa-model-strong",
+  ]);
+  db.close();
+});
+
+test("an OpenAI-compatible provider is added, chained, switched off and deleted", async () => {
   const { call, cleanup } = setup();
-  // The seeded provider is the only one on this database; the added one is the owner's.
   try {
     const created = await call("/api/providers", "POST", {
       catalogId: "custom",
@@ -173,7 +176,7 @@ test("an OpenAI-compatible provider is added, listed, chained and readable", asy
       baseUrl: "https://custom.example/v1",
       apiKey: "custom-key-9999",
     });
-    // Without a network the creation still succeeds and records why the read failed.
+    // Without a reachable network the creation still succeeds and records why the read failed.
     expect(created.status).toBe(201);
     const createdBody = z
       .object({
@@ -225,26 +228,27 @@ test("an unknown catalog, a malformed base URL and a bad patch are refused with 
     expect(
       (await call("/api/providers", "POST", { catalogId: "custom", baseUrl: "ftp://x" })).status,
     ).toBe(422);
-    expect((await call("/api/providers", "POST", { catalogId: "custom" })).status).toBe(422); // custom has no predefined base URL
+    // A custom provider has no predefined base URL, so it must be given one.
+    expect((await call("/api/providers", "POST", { catalogId: "custom" })).status).toBe(422);
     expect((await call("/api/providers/missing", "PATCH", { label: "x" })).status).toBe(404);
     expect((await call("/api/providers/missing", "DELETE")).status).toBe(404);
-    const deepinfra = await call("/api/providers", "POST", {
+    const badHeader = await call("/api/providers", "POST", {
       catalogId: "deepinfra",
       apiKey: "k",
       headers: { "bad header name": "v" },
     });
-    expect(deepinfra.status).toBe(422);
+    expect(badHeader.status).toBe(422);
   } finally {
     cleanup();
   }
 });
 
-test("the chain refuses a name that is not an exact permutation of itself", async () => {
+test("the chain refuses anything but an exact permutation of itself", async () => {
   const { call, cleanup } = setup();
   try {
     for (const body of [{}, { entries: "x" }, { entries: [{ providerId: "a", modelId: "b" }] }]) {
       const response = await call("/api/settings/models", "PUT", body);
-      expect([422, 404]).toContain(response.status);
+      expect(response.status).toBe(422);
     }
   } finally {
     cleanup();

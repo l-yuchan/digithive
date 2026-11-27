@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { TAB_PATHS, chatPath, collapsePath, isTabPath, routeOf, tabPath } from "../web/src/routes";
+import {
+  SETTINGS_CHILDREN,
+  chatPath,
+  collapsePath,
+  isTabPath,
+  routeOf,
+  settingsChildOf,
+  settingsPath,
+  tabPath,
+} from "../web/src/routes";
 import { TAB_ROUTE } from "../src/server/auth";
 
 /**
@@ -14,22 +23,42 @@ describe("the tab routes", () => {
       "/chat/abc",
       "/work",
       "/workflows",
-      "/connections",
       "/knowledge",
       "/whiteboard",
       "/settings",
+      "/settings/providers",
+      "/settings/accounts",
+      "/settings/push",
+      "/settings/briefings",
+      // The address the 연결 tab used to have stays served, so an old link still works.
+      "/connections",
     ];
     for (const path of paths) {
       expect(TAB_ROUTE.test(path)).toBe(true);
       expect(isTabPath(path)).toBe(true);
-      const route = routeOf(path);
-      expect(tabPath(route.tab, route.sessionId)).toBe(path);
+      if (path !== "/connections")
+        expect(tabPath(routeOf(path).tab)).toBe(`/${path.split("/")[1]}`);
     }
-    for (const path of ["/", "/app2", "/chat/a/b", "/api/health", "/nope"]) {
+    for (const path of ["/", "/app2", "/chat/a/b", "/api/health", "/nope", "/settings/unknown"]) {
       expect(TAB_ROUTE.test(path)).toBe(false);
     }
     expect(isTabPath("/")).toBe(true);
     expect(isTabPath("/nope")).toBe(false);
+  });
+
+  test("연결 is gone as a tab: its parts live under /settings", () => {
+    // The one settings tab carries the four parts 연결 used to split from 설정.
+    expect(Object.keys(SETTINGS_CHILDREN)).toEqual(["providers", "accounts", "push", "briefings"]);
+    for (const child of ["providers", "accounts", "push", "briefings"] as const) {
+      expect(routeOf(`/settings/${child}`)).toEqual({ tab: "settings", sessionId: null });
+      expect(settingsChildOf(`/settings/${child}`)).toBe(child);
+      expect(settingsPath(child)).toBe(`/settings/${child}`);
+    }
+    expect(settingsPath(null)).toBe("/settings");
+    expect(settingsChildOf("/settings")).toBeNull();
+    expect(settingsChildOf("/settings/unknown")).toBeNull();
+    // `/connections` is not a tab any more; the client turns it into the accounts part.
+    expect(routeOf("/connections")).toEqual({ tab: "chat", sessionId: null });
   });
 
   test("a path names its tab, and the chat tab names its conversation", () => {
@@ -38,7 +67,6 @@ describe("the tab routes", () => {
     expect(routeOf("/chat/abc")).toEqual({ tab: "chat", sessionId: "abc" });
     expect(routeOf("/work")).toEqual({ tab: "work", sessionId: null });
     expect(routeOf("/workflows/")).toEqual({ tab: "workflows", sessionId: null });
-    expect(routeOf("/connections")).toEqual({ tab: "connections", sessionId: null });
     expect(routeOf("/knowledge")).toEqual({ tab: "knowledge", sessionId: null });
     expect(routeOf("/whiteboard")).toEqual({ tab: "whiteboard", sessionId: null });
     expect(routeOf("/settings")).toEqual({ tab: "settings", sessionId: null });
@@ -59,13 +87,11 @@ describe("the tab routes", () => {
   });
 
   test("every tab has one fixed path and the chat tab carries the conversation", () => {
-    expect(tabPath("work")).toBe(TAB_PATHS.work);
+    expect(tabPath("work")).toBe("/work");
     expect(tabPath("workflows")).toBe("/workflows");
-    expect(tabPath("connections")).toBe("/connections");
     expect(tabPath("knowledge")).toBe("/knowledge");
     expect(tabPath("whiteboard")).toBe("/whiteboard");
     expect(tabPath("settings")).toBe("/settings");
-    expect(tabPath("settings")).toBe(TAB_PATHS.settings);
     expect(tabPath("chat", "x")).toBe("/chat/x");
     expect(tabPath("chat")).toBe("/chat");
   });
