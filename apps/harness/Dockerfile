@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
+# The build context has no .git, so the commit the web bundle reports comes from CD.
+ARG GIT_COMMIT=
 RUN bun run build:web
 
 FROM oven/bun:1.4.4-alpine

@@ -52,6 +52,8 @@ jobs:
         with:
           context: apps/harness
           push: true
+          build-args: |
+            GIT_COMMIT=${{ env.SHA }}
           tags: |
             ${{ env.IMAGE }}:${{ env.SHA }}
             ${{ env.IMAGE }}:latest

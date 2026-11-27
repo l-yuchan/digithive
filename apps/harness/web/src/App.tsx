@@ -16,6 +16,7 @@ import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
 import { Login } from "./auth/Login";
+import { Version } from "./AppVersion";
 import { watchBuild } from "./buildCheck";
 import { TAB_PATHS, routeOf, tabPath, type Tab } from "./routes";
 import { ChatView, cancelQueued, resumeQueue, useQueue } from "./chat/ChatView";
@@ -649,6 +650,7 @@ export function App() {
             {label}
           </a>
         ))}
+        <Version />
       </nav>
       <main className="conversation" aria-label={tabs.find(({ tab }) => tab === route.tab)?.label}>
         {route.tab === "work" ? (
