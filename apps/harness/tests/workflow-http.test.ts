@@ -6,6 +6,7 @@ import { EventLog } from "../src/events/log";
 import { handleWorkflowRequest } from "../src/server/workflow-routes";
 import { handleScheduleRequest } from "../src/server/schedule-routes";
 import { dispatchDueSchedules } from "../src/scheduler/schedule-dispatch";
+import { ensureTitleWorkflow } from "../src/workflows/title-run";
 
 const databases: Database[] = [];
 const BASE = Date.parse("2026-01-01T00:00:00.000Z");
@@ -42,6 +43,19 @@ const WorkflowBody = z.object({
 });
 
 describe("workflow API", () => {
+  test("the title workflow is accessible through its encoded client URL", async () => {
+    const { deps } = setup();
+    ensureTitleWorkflow(deps);
+    const response = await handleWorkflowRequest(
+      request("GET", "/api/workflows/system%3Atitle"),
+      deps,
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toMatchObject({
+      workflow: { id: "system:title", title: "대화 이름 짓기" },
+    });
+  });
+
   test("a definition is created, searched, read, patched and deleted with its binding", async () => {
     const { deps } = setup();
     const created = await handleWorkflowRequest(
@@ -239,5 +253,12 @@ describe("workflow API", () => {
       (await handleWorkflowRequest(request("POST", "/api/workflows/nope/run", { args: {} }), deps))
         ?.status,
     ).toBe(404);
+  });
+
+  test("a malformed escaped workflow id answers 400", async () => {
+    const { deps } = setup();
+    const response = await handleWorkflowRequest(request("GET", "/api/workflows/%ZZ"), deps);
+    expect(response?.status).toBe(400);
+    expect(await response?.json()).toEqual({ error: "invalid_workflow_id" });
   });
 });

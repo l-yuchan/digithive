@@ -145,7 +145,13 @@ export async function handleWorkflowRequest(
 
   const match = /^\/api\/workflows\/([^/]+)(?:\/(run|runs))?$/.exec(path);
   if (!match) return null;
-  const id = match[1] ?? "";
+  let id: string;
+  try {
+    id = decodeURIComponent(match[1] ?? "");
+  } catch (error) {
+    if (error instanceof URIError) return json({ error: "invalid_workflow_id" }, 400);
+    throw error;
+  }
   const sub = match[2];
 
   if (sub === "run" && request.method === "POST") {
