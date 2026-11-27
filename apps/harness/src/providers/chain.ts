@@ -101,6 +101,9 @@ export function createChainStream(
       cooldownMs: options.cooldownMs,
       retries: options.retries,
       priority: () => chainPriority(store),
+      // Read on every call, so a provider added, switched off or deleted on the settings
+      // screen answers (or stops answering) immediately, in this process and in the worker.
+      routes: () => buildRouterRoutes(resolvedChain(store)),
       ...(options.usageProbe === undefined ? {} : { usageProbe: options.usageProbe }),
       ...(options.onDiagnostic === undefined ? {} : { onDiagnostic: options.onDiagnostic }),
     },

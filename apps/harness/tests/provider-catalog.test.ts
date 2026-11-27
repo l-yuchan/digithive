@@ -410,6 +410,49 @@ describe("routing from the chain", () => {
     expect(byHost.calls).toEqual(["POST https://b.example/v1/chat/completions"]);
   });
 
+  test("a provider added while the stream exists answers the very next call", async () => {
+    const { store } = memoryStore();
+    const a = store.create({
+      catalogId: "custom",
+      label: "A",
+      baseUrl: "https://a.example/v1",
+      apiKey: "a-key",
+      headers: {},
+      enabled: true,
+    });
+    store.addToChain(a, "a-model");
+    const network = recordingFetch((request) =>
+      request.url.includes("a.example") ? answerWith("A") : answerWith("B"),
+    );
+    // One stream for the whole test: the route list is read per call, not at creation.
+    const stream = createChainStream(store, { cooldownMs: 0, retries: 0 });
+    const ask = async (): Promise<string> => {
+      let text = "";
+      for await (const event of stream([{ role: "user", content: "hi" }], [], {
+        maxOutputTokens: 8,
+        firstTokenTimeoutMs: 2_000,
+        idleTimeoutMs: 2_000,
+        fetchImpl: network.fetch,
+      })) {
+        if (event.type === "text_delta") text += event.text;
+      }
+      return text;
+    };
+    expect(await ask()).toBe("A");
+    const b = store.create({
+      catalogId: "custom",
+      label: "B",
+      baseUrl: "https://b.example/v1",
+      apiKey: "b-key",
+      headers: {},
+      enabled: true,
+    });
+    store.addToChain(b, "b-model");
+    const entries = store.chain();
+    store.reorderChain(entries.toReversed().map((entry) => ({ providerId: entry.providerId, modelId: entry.modelId })));
+    expect(await ask()).toBe("B");
+  });
+
   test("a failing first route falls back to the next chain entry, in order", async () => {
     const { store } = memoryStore();
     const a = store.create({

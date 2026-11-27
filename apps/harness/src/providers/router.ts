@@ -46,6 +46,14 @@ export type RouterOptions = {
   /** Transport for every route, overriding the per-route hook (routing tests). */
   readonly fetchImplOverride?: typeof fetch;
   /**
+   * The routes themselves, read on every model call. When given, this is the whole route
+   * list and `config` is only its starting point: a provider added, switched off or
+   * deleted on the settings screen applies to the next call in this process and in the
+   * worker without a restart. What is sent for each new route is derived from its own
+   * name, so a route keeps its transport, its cooldown and its affinity by identity.
+   */
+  readonly routes?: () => readonly ProviderRouteConfig[];
+  /**
    * Saved route order by route name (the owner's settings). Read on every model
    * call, so a change applies to the next call. A listed name comes in that order;
    * a route the list does not name keeps config order after the listed ones, and a
@@ -140,11 +148,17 @@ export function createRoutingStream(
   readonly diagnostics: () => readonly ProviderDiagnostic[];
   readonly activeRoute: (contextKey: string) => string | null;
 } {
-  const routes: readonly Route[] = [config.primary, ...config.fallbacks].map((route, index) => ({
+  const headerized = (route: ProviderRouteConfig, index: number): Route => ({
     ...withGatewayHeaders(route),
     index,
-  }));
-  const streams = new Map<number, StreamFn>();
+  });
+  const configRoutes: readonly Route[] = [config.primary, ...config.fallbacks].map(headerized);
+  /** The routes this call may use: the saved chain when it is live, else the config. */
+  const currentRoutes = (): readonly Route[] =>
+    options.routes === undefined
+      ? configRoutes
+      : options.routes().map((route, index) => headerized(route, index));
+  const streams = new Map<string, StreamFn>();
   let fetchOverride: typeof fetch | undefined;
   /**
    * Every route reads its own endpoint through this network fetch when no
@@ -155,7 +169,7 @@ export function createRoutingStream(
   const transport = (route: Route): typeof fetch =>
     fetchOverride ?? options.fetchImplOverride ?? options.fetchFor?.(route) ?? network;
   const stream = (route: Route): StreamFn => {
-    const existing = streams.get(route.index);
+    const existing = streams.get(route.name);
     if (existing) return existing;
     const created = openAiStream({
       baseUrl: route.baseUrl,
@@ -163,7 +177,7 @@ export function createRoutingStream(
       model: route.model,
       ...(route.headers === undefined ? {} : { headers: route.headers }),
     });
-    streams.set(route.index, created);
+    streams.set(route.name, created);
     return created;
   };
 
@@ -224,7 +238,7 @@ export function createRoutingStream(
     for (const [position, name] of priority.entries()) {
       if (!saved.has(name)) saved.set(name, position);
     }
-    const ordered = routes.toSorted((left, right) => {
+    const ordered = currentRoutes().toSorted((left, right) => {
       const leftRank = saved.get(left.name) ?? priority.length + left.index;
       const rightRank = saved.get(right.name) ?? priority.length + right.index;
       return leftRank - rightRank;
@@ -238,7 +252,8 @@ export function createRoutingStream(
 
   /** The route a caller should be told about next: the first one out of cooldown. */
   const soonest = (): { route: Route; waitMs: number } | null => {
-    const open = routes
+    const live = currentRoutes();
+    const open = live
       .map((route) => ({ route, until: cooldownUntil.get(route.name) ?? 0 }))
       .filter((entry) => entry.until > now())
       .toSorted((left, right) => left.until - right.until);
@@ -253,11 +268,12 @@ export function createRoutingStream(
    */
   const outage = (contextKey: string, where: "cooldown" | "failed"): ProviderError => {
     const next = soonest();
+    const live = currentRoutes();
     const reasons = [...lastError.values()].map((error) => error.message);
     report({
       kind: "provider.exhausted",
-      provider: next?.route.name ?? routes[0]?.name ?? "unknown",
-      model: next?.route.model ?? routes[0]?.model ?? "unknown",
+      provider: next?.route.name ?? live.at(0)?.name ?? "unknown",
+      model: next?.route.model ?? live.at(0)?.model ?? "unknown",
       reason: where === "cooldown" ? "all routes are in cooldown" : "every route failed",
       retryInMs: next?.waitMs ?? 0,
       ...(next ? { until: new Date(now() + next.waitMs).toISOString() } : {}),
