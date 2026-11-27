@@ -1,3 +1,4 @@
+// allow: SIZE_OK — process composition keeps ordered lifecycle wiring for existing tool families; whiteboard/search assembly is extracted.
 import { SdkBridge } from "./sdk/bridge";
 import { dirname, join, resolve } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -23,6 +24,10 @@ import {
   type WorkDeps,
 } from "./surfaces/work/runner";
 import { z } from "zod";
+import { searchConfigFromEnv } from "./search";
+import type { SearchConfig } from "./search";
+import { createWhiteboardTools } from "./runtime/whiteboard-tools";
+import type { WhiteboardStore } from "./whiteboard/types";
 
 const here = import.meta.dir;
 const appRoot = resolve(here, "..");
@@ -55,6 +60,8 @@ export type HarnessConfig = {
   readonly vapidPublicKey: string;
   readonly vapidPrivateKey: string;
   readonly vapidSubject: string;
+  readonly whiteboardRoot: string;
+  readonly search: SearchConfig;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): HarnessConfig {
@@ -103,11 +110,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     vapidPublicKey: env["VAPID_PUBLIC_KEY"] ?? "",
     vapidPrivateKey: env["VAPID_PRIVATE_KEY"] ?? "",
     vapidSubject: env["VAPID_SUBJECT"] ?? "mailto:owner@digithive.local",
+    whiteboardRoot: resolve(env["HARNESS_WHITEBOARD"] ?? join(workspaceRoot, "whiteboard")),
+    search: searchConfigFromEnv(env),
   };
 }
 
 /** Shared runtime pieces: the HTTP server and the worker use the same builder. */
-export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: () => void } {
+export function createRuntime(config: HarnessConfig): {
+  work: WorkDeps;
+  whiteboard: WhiteboardStore;
+  close: () => void;
+} {
   if (config.dbPath !== ":memory:") mkdirSync(resolve(config.dbPath, ".."), { recursive: true });
   mkdirSync(config.workspaceRoot, { recursive: true });
   mkdirSync(config.scriptsRoot, { recursive: true });
@@ -116,6 +129,15 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   installJobs(config.scriptsRoot);
   const db = openDatabase(config.dbPath);
   const events = new EventLog(db);
+  const {
+    whiteboard,
+    evidence,
+    tools: whiteboardToolset,
+  } = createWhiteboardTools({
+    db,
+    root: config.whiteboardRoot,
+    search: config.search,
+  });
   const primary: ProviderRouteConfig = {
     name: "primary",
     baseUrl: config.baseUrl,
@@ -162,6 +184,15 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     privateKey: config.vapidPrivateKey,
     subject: config.vapidSubject,
   };
+  const jobToolsForRuntime = jobTools({
+    db,
+    events,
+    google: googleDeps,
+    canvas: canvasDeps,
+    push: pushConfig,
+    briefingSources: evidence,
+    refreshWhiteboard: () => whiteboard.refresh(),
+  });
   const tools = createRegistry([
     ...builtinTools({ root: config.workspaceRoot }),
     ...personalTools(googleDeps),
@@ -176,15 +207,19 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
     ...scheduleTools({ db, events }),
     ...memoryTools(db),
     ...fileTools(db),
-    // The app's own jobs call these through the SDK bridge. They are registered on
-    // every start: an install writes nothing once the files are in place, so tying
-    // the tools to what that call wrote left a normal start without them and every
-    // job's first call failing as an unknown tool.
-    ...jobTools({ db, events, google: googleDeps, canvas: canvasDeps, push: pushConfig }),
+    ...whiteboardToolset,
+    // Historical deterministic composition is reserved for the legacy SDK below;
+    // new agents must ground their briefing in the whiteboard.
+    ...jobToolsForRuntime.filter((tool) => tool.name !== "briefing_compose"),
   ]);
   // Scripts are separate processes, so the SDK is a loopback bridge plus a
   // generated module; both exist only while the runtime is alive.
-  const sdk = new SdkBridge({ tools });
+  const sdk = new SdkBridge({
+    tools: createRegistry([
+      ...tools.tools,
+      ...jobToolsForRuntime.filter((tool) => tool.name === "briefing_compose"),
+    ]),
+  });
   const work: WorkDeps = {
     db,
     events,
@@ -205,6 +240,7 @@ export function createRuntime(config: HarnessConfig): { work: WorkDeps; close: (
   holder.work = work;
   return {
     work,
+    whiteboard,
     close: () => {
       sdk.close();
       db.close();

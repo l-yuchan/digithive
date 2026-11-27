@@ -39,7 +39,7 @@ const TriggerDescription =
  * any other script workflow.
  */
 const ExecutorDescription =
-  "{kind:'agent'} | {kind:'script',path,args?,capabilities?}. path가 '@builtin/'으로 시작하면 앱이 직접 싣는 작업입니다: 연결 자료 수집 {kind:'script',path:'@builtin/collection.ts',args:[accountId],capabilities:['account.read']}, 브리핑 생성 {kind:'script',path:'@builtin/briefing.ts',capabilities:['account.read','mail.send']}";
+  "{kind:'agent'} | {kind:'script',path,args?,capabilities?}. path가 '@builtin/'으로 시작하면 앱이 직접 싣는 작업입니다: 연결 자료 수집 {kind:'script',path:'@builtin/collection.ts',args:[accountId],capabilities:['account.read']}. 브리핑과 일일 검색은 system:briefing·system:daily-search의 agent 워크플로를 실행하세요.";
 
 function failure(error: unknown): string {
   if (error instanceof WorkflowError) {

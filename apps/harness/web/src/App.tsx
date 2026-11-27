@@ -1,3 +1,4 @@
+// allow: SIZE_OK — the application shell owns one chronological navigation/event flow.
 import { z } from "zod";
 import { useCallback, useEffect, useEffectEvent, useReducer, useState } from "react";
 import {
@@ -15,6 +16,7 @@ import { WorkPanel } from "./work/WorkPanel";
 import { ConnectionsPanel } from "./connections/ConnectionsPanel";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
 import { KnowledgePanel } from "./knowledge/KnowledgePanel";
+import { WhiteboardPanel } from "./whiteboard/WhiteboardPanel";
 import { Login } from "./auth/Login";
 import { Version } from "./AppVersion";
 import { watchBuild } from "./buildCheck";
@@ -628,6 +630,7 @@ export function App() {
     { tab: "workflows", label: "워크플로", testId: "tab-workflows" },
     { tab: "connections", label: "연결", testId: "tab-connections" },
     { tab: "knowledge", label: "기억", testId: "tab-knowledge" },
+    { tab: "whiteboard", label: "화이트보드", testId: "tab-whiteboard" },
   ];
 
   return (
@@ -661,6 +664,8 @@ export function App() {
           <ConnectionsPanel />
         ) : route.tab === "knowledge" ? (
           <KnowledgePanel />
+        ) : route.tab === "whiteboard" ? (
+          <WhiteboardPanel />
         ) : (
           <ChatView
             sessions={state.sessions}

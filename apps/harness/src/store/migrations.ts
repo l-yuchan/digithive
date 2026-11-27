@@ -1,4 +1,6 @@
+// allow: SIZE_OK — migration reset and transitions are one ordered schema ledger.
 import type { Database } from "bun:sqlite";
+import { V16 } from "./whiteboard-v16";
 
 /**
  * How a database reaches the current schema.
@@ -479,14 +481,13 @@ export function restoreConversationSchema(db: Database): void {
 }
 
 /** The newest version this build writes. */
-export const LATEST = V15.version;
+export const LATEST = V16.version;
 
 /**
- * The one kept step: the newest schema change. A fresh database gets the reset (v11's
- * shape) and needs only this; an older one is repaired by the step itself, because it
- * brings the conversation pieces the reset carries whichever version it started from.
+ * The two most recent steps, per the owner's migration rule. A fresh database gets the
+ * reset and both steps; older ones are repaired by the steps themselves.
  */
-export const TRANSITIONS: readonly Transition[] = [V15];
+export const TRANSITIONS: readonly Transition[] = [V15, V16];
 
 /** The executor a shipped job carries: the path, the account, the grant. */
 export function shippedExecutor(

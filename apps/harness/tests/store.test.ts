@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrate, openDatabase, OLDEST_OPENABLE } from "../src/store/db";
-import { LATEST, RESET_VERSION, V13, V15 } from "../src/store/migrations";
+import { LATEST, RESET_VERSION, TRANSITIONS, V13 } from "../src/store/migrations";
 
 function memoryDb(): Database {
   const db = new Database(":memory:");
@@ -104,10 +104,10 @@ describe("the kept schema steps", () => {
   }
 
   test("a fresh database ends at the latest version and reports the steps it ran", () => {
-    // The count reports the kept steps that ran; the reset is not a transition.
+    // Every retained step follows the reset; the reset itself is not counted.
     const db = new Database(":memory:");
-    expect(migrate(db)).toBe(1);
-    // The queue table is in the reset itself; only the newest step runs on top of it.
+    expect(migrate(db)).toBe(TRANSITIONS.length);
+    // The queue table is in the reset itself; only the retained steps run on top of it.
     expect(version(db)).toBe(LATEST);
     expect(
       db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),
@@ -116,7 +116,7 @@ describe("the kept schema steps", () => {
 
   test("a database one version behind runs exactly the step it lacks", () => {
     const db = fresh();
-    db.exec(`PRAGMA user_version = ${V15.version - 1}`);
+    db.exec(`PRAGMA user_version = ${LATEST - 1}`);
     expect(migrate(db)).toBe(1);
     expect(version(db)).toBe(LATEST);
   });
@@ -128,7 +128,7 @@ describe("the kept schema steps", () => {
     db.exec("DROP TABLE session_queue");
     db.exec(`PRAGMA user_version = ${V13.version - 1}`);
     const ran = migrate(db);
-    expect(ran).toBe(1);
+    expect(ran).toBe(TRANSITIONS.length);
     expect(version(db)).toBe(LATEST);
     expect(
       db.query("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='session_queue'").get(),

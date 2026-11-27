@@ -10,6 +10,8 @@ import { composeStoredBriefing } from "../jobs/briefing";
 import type { ToolRuntime } from "./registry";
 import type { PushConfig } from "../scheduler/push";
 import { pushConfigured, sendPush } from "../scheduler/push";
+import { storeAgentBriefing } from "../workflows/briefing-store";
+import type { WhiteboardEvidence } from "./whiteboard-evidence";
 
 export type JobToolDeps = {
   readonly db: Database;
@@ -19,7 +21,18 @@ export type JobToolDeps = {
   readonly canvas: CanvasDeps;
   /** Absent while no VAPID pair is configured; a job then reports no device. */
   readonly push?: PushConfig;
+  /** Agent briefing retrieval receipts and the canonical filesystem refresh. */
+  readonly briefingSources?: WhiteboardEvidence;
+  readonly refreshWhiteboard?: () => void;
 };
+
+export class BriefingToolError extends Error {
+  readonly name = "BriefingToolError";
+
+  constructor(readonly code: "briefing_evidence_unavailable") {
+    super(code);
+  }
+}
 
 export type JobAccount = {
   readonly id: string;
@@ -118,6 +131,48 @@ export function jobTools(deps: JobToolDeps): ToolRuntime[] {
             now: Date.now(),
           }),
         ),
+    },
+    {
+      name: "briefing_publish",
+      description:
+        "화이트보드에서 실제 읽은 출처를 근거로, 에이전트가 작성한 브리핑을 실행과 연결해 저장합니다. 반환된 제목과 본문으로 push_send를 호출하세요.",
+      parameters: {
+        type: "object",
+        properties: {
+          text: { type: "string", description: "에이전트가 작성한 자연어 브리핑 전문" },
+          sourceIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "같은 실행에서 whiteboard_list/read가 반환한 문서 id",
+          },
+          slot: { type: "string", description: "생략하면 현재 한국 시각 HH:mm" },
+        },
+        required: ["text", "sourceIds"],
+      },
+      action: "edit",
+      execute: async (args, context) => {
+        const input = z
+          .object({
+            text: z.string().trim().min(1).max(60_000),
+            sourceIds: z.array(z.string().min(1)).min(1).max(100),
+            slot: z.string().min(1).max(32).optional(),
+          })
+          .strict()
+          .parse(args);
+        if (!deps.briefingSources) throw new BriefingToolError("briefing_evidence_unavailable");
+        deps.briefingSources.assertRetrieved(context.runId, input.sourceIds);
+        const result = storeAgentBriefing({
+          db: deps.db,
+          events: deps.events,
+          runId: context.runId,
+          text: input.text,
+          sourceIds: input.sourceIds,
+          ...(input.slot === undefined ? {} : { slot: input.slot }),
+          now: Date.now(),
+        });
+        if (!result.duplicate) deps.refreshWhiteboard?.();
+        return JSON.stringify({ ...result, stored: !result.duplicate });
+      },
     },
     {
       name: "push_send",

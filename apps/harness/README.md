@@ -108,18 +108,44 @@ TypeScript의 enum, namespace, constructor parameter property 등 non-erasable
 | `agent`  | 모델 + 도구              | 없음                            |
 | `script` | `scriptsRoot`의 스크립트 | SDK 브리지로만 앱 기능에 닿는다 |
 
-앱이 실어 보내는 작업(`연결 자료 수집` = `jobs/collection.ts`, `브리핑 생성` = `jobs/briefing.ts`)도 같은
-`script` 방식이다. `jobs/`는 **제품 파일**이며 서버 코드(`src/`)가 아니다: 컨테이너는 `jobs/`를 `/app/jobs`로
-복사하고 `HARNESS_SCRIPTS_ROOT=/app/jobs`로 실행하므로, 스크립트의 `../.digithive/sdk.ts` import가 그대로 SDK를
-가리킨다. 그래서 서버는 평소 작업 파일을 설치하지 않고, 개발/테스트처럼 스크립트 루트가 체크아웃의 `jobs/`와
-다른 경우에만 원본 그대로 복사한다(`src/jobs/install.ts`). 수집은 저장된 소스 목록을 쓰지 않고 실행 시점에
-계정의 켜진 소스(`account.read`)만 읽는다.
+`연결 자료 수집`은 `jobs/collection.ts`의 ordinary script다. `jobs/`는 **제품 파일**이며 서버 코드(`src/`)가 아니다:
+컨테이너는 `jobs/`를 `/app/jobs`로 복사하고 `HARNESS_SCRIPTS_ROOT=/app/jobs`로 실행한다. 설치된 스크립트는 같은
+위치의 `./.digithive/sdk.ts`를 import한다. 서버는 개발/테스트처럼 스크립트 루트가 체크아웃의 `jobs/`와 다를 때만
+원본을 그대로 복사한다(`src/jobs/install.ts`). 수집은 실행 시점에 계정별로 켜진 소스(`account.read`)만 읽는다.
+
+`jobs/briefing.ts`와 `briefing_compose`는 이미 큐에 들어간 옛 실행의 호환 경로다. 새 `system:briefing`
+정의는 `agent`이며, 새 에이전트의 도구 목록에는 결정론적 `briefing_compose`가 없다. 브리핑은
+`whiteboard_list`/`whiteboard_read`로 확인한 출처만 `briefing_publish`로 저장하고, 반환된 제목·본문을
+기존 `push_send`로 보낸다(HH:mm은 07:30, 21:00 Asia/Seoul). 결과는 실행 id와 출처 id를 가진
+`threads/briefings/*.md`로도 남는다.
 
 스크립트 SDK: [docs/workflow-sdk.md](../../docs/workflow-sdk.md), 예제 `scripts/jobs/example-workflow.ts`.
 
 도구(대화·작업 공용): `workflow_list`(keyword/regex/bm25 중 하나) · `workflow_detail`(섹션 선택) ·
 `workflow_create` · `workflow_edit` · `workflow_delete` · `workflow_run`(기본 동기 즉시 실행,
 `async:true`면 큐 적재) · `schedule_list/detail/create/edit/delete`.
+
+## 화이트보드와 일일 웹 조사
+
+**화이트보드** 탭은 실제 파일시스템의 Markdown 문서를 보여준다. 기본 루트는
+`<HARNESS_WORKSPACE>/whiteboard`이고 `HARNESS_WHITEBOARD`로 바꿀 수 있다. JSON frontmatter(YAML의 부분집합)가
+id·종류·출처·상태·시각을 담으며, SQLite의 `whiteboard_documents`/`whiteboard_fts`는 검색용 파생 인덱스다.
+
+- `records/gmail|calendar|canvas`: 수집한 원본 Evidence
+- `records/conversations`: 대화의 각 사용자/assistant 이벤트를 원문 출처와 함께 보관한 Evidence
+- `records/files`, `records/web`: 업로드 파일 메타데이터와 웹 검색 원문 결과
+- `threads/notes|memories|research|briefings`: 노트, 기억, 조사 해석, 브리핑
+- `commitments/notes|workflows|runs`: 사용자 할 일, 정의, 실행 상태
+- `watches/schedules`: 자동 실행 규칙
+
+`whiteboard_list/read/write/update` 도구와 `/api/whiteboard`, `/api/whiteboard/:id` API가 같은 파일을 읽는다.
+수정은 마지막으로 읽은 `hash`로 충돌을 거부하며, `..`/절대 경로/종류 루트 이탈은 4xx로 거부한다.
+원본 시스템이 만든 문서는 읽기 전용이고 사용자·에이전트 문서만 수정한다.
+
+`system:daily-search`(06:30 Asia/Seoul)는 활성 Thread/Commitment/Watch를 살펴 주제를 정한 뒤 `web_search`로
+조사하고, 원문을 `records/web/YYYY-MM-DD/`, 해석을 `threads/research/`에 저장한다. TinyFish·Firecrawl·
+DuckDuckGo 중 필요한 제공자를 선택하며, 실패한 제공자와 원문 보관 실패도 결과에서 감추지 않는다.
+DuckDuckGo는 공식 일반 검색 API가 아닌 best-effort HTML 어댑터다.
 
 ## 배포 (mini, https://digithive.chanoil.com/)
 
@@ -131,13 +157,18 @@ TypeScript의 enum, namespace, constructor parameter property 등 non-erasable
 
 ## 연동 환경변수
 
-| 변수                                    | 기본값                                                  | 설명                                                     |
-| --------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------- |
-| GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | (없음)                                                  | OAuth 클라이언트. 없으면 `/api/oauth/google/start`가 409 |
-| GOOGLE_REDIRECT_URI                     | https://digithive.chanoil.com/api/oauth/google/callback | 동의 후 돌아올 주소                                      |
-| CANVAS_URL                              | (없음)                                                  | LMS 베이스 URL (예: https://lxp-canvas.hanyang.ac.kr)    |
-| CANVAS_TOKEN                            | (없음)                                                  | Canvas API 토큰                                          |
-| VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY    | (없음)                                                  | Web Push VAPID 키. 없으면 전송은 `push_unconfigured`     |
-| VAPID_SUBJECT                           | mailto:owner@digithive.local                            | VAPID subject                                            |
+| 변수                                    | 기본값                                                  | 설명                                                                    |
+| --------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET | (없음)                                                  | OAuth 클라이언트. 없으면 `/api/oauth/google/start`가 409                |
+| GOOGLE_REDIRECT_URI                     | https://digithive.chanoil.com/api/oauth/google/callback | 동의 후 돌아올 주소                                                     |
+| CANVAS_URL                              | (없음)                                                  | LMS 베이스 URL (예: https://lxp-canvas.hanyang.ac.kr)                   |
+| CANVAS_TOKEN                            | (없음)                                                  | Canvas API 토큰                                                         |
+| VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY    | (없음)                                                  | Web Push VAPID 키. 없으면 전송은 `push_unconfigured`                    |
+| VAPID_SUBJECT                           | mailto:owner@digithive.local                            | VAPID subject                                                           |
+| HARNESS_WHITEBOARD                      | `<workspace>/whiteboard`                                | 화이트보드 Markdown 루트                                                |
+| TINYFISH_API_KEY / TINYFISH_API_URL     | (없음) / 공식 TinySearch                                | TinyFish 검색 키/베이스 URL                                             |
+| FIRECRAWL_API_KEY / FIRECRAWL_API_URL   | (없음) / 공식 Firecrawl v2                              | Firecrawl 검색 키/베이스 URL                                            |
+| DUCKDUCKGO_HTML_URL                     | html.duckduckgo.com/html/                               | best-effort DuckDuckGo HTML 검색 URL                                    |
+| SEARCH_ENABLE_CLI                       | true                                                    | 키가 없어도 tinyfish/firecrawl CLI fallback 허용(false면 API 설정 필수) |
 
 연결은 화면에서 한다: 사이드바 **연결** 탭에서 Google 동의, 계정별 소스 스위치, 동기화, 알림 구독을 관리한다.

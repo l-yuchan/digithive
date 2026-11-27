@@ -81,6 +81,7 @@ export function createHarness(config: HarnessConfig): {
       ...runtime.work,
       hooks: titleHooks(titleDeps),
     },
+    whiteboard: runtime.whiteboard,
     google: {
       db,
       events,

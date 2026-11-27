@@ -74,7 +74,9 @@ if (process.env["PREVIEW_ASSETS"] === "1") {
 }
 await Bun.write(
   resolve(outdir, "styles.css"),
-  await Bun.file(resolve(root, "web/src/styles.css")).text(),
+  `${await Bun.file(resolve(root, "web/src/styles.css")).text()}\n${await Bun.file(
+    resolve(root, "web/src/whiteboard/whiteboard.css"),
+  ).text()}\n${await Bun.file(resolve(root, "web/src/whiteboard/whiteboard-layout.css")).text()}`,
 );
 await Bun.write(resolve(outdir, "sw.js"), await Bun.file(resolve(root, "web/sw.js")).text());
 await Bun.write(resolve(outdir, "build.json"), JSON.stringify({ id: buildId, version }));

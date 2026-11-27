@@ -9,7 +9,15 @@ import { TAB_ROUTE } from "../src/server/auth";
  */
 describe("the tab routes", () => {
   test("the server pattern is the one the client mirrors", () => {
-    const paths = ["/chat", "/chat/abc", "/work", "/workflows", "/connections", "/knowledge"];
+    const paths = [
+      "/chat",
+      "/chat/abc",
+      "/work",
+      "/workflows",
+      "/connections",
+      "/knowledge",
+      "/whiteboard",
+    ];
     for (const path of paths) {
       expect(TAB_ROUTE.test(path)).toBe(true);
       expect(isTabPath(path)).toBe(true);
@@ -31,6 +39,7 @@ describe("the tab routes", () => {
     expect(routeOf("/workflows/")).toEqual({ tab: "workflows", sessionId: null });
     expect(routeOf("/connections")).toEqual({ tab: "connections", sessionId: null });
     expect(routeOf("/knowledge")).toEqual({ tab: "knowledge", sessionId: null });
+    expect(routeOf("/whiteboard")).toEqual({ tab: "whiteboard", sessionId: null });
     // Anything else falls back to the chat tab rather than a blank screen.
     expect(routeOf("/nope")).toEqual({ tab: "chat", sessionId: null });
     expect(routeOf("/chat/a/b")).toEqual({ tab: "chat", sessionId: null });
@@ -52,6 +61,7 @@ describe("the tab routes", () => {
     expect(tabPath("workflows")).toBe("/workflows");
     expect(tabPath("connections")).toBe("/connections");
     expect(tabPath("knowledge")).toBe("/knowledge");
+    expect(tabPath("whiteboard")).toBe("/whiteboard");
     expect(tabPath("chat", "x")).toBe("/chat/x");
     expect(tabPath("chat")).toBe("/chat");
   });

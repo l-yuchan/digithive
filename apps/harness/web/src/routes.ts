@@ -3,7 +3,7 @@
  * read them. The server holds the same list (`TAB_ROUTE` in `src/server/auth.ts`) and
  * serves the shell behind each of them.
  */
-export type Tab = "chat" | "work" | "workflows" | "connections" | "knowledge";
+export type Tab = "chat" | "work" | "workflows" | "connections" | "knowledge" | "whiteboard";
 
 export const TAB_PATHS: Record<Tab, string> = {
   chat: "/chat",
@@ -11,9 +11,10 @@ export const TAB_PATHS: Record<Tab, string> = {
   workflows: "/workflows",
   connections: "/connections",
   knowledge: "/knowledge",
+  whiteboard: "/whiteboard",
 };
 
-const FIXED_TABS: readonly Tab[] = ["work", "workflows", "connections", "knowledge"];
+const FIXED_TABS: readonly Tab[] = ["work", "workflows", "connections", "knowledge", "whiteboard"];
 
 /**
  * The problem this solves, recorded because it was reported from the live site: the
@@ -90,6 +91,7 @@ export function isTabPath(pathname: string): boolean {
  * Kept byte-identical in shape to the server's pattern; `tests/router-contract.test.ts`
  * fails when the two disagree.
  */
-const TAB_ROUTE_MIRROR = /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge)\/?$/;
+const TAB_ROUTE_MIRROR =
+  /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge|whiteboard)\/?$/;
 
 export const TAB_ROUTE_PATTERN = TAB_ROUTE_MIRROR.source;

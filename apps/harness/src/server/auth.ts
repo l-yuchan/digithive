@@ -58,7 +58,8 @@ export function readCookie(header: string | null, name = COOKIE_NAME): string | 
 }
 
 /** The tab routes the shell answers, mirrored from app.ts to keep the gate list honest. */
-export const TAB_ROUTE = /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge)\/?$/;
+export const TAB_ROUTE =
+  /^\/(chat(?:\/[^/]+)?|work|workflows|connections|knowledge|whiteboard)\/?$/;
 
 /** Routes that must work before login so the client can render its gate. */
 export function isPublicRoute(path: string, method: string): boolean {

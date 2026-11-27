@@ -1,7 +1,12 @@
+// allow: SIZE_OK — authenticated HTTP dispatch is one ordered route boundary.
 import { z } from "zod";
 import type { Database } from "bun:sqlite";
 import type { EventLog } from "../events/log";
-import { latestBriefing, runBriefing } from "../jobs/briefing";
+import { latestAgentBriefing } from "../workflows/briefing-store";
+import { handleWhiteboardRequest } from "./whiteboard-routes";
+import type { WhiteboardStore } from "../whiteboard/types";
+import { enqueueWorkflowRun } from "../workflows/workflow-run";
+import { BRIEFING_WORKFLOW_ID } from "../workflows/system-workflows";
 import {
   createSession,
   getSession,
@@ -66,6 +71,8 @@ export type AppDeps = {
   readonly filesRoot?: string;
   readonly maxUploadBytes?: number;
   readonly auth: AuthConfig;
+  /** Real apps always provide it; lightweight legacy route fixtures may not. */
+  readonly whiteboard?: WhiteboardStore;
 };
 
 function json(body: unknown, status = 200): Response {
@@ -253,6 +260,13 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/health") return json({ ok: true, lastSeq: deps.events.lastSeq() });
+
+    const whiteboard = deps.whiteboard;
+    if (whiteboard) {
+      const whiteboardResponse = await handleWhiteboardRequest(request, { whiteboard });
+      if (whiteboardResponse) return whiteboardResponse;
+    }
+
     const knowledgeResponse = await handleKnowledgeRequest(request, {
       db: deps.db,
       filesRoot: deps.filesRoot ?? `${deps.webRoot}/../files`,
@@ -306,24 +320,17 @@ export function createApp(deps: AppDeps): (request: Request) => Promise<Response
     }
 
     if (path === "/api/briefings/latest" && request.method === "GET")
-      return json(latestBriefing(deps.db));
+      return json(latestAgentBriefing(deps.db));
 
     if (path === "/api/briefings/run" && request.method === "POST") {
-      const result = await runBriefing(
+      const prepared = enqueueWorkflowRun(deps, BRIEFING_WORKFLOW_ID, { triggerKind: "manual" });
+      return json(
         {
-          db: deps.db,
-          events: deps.events,
-          push: async (payload) => {
-            const outcome = await sendPush(deps.db, deps.vapid, payload);
-            return {
-              ok: outcome.sent > 0,
-              ...(outcome.sent > 0 ? {} : { error: outcome.errors.join(",") || "no_device" }),
-            };
-          },
+          run: prepared.run,
+          workflow: { id: prepared.workflow.id, title: prepared.workflow.title },
         },
-        true,
+        201,
       );
-      return json(result);
     }
 
     if (path === "/api/runs") {
