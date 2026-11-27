@@ -48,14 +48,15 @@ PORT=8799 MODEL_BASE_URL=http://127.0.0.1:8798/v1 MODEL_NAME=mock-model bun run 
 | 이미 응답이 스트리밍된 뒤 실패                                   | 재시도·전환 없이 실패로 기록(부분 응답을 다른 공급자로 반복하지 않음) |
 | 모든 공급자 실패/대기                                            | 빈 문자열이 아니라 사유가 담긴 오류                                   |
 
-대체 공급자는 `MODEL_FALLBACKS_JSON`(우선순위 순 배열)으로 지정한다. 잘못된
-JSON은 시작 시 오류로 멈춘다(조용히 버리지 않음).
-
-```bash
-MODEL_FALLBACKS_JSON='[{"name":"backup","baseUrl":"https://api.example/v1","apiKey":"...","model":"..."}]' \
-MODEL_COOLDOWN_MS=900000 MODEL_RETRIES=1 bun run start
-```
-
+대체 공급자는 이제 **설정 화면**(`/settings/providers`)에서 정한다. 공급자 하나는 이름,
+base URL, 봉인된 키, 추가 헤더로 저장되고, `모델 경로`가 답변 순서다(위가 먼저).
+OpenCode Go와 DeepInfra는 미리 준비된 종류이며 각자의 API에서 모델 목록과 사용량·한도를
+직접 읽는다. OpenAI 호환 서버는 `종류: OpenAI 호환 서버`로 추가한다.
+`MODEL_BASE_URL`/`MODEL_API_KEY`/`MODEL_NAME`/`MODEL_FALLBACKS_JSON`은 **공급자가 하나도
+없는 데이터베이스의 첫 실행**에서만 쓰인다(기존 설치의 경로를 그대로 옮겨 심는다). 한 번
+심고 나면 화면이 유일한 출발점이다. 잘못된 `MODEL_FALLBACKS_JSON`은 시작 시 오류로
+멈춘다(조용히 버리지 않음). 모델 선택 화면을 브라우저로 검증하려면
+`bun scripts/qa/settings-qa.ts --evidence-dir <dir>`를 쓴다(로컬 대역 공급자 + 실제 Chrome).
 라우팅 결정(재시도·전환·전체 소진)은 대화의 응답 근처와 실행 로그(`provider.retry`,
 `provider.fallback`, `provider.exhausted` 이벤트)에 공급자명, 사유, 업스트림 응답 본문과
 함께 남는다. HTTP 200으로 오는 오류 봉투와 내용 없는 스트림도 실패로 처리한다.
