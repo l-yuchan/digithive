@@ -59,7 +59,12 @@ function sameContent(
   );
 }
 
-export function createWhiteboardStore(db: Database, root: string): WhiteboardStore {
+export type WhiteboardStoreWithRoot = WhiteboardStore & {
+  /** The absolute directory the documents live in, for tools and QA that need it. */
+  readonly root: string;
+};
+
+export function createWhiteboardStore(db: Database, root: string): WhiteboardStoreWithRoot {
   const absoluteRoot = resolve(root);
   mkdirSync(absoluteRoot, { recursive: true });
 
@@ -147,5 +152,5 @@ export function createWhiteboardStore(db: Database, root: string): WhiteboardSto
     return { ...document, hash: sha256Hex(content) };
   }
 
-  return { refresh, list, read, write, update };
+  return { root: absoluteRoot, refresh, list, read, write, update };
 }

@@ -1,4 +1,4 @@
-import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { SQLiteError, type Database, type SQLQueryBindings } from "bun:sqlite";
 import { isRecord, listMarkdownFiles, readDocumentFile, stableJson } from "./document";
 import { WhiteboardListSchema } from "./schema";
 import type {
@@ -125,19 +125,61 @@ export function indexWhiteboard(db: Database, root: string): void {
       updated_at: document.updatedAt,
     });
   }
-  db.transaction((): void => {
-    db.run("DELETE FROM whiteboard_fts");
-    db.run("DELETE FROM whiteboard_documents");
-    const insertDocument = db.query(
+  // Only the difference between the files and the index is written. A refresh over an
+  // unchanged board opens no write transaction at all, which is what keeps a starting
+  // worker from colliding with the web process (live SQLITE_BUSY, 2026-11-28).
+  const existing = new Map(
+    db
+      .query<{ id: string; path: string; hash: string }, []>(
+        "SELECT id, path, hash FROM whiteboard_documents",
+      )
+      .all()
+      .map((row) => [row.path, row]),
+  );
+  const wanted = new Set(rows.map((row) => row.path));
+  const stale = [...existing.values()].filter((row) => !wanted.has(row.path));
+  const changed = rows.filter((row) => existing.get(row.path)?.hash !== row.hash);
+  if (stale.length === 0 && changed.length === 0) return;
+  // The read above and this write are one decision under the write lock. They are retried
+  // while another process holds the lock: measured with a real second process on Bun 1.4.5,
+  // an explicit BEGIN IMMEDIATE is refused and did not wait despite `busy_timeout`, so the
+  // wait is made here. A locked read is free to re-run; nothing is written until it succeeds.
+  let attempt = 0;
+  while (true) {
+    try {
+      db.transaction(writeDifference)();
+      return;
+    } catch (error) {
+      const busy =
+        error instanceof SQLiteError &&
+        (error.code === "SQLITE_BUSY" || error.code === "SQLITE_LOCKED");
+      attempt += 1;
+      if (!busy || attempt >= 100) throw error;
+      Bun.sleepSync(100);
+    }
+  }
+
+  function writeDifference(): void {
+    const removeDocument = db.query("DELETE FROM whiteboard_documents WHERE path = ?");
+    const removeSearch = db.query("DELETE FROM whiteboard_fts WHERE path = ?");
+    for (const row of stale) {
+      removeDocument.run(row.path);
+      removeSearch.run(row.path);
+    }
+    const upsert = db.query(
       `INSERT INTO whiteboard_documents
          (id,path,kind,title,source_json,status,hash,created_at,updated_at,indexed_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?,?)
+       ON CONFLICT(path) DO UPDATE SET id=excluded.id, kind=excluded.kind, title=excluded.title,
+         source_json=excluded.source_json, status=excluded.status, hash=excluded.hash,
+         created_at=excluded.created_at, updated_at=excluded.updated_at, indexed_at=excluded.indexed_at`,
     );
     const insertSearch = db.query(
       "INSERT INTO whiteboard_fts (document_id,path,text) VALUES (?,?,?)",
     );
-    for (const row of rows) {
-      insertDocument.run(
+    for (const row of changed) {
+      removeSearch.run(row.path);
+      upsert.run(
         row.id,
         row.path,
         row.kind,
@@ -156,7 +198,21 @@ export function indexWhiteboard(db: Database, root: string): void {
         `${row.title}\n${document?.text ?? ""}\n${sourceText(document?.source)}\n${row.path}`,
       );
     }
-  })();
+  }
+}
+
+/**
+ * A SQLite connection that waits for another writer instead of failing instantly. The
+ * indexer's writes are short, so the wait only ever bridges the web process's own write; a
+ * connection still blocked after the budget reports the real error rather than hanging.
+ */
+export function withBusyTimeout<T>(db: Database, work: () => T): T {
+  db.exec("PRAGMA busy_timeout = 15000");
+  try {
+    return work();
+  } finally {
+    db.exec("PRAGMA busy_timeout = 5000");
+  }
 }
 
 export function queryIndex(db: Database, input: WhiteboardListInput = {}): WhiteboardSummary[] {
