@@ -32,7 +32,21 @@ export const SourceNameSchema = z.enum(["calendar", "gmail", "canvas"]);
  * `jobs/`, so a job is not a special kind of workflow — only its path is unusual.
  */
 export const RunExecutorSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("agent") }),
+  // A briefing reads a digest the runner builds from the index and then talks to the
+  // owner in Korean, so an instance can carry its persona and round budget as settings —
+  // the run row keeps the snapshot, the definition keeps the choice.
+  z.object({
+    kind: z.literal("agent"),
+    /** Prepended to the run goal as the assistant's persona for this instance. */
+    persona: z.string().min(1).max(4_000).optional(),
+    /** Tool rounds this instance may take; absent means the runtime default. */
+    maxToolRounds: z.number().int().min(1).max(64).optional(),
+    /**
+     * The app answers "what changed" deterministically and hands it to the agent as its
+     * first user message, so a run with a small round budget never has to survey the board.
+     */
+    starter: z.literal("briefing-digest").optional(),
+  }),
   z.object({
     kind: z.literal("script"),
     path: z.string().min(1).max(500),

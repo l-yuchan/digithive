@@ -20,7 +20,12 @@ type Account = {
   readonly sources?: readonly string[];
 };
 
-type Outcome = { readonly ok?: boolean; readonly count?: number; readonly error?: string };
+type Outcome = {
+  readonly ok?: boolean;
+  readonly count?: number;
+  readonly skippedItems?: number;
+  readonly error?: string;
+};
 
 function isOutcome(value: unknown): value is Outcome {
   return typeof value === "object" && value !== null;
@@ -60,7 +65,10 @@ if (sources.length === 0) {
   process.exit(0);
 }
 
-const results: { source: string; ok: boolean; count?: number; error?: string }[] = [];
+// `skipped` is the provider's own count of items it no longer has (e.g. Gmail 404 on a message
+// detail); a skip is not a failure and does not make the run exit non-zero.
+const results: { source: string; ok: boolean; count?: number; skipped?: number; error?: string }[] =
+  [];
 for (const source of sources) {
   try {
     const outcome = await sdk.accounts.collect(source, accountId);
@@ -68,6 +76,9 @@ for (const source of sources) {
       source,
       ok: !isOutcome(outcome) || outcome.ok !== false,
       ...(isOutcome(outcome) && typeof outcome.count === "number" ? { count: outcome.count } : {}),
+      ...(isOutcome(outcome) && typeof outcome.skippedItems === "number" && outcome.skippedItems > 0
+        ? { skipped: outcome.skippedItems }
+        : {}),
       ...(isOutcome(outcome) && outcome.error ? { error: outcome.error } : {}),
     });
   } catch (error) {

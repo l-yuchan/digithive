@@ -221,6 +221,47 @@ describe("google oauth + sync", () => {
     expect(outcome.count).toBe(1);
   });
 
+  test("a message detail that no longer exists is skipped, not treated as a failed sync", async () => {
+    // Live 2026-11-28: one message returned 404 on the detail read and the collector aborted the
+    // whole batch every 15 minutes, so the cursor never moved and the account stopped advancing.
+    const deps = googleDeps(
+      Object.assign(
+        async (input: string | URL | Request) => {
+          const url = input instanceof Request ? input.url : input.toString();
+          // A message the history reports as added, then gone by the time it is read.
+          if (url.includes("/history"))
+            return jsonResponse({
+              history: [{ messagesAdded: [{ message: { id: "m1" } }, { message: { id: "m2" } }] }],
+              historyId: "mail-2",
+            });
+          if (url.includes("/messages/m1")) return jsonResponse({ error: "not found" }, 404);
+          if (url.includes("/messages?"))
+            return jsonResponse({ messages: [{ id: "m1" }, { id: "m2" }] });
+          return jsonResponse({
+            id: "m2",
+            internalDate: "1795500000000",
+            payload: { headers: [{ name: "Subject", value: "정상 메일" }] },
+          });
+        },
+        { preconnect: fetch.preconnect },
+      ),
+    );
+    deps.db
+      .query(
+        "UPDATE account_sources SET cursor='old-history', ok=1 WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
+      )
+      .run();
+    const outcome = await syncGoogleGmail(deps, ACCOUNT);
+    expect(outcome).toMatchObject({ ok: true, count: 1, cursor: "mail-2", skippedItems: 1 });
+    const row = deps.db
+      .query<{ cursor: string; ok: number; detail_json: string }, []>(
+        "SELECT cursor, ok, detail_json FROM account_sources WHERE account_id='6f1c7a52-9b3e-4f8a-9c2d-71b0a5d4e8c6' AND source='gmail'",
+      )
+      .get();
+    expect(row?.ok).toBe(1);
+    expect(JSON.parse(row?.detail_json ?? "{}")).toMatchObject({ skipped: 1, count: 1 });
+  });
+
   test("calendar and gmail keep independent cursors", async () => {
     const deps = googleDeps(
       Object.assign(

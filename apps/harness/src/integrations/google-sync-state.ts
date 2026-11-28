@@ -9,8 +9,13 @@ export function cursorOf(db: Database, accountId: string, source: string): strin
   return row?.cursor ?? null;
 }
 
-export type Progress = { items: number };
+/** What one collection pass read so far; `skipped` counts items the provider no longer has. */
+export type Progress = { items: number; skipped?: number };
 
 export function failureDetail(progress: Progress): Record<string, unknown> {
-  return { partial: progress.items > 0, collected: progress.items };
+  return {
+    partial: progress.items > 0,
+    collected: progress.items,
+    ...(progress.skipped ? { skipped: progress.skipped } : {}),
+  };
 }

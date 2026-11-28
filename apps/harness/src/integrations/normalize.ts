@@ -120,6 +120,8 @@ export type SyncOutcome = {
   readonly error: string | null;
   /** True when a disabled source or a credential-less account was not attempted. */
   readonly skipped?: boolean;
+  /** Items the provider no longer has (e.g. a Gmail message that 404s); collected once, then gone. */
+  readonly skippedItems?: number;
 };
 
 export type SyncState = {

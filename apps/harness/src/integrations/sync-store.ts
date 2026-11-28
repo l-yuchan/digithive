@@ -87,6 +87,7 @@ export function recordOutcome(input: OutcomeInput, result: OutcomeResult): SyncO
     },
     now,
   });
+  const skippedItems = result.detail?.["skipped"];
   return {
     accountId: result.accountId,
     source: result.source,
@@ -94,6 +95,7 @@ export function recordOutcome(input: OutcomeInput, result: OutcomeResult): SyncO
     count: result.count,
     cursor: result.cursor,
     error: result.error,
+    ...(typeof skippedItems === "number" && skippedItems > 0 ? { skippedItems } : {}),
   };
 }
 

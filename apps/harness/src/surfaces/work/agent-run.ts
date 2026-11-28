@@ -2,6 +2,7 @@ import type { SQLQueryBindings } from "bun:sqlite";
 import { specs } from "../../tools/registry";
 import { buildContext } from "../../core/context";
 import type { WorkDeps } from "./runner";
+import { RunExecutorSchema } from "../../core/executor";
 import type { RunRow } from "./record";
 import type { keepLease } from "./lease";
 import { ownsLease } from "./lease";
@@ -11,8 +12,23 @@ import { runStream } from "./stream-diagnostics";
 import { ProviderError } from "../../providers/errors";
 import { abortMessage, dbCancelled, settle, type RunOutcome } from "./settle";
 import { z } from "zod";
+import { composeBriefingDigest } from "../../workflows/briefing-digest";
 
 type Lease = ReturnType<typeof keepLease>;
+
+/**
+ * The app's own first message, written for a run whose executor names a starter. It is
+ * produced once and then persisted like any other message, so an approval resume replays
+ * the same digest instead of composing a second, different one.
+ */
+function starterMessage(
+  deps: WorkDeps,
+  executor: { readonly starter?: "briefing-digest" | undefined },
+  now: number,
+): string | null {
+  if (executor.starter !== "briefing-digest") return null;
+  return composeBriefingDigest(deps.db, now).text;
+}
 
 const BudgetSchema = z.object({
   inputRefs: z.array(z.string()).optional(),
@@ -58,6 +74,14 @@ export async function executeAgent(
 ): Promise<RunOutcome> {
   const state = parseState(run);
   const contract = BudgetSchema.parse(JSON.parse(run.budgetJson));
+  // An agent instance may carry its own round budget and persona (see RunExecutorSchema);
+  // the runtime limit is the floor so a definition can only ask for more, never for zero.
+  const executor = RunExecutorSchema.parse(
+    JSON.parse(run.executorJson.length > 0 ? run.executorJson : '{"kind":"agent"}'),
+  );
+  const persona = executor.kind === "agent" ? executor.persona : undefined;
+  const maxToolRounds =
+    (executor.kind === "agent" ? executor.maxToolRounds : undefined) ?? limits.maxToolRounds;
   // The context producer is shared with conversations: fresh clock, language,
   // policy and the actual tool list on every start and approval resume.
   const history = state.messages.filter((message) => message.role !== "system");
@@ -67,6 +91,7 @@ export async function executeAgent(
     tools: specs(deps.tools).map((tool) => ({ name: tool.name, description: tool.description })),
   });
   let system = built.system;
+  if (persona) system += `\n\n${persona}`;
   if (contract.completionCondition) {
     system += `\n\nInput references: ${JSON.stringify(contract.inputRefs)}\nCompletion condition: ${contract.completionCondition}\nPermission profile: ${contract.permissionProfile}`;
   }
@@ -74,6 +99,16 @@ export async function executeAgent(
     system += `\n\n## Workflow parameters\n${JSON.stringify(contract.params, null, 2)}`;
   }
   state.messages = [{ role: "system", content: system }, ...history];
+  // A fresh run's state starts with its goal as the only message; a starter replaces that
+  // first message (the digest is the job), and a resume never fires it a second time.
+  if ((state.roundsUsed ?? 0) === 0 && history.length === 1 && history[0]?.role === "user") {
+    const starter = starterMessage(deps, executor.kind === "agent" ? executor : {}, now());
+    if (starter !== null)
+      state.messages = [
+        { role: "system", content: system },
+        { role: "user", content: starter },
+      ];
+  }
   const maxToolCalls = contract.budget?.maxToolCalls ?? contract.maxToolCalls ?? Infinity;
   const assertActive = () => {
     if (lease.signal.aborted) throw lease.signal.reason;
@@ -126,12 +161,12 @@ export async function executeAgent(
       saveState(deps.db, run, state);
     }
 
-    for (let round = 0; round < limits.maxToolRounds; round += 1) {
+    for (let round = 0; round < maxToolRounds; round += 1) {
       assertActive();
       const pending: { id: string; name: string; arguments: string }[] = state.remaining ?? [];
       delete state.remaining;
       if (pending.length === 0) {
-        if ((state.roundsUsed ?? 0) >= limits.maxToolRounds) throw new Error("tool_round_limit");
+        if ((state.roundsUsed ?? 0) >= maxToolRounds) throw new Error("tool_round_limit");
         state.roundsUsed = (state.roundsUsed ?? 0) + 1;
         for await (const typed of runStream(
           deps,
@@ -249,7 +284,7 @@ export async function executeAgent(
           });
       }
       if (paused) return "paused";
-      if (round === limits.maxToolRounds - 1) throw new Error("tool_round_limit");
+      if (round === maxToolRounds - 1) throw new Error("tool_round_limit");
     }
 
     assertActive();

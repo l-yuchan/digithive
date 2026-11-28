@@ -42,7 +42,7 @@ async function syncGmailFull(
     page = body.nextPageToken;
   } while (page);
   const items: NormalizedItem[] = [];
-  await gmailDetails(deps, token, ids, items, progress);
+  const skipped = await gmailDetails(deps, token, ids, items, progress);
   return deps.db.transaction(() => {
     deps.db.query("DELETE FROM sync_items WHERE account_id=? AND source='gmail'").run(accountId);
     saveItems(deps.db, accountId, "gmail", items, now);
@@ -53,17 +53,24 @@ async function syncGmailFull(
       count: items.length,
       cursor: historyId,
       error: "full_resync",
+      ...(skipped > 0 ? { detail: { skipped } } : {}),
     });
   })();
 }
 
+/**
+ * Reads each listed message's full body. A 404 here means that message is gone (deleted or
+ * expunged between the list and this read); it is skipped and counted, because one missing
+ * message must not stop the account from collecting the rest or from advancing its cursor.
+ * Any other failure (401/403/5xx) still throws and is reported as the source's error.
+ */
 async function gmailDetails(
   deps: GoogleDeps,
   token: string,
   ids: Iterable<string>,
   sink: NormalizedItem[],
   progress: Progress,
-): Promise<void> {
+): Promise<number> {
   for (const id of ids) {
     const detail = await (deps.fetchImpl ?? fetch)(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`,
@@ -71,10 +78,15 @@ async function gmailDetails(
         headers: { authorization: `Bearer ${token}` },
       },
     );
+    if (detail.status === 404) {
+      progress.skipped = (progress.skipped ?? 0) + 1;
+      continue;
+    }
     if (!detail.ok) throw new Error(`gmail_detail_http_${detail.status}`);
     sink.push(normalizeGmail(await detail.json()));
     progress.items = sink.length;
   }
+  return progress.skipped ?? 0;
 }
 
 export async function syncGoogleGmail(deps: GoogleDeps, accountId?: string): Promise<SyncOutcome> {
@@ -135,7 +147,7 @@ export async function syncGoogleGmail(deps: GoogleDeps, accountId?: string): Pro
       page = body.nextPageToken;
     } while (page);
     const items: NormalizedItem[] = [];
-    await gmailDetails(deps, token, ids, items, progress);
+    const skipped = await gmailDetails(deps, token, ids, items, progress);
     return deps.db.transaction(() => {
       saveItems(deps.db, target, "gmail", items, now);
       for (const id of deleted)
@@ -149,6 +161,7 @@ export async function syncGoogleGmail(deps: GoogleDeps, accountId?: string): Pro
         count: items.length,
         cursor,
         error: null,
+        ...(skipped > 0 ? { detail: { skipped } } : {}),
       });
     })();
   } catch (error) {

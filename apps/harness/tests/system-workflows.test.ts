@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { migrate } from "../src/store/db";
 import { getWorkflow } from "../src/workflows/workflow-store";
 import {
+  BRIEFING_AGENT_INSTRUCTION,
   BRIEFING_WORKFLOW_ID,
   DAILY_SEARCH_TRIGGER,
   DAILY_SEARCH_WORKFLOW_ID,
@@ -23,7 +24,15 @@ test("fresh databases contain both system agents and their daily bindings", () =
     // When all current migrations run.
     migrate(db);
     // Then each agent and its automatic trigger exists, not merely its instructions.
-    expect(getWorkflow(db, BRIEFING_WORKFLOW_ID)?.executor).toEqual({ kind: "agent" });
+    // The briefing is an agent instance with its own rounds and a digest starter, so a run
+    // with a small round budget is not asked to survey the whole board (2026-11-28 failure).
+    const briefing = getWorkflow(db, BRIEFING_WORKFLOW_ID);
+    expect(briefing?.executor).toEqual({
+      kind: "agent",
+      persona: BRIEFING_AGENT_INSTRUCTION,
+      maxToolRounds: 16,
+      starter: "briefing-digest",
+    });
     expect(getWorkflow(db, DAILY_SEARCH_WORKFLOW_ID)?.executor).toEqual({ kind: "agent" });
     expect(binding(db, "system:daily-search:06:30")).toMatchObject({
       workflow_id: DAILY_SEARCH_WORKFLOW_ID,
@@ -87,7 +96,10 @@ test("V16 moves a shipped briefing's existing schedule to the canonical agent", 
       next_run_at: "2030-01-01T00:00:00.000Z",
     });
     expect(getWorkflow(db, "legacy-briefing")).toBeNull();
-    expect(getWorkflow(db, BRIEFING_WORKFLOW_ID)?.executor).toEqual({ kind: "agent" });
+    expect(getWorkflow(db, BRIEFING_WORKFLOW_ID)?.executor).toMatchObject({
+      kind: "agent",
+      starter: "briefing-digest",
+    });
   } finally {
     db.close();
   }
