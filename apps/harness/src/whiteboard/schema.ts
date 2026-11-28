@@ -49,9 +49,19 @@ export const WhiteboardUpdateSchema = z.object({
 });
 
 export const WhiteboardListSchema = z.object({
-  query: z.string().optional(),
+  query: z.string().max(500).optional(),
   kind: z.enum(WHITEBOARD_KINDS).optional(),
   limit: z.number().int().min(1).max(200).optional(),
+  /** A path prefix such as `records/inbox`; never absolute and never `..`. */
+  group: z
+    .string()
+    .trim()
+    .max(512)
+    .refine((value) => !value.includes("..") && !value.includes("\\") && !value.startsWith("/"))
+    .optional(),
+  source: z.string().trim().min(1).max(64).optional(),
+  after: instant.optional(),
+  before: instant.optional(),
 });
 
 const SEGMENT = /^[A-Za-z0-9._-]+$/;

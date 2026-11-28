@@ -27,16 +27,29 @@ const OPERATIONAL_TYPES = new Set([
 ]);
 
 /** A stale file is removed only when its path namespace and source both match. */
+/**
+ * Where a projection's files may live: the current layout first, then the prefixes documents
+ * were projected under before 2026-11-28, so a stale file in an old tree is still removed
+ * and a citation written against an old path still resolves through `previous_path`.
+ */
 const OWNED_PREFIXES: readonly { readonly prefix: string; readonly type: string }[] = [
+  { prefix: "records/inbox/", type: "gmail" },
   { prefix: "records/gmail/", type: "gmail" },
   { prefix: "records/calendar/", type: "calendar" },
+  { prefix: "records/courses/", type: "canvas" },
   { prefix: "records/canvas/", type: "canvas" },
+  { prefix: "resources/", type: "file" },
   { prefix: "records/files/", type: "file" },
   { prefix: "records/conversations/", type: "conversation" },
+  { prefix: "notes/", type: "memory" },
   { prefix: "threads/memories/", type: "memory" },
+  { prefix: "briefings/", type: "briefing" },
   { prefix: "threads/briefings/", type: "briefing" },
+  { prefix: "workspaces/", type: "workflow" },
   { prefix: "commitments/workflows/", type: "workflow" },
+  { prefix: "runs/", type: "run" },
   { prefix: "commitments/runs/", type: "run" },
+  { prefix: "schedules/", type: "schedule" },
   { prefix: "watches/schedules/", type: "schedule" },
 ];
 

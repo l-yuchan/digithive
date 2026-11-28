@@ -213,14 +213,42 @@ describe("whiteboard store", () => {
     const documents = store.list({ limit: 200 });
     const gmail = documents.find((row) => row.source["type"] === "gmail");
     const canvas = documents.find((row) => row.source["type"] === "canvas");
-    expect(gmail?.path).toStartWith("records/gmail/");
+    // The 2026-11-28 layout: mail is the inbox, an LMS item sits under its own course and year.
+    expect(gmail?.path).toMatch(
+      /^records\/inbox\/\d{4}\/\d{2}\/\d{4}-\d{2}-\d{2}-.+-[a-z0-9]{6}\.md$/,
+    );
+    expect(gmail?.path).toContain("회의-초대");
     expect(gmail?.source["itemId"]).toBe("m1");
-    expect(canvas?.path).toStartWith("records/canvas/");
+    // Without a course name in the item, the year/month folder is the honest place.
+    expect(canvas?.path).toMatch(/^records\/courses\/\d{4}\/(\d{2}|.+)\/\d{4}-\d{2}-\d{2}-/);
     expect(documents.some((row) => row.source["type"] === "calendar")).toBe(false);
     const gmailDocument = store.read(gmail?.id ?? "");
     expect(gmailDocument?.text).toContain("메일 본문");
     expect(readFileSync(resolve(root, gmail?.path ?? ""), "utf8")).toStartWith("---\n");
     expect(store.read(canvas?.id ?? "")?.text).toContain("과제 설명");
+  });
+
+  test("an LMS item with a course is filed under that course", () => {
+    const { db, store } = setup();
+    saveItems(
+      db,
+      DEFAULT_CANVAS_ACCOUNT_ID,
+      "canvas",
+      [
+        {
+          id: "a2",
+          source: "canvas",
+          title: "중간 보고서",
+          at: "2026-11-28T00:00:00.000Z",
+          detail: "과목 소프트웨어공학 · 2페이지 분량",
+          url: null,
+        },
+      ],
+      NOW,
+    );
+    store.refresh();
+    const document = store.list({ limit: 50 }).find((row) => row.source["itemId"] === "a2");
+    expect(document?.path).toStartWith("records/courses/소프트웨어공학/2026/");
   });
 
   test("workflow/run/watch project current operational state (regression: lost run state or schedule)", () => {
@@ -260,10 +288,10 @@ describe("whiteboard store", () => {
     );
     expect(runDocument?.source["runId"]).toBe(run.id);
     expect(runDocument?.title).toBe(workflow.title);
-    expect(workflowDocument?.path).toStartWith("commitments/workflows/");
-    expect(runDocument?.path).toStartWith("commitments/runs/");
+    expect(workflowDocument?.path).toStartWith("workspaces/");
+    expect(runDocument?.path).toMatch(/^runs\/\d{4}\/\d{2}\/\d{4}-\d{2}-\d{2}-/);
     expect(runDocument?.status).toBe("queued");
-    expect(watch?.path).toStartWith("watches/schedules/");
+    expect(watch?.path).toStartWith("schedules/");
     expect(watch?.status).toBe("enabled");
     expect(store.read(workflowDocument?.id ?? "")?.text).toContain("회의 자료를 조사한다");
     expect(store.read(runDocument?.id ?? "")?.text).toContain("일일 조사 실행");

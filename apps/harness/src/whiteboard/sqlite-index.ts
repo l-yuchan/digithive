@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS whiteboard_documents (
   hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  indexed_at TEXT NOT NULL
+  indexed_at TEXT NOT NULL,
+  /** The path this document was indexed from before a layout move, for old citations. */
+  previous_path TEXT
 );
 CREATE INDEX IF NOT EXISTS whiteboard_documents_kind ON whiteboard_documents(kind, updated_at DESC);
 CREATE INDEX IF NOT EXISTS whiteboard_documents_updated ON whiteboard_documents(updated_at DESC);
@@ -105,6 +107,7 @@ export function searchExpression(query: string): string | null {
  * from the same scan so an edited body is searchable immediately.
  */
 export function indexWhiteboard(db: Database, root: string): void {
+  ensureIndexShape(db);
   const indexedAt = new Date().toISOString();
   const rows: IndexRow[] = [];
   const documents = new Map<string, WhiteboardDocument>();
@@ -137,7 +140,18 @@ export function indexWhiteboard(db: Database, root: string): void {
       .map((row) => [row.path, row]),
   );
   const wanted = new Set(rows.map((row) => row.path));
-  const stale = [...existing.values()].filter((row) => !wanted.has(row.path));
+  // A document that moved is recognised by its id: the row keeps the path it left behind so a
+  // reference written before the move still resolves (citations name paths, ids do not move).
+  const byId = new Map([...existing.values()].map((row) => [row.id, row]));
+  const movedTo = new Map(
+    rows
+      .filter((row) => existing.get(row.path) === undefined && byId.has(row.id))
+      .map((row) => [row.id, row.path]),
+  );
+  const movedFrom = new Map([...movedTo].map(([id, path]) => [path, byId.get(id)?.path ?? null]));
+  const stale = [...existing.values()].filter(
+    (row) => !wanted.has(row.path) && !movedTo.has(row.id),
+  );
   const changed = rows.filter((row) => existing.get(row.path)?.hash !== row.hash);
   if (stale.length === 0 && changed.length === 0) return;
   // The read above and this write are one decision under the write lock. They are retried
@@ -166,13 +180,22 @@ export function indexWhiteboard(db: Database, root: string): void {
       removeDocument.run(row.path);
       removeSearch.run(row.path);
     }
+    // A moved document's old row is removed here, before its new one is inserted, so the
+    // id never exists twice inside the same transaction.
+    for (const [path, previous] of movedFrom) {
+      if (previous !== null && previous !== path) {
+        removeDocument.run(previous);
+        removeSearch.run(previous);
+      }
+    }
     const upsert = db.query(
       `INSERT INTO whiteboard_documents
-         (id,path,kind,title,source_json,status,hash,created_at,updated_at,indexed_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?)
+         (id,path,kind,title,source_json,status,hash,created_at,updated_at,indexed_at,previous_path)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(path) DO UPDATE SET id=excluded.id, kind=excluded.kind, title=excluded.title,
          source_json=excluded.source_json, status=excluded.status, hash=excluded.hash,
-         created_at=excluded.created_at, updated_at=excluded.updated_at, indexed_at=excluded.indexed_at`,
+         created_at=excluded.created_at, updated_at=excluded.updated_at, indexed_at=excluded.indexed_at,
+         previous_path=COALESCE(excluded.previous_path, whiteboard_documents.previous_path)`,
     );
     const insertSearch = db.query(
       "INSERT INTO whiteboard_fts (document_id,path,text) VALUES (?,?,?)",
@@ -190,6 +213,7 @@ export function indexWhiteboard(db: Database, root: string): void {
         row.created_at,
         row.updated_at,
         indexedAt,
+        movedFrom.get(row.path) ?? null,
       );
       const document = documents.get(row.path);
       insertSearch.run(
@@ -215,34 +239,181 @@ export function withBusyTimeout<T>(db: Database, work: () => T): T {
   }
 }
 
-export function queryIndex(db: Database, input: WhiteboardListInput = {}): WhiteboardSummary[] {
+type RankedRow = IndexRow & { score: number | null; total: number };
+
+export type IndexedHit = WhiteboardSummary & {
+  /** BM25 score, lower is better; null when the call was a plain listing. */
+  readonly score: number | null;
+  /** Documents that matched the whole filter, so the caller knows what it did not see. */
+  readonly total: number;
+};
+
+/** A group prefix as stored paths use it: no trailing slash, no escaping. */
+function prefixOf(group: string): string {
+  return group.replace(/\/+$/, "");
+}
+
+/**
+ * Reads the index with the filesystem filters composed and FTS ranking on top. A query ranks
+ * (BM25: title above tags above body) and a listing orders by recency; both answer the total
+ * so a caller knows the answer was cut.
+ */
+export function queryIndex(db: Database, input: WhiteboardListInput = {}): IndexedHit[] {
   const parsed = WhiteboardListSchema.parse(input);
   const conditions: string[] = [];
   const bindings: SQLQueryBindings[] = [];
-  if (parsed.query !== undefined) {
-    const expression = searchExpression(parsed.query);
-    if (expression !== null) {
-      conditions.push(
-        "d.id IN (SELECT document_id FROM whiteboard_fts WHERE whiteboard_fts MATCH ?)",
-      );
-      bindings.push(expression);
-    }
+  const expression = parsed.query === undefined ? null : searchExpression(parsed.query);
+  if (expression !== null) {
+    conditions.push(
+      "d.id IN (SELECT document_id FROM whiteboard_fts WHERE whiteboard_fts MATCH ?)",
+    );
+    bindings.push(expression);
   }
   if (parsed.kind !== undefined) {
     conditions.push("d.kind = ?");
     bindings.push(parsed.kind);
   }
-  const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
-  bindings.push(parsed.limit ?? 50);
+  if (parsed.group !== undefined && parsed.group.trim().length > 0) {
+    // Prefix plus a separator, so a search in "records/in" cannot match "records/inbox".
+    conditions.push("(d.path = ? OR d.path LIKE ? ESCAPE '\\')");
+    const prefix = prefixOf(parsed.group.trim());
+    bindings.push(prefix + ".md", likePrefix(prefix) + "/%");
+  }
+  if (parsed.source !== undefined) {
+    conditions.push("json_extract(d.source_json, '$.type') = ?");
+    bindings.push(parsed.source);
+  }
+  if (parsed.after !== undefined) {
+    conditions.push("d.updated_at > ?");
+    bindings.push(parsed.after);
+  }
+  if (parsed.before !== undefined) {
+    conditions.push("d.updated_at < ?");
+    bindings.push(parsed.before);
+  }
+  const where = conditions.length > 0 ? " WHERE " + conditions.join(" AND ") : "";
+  const total =
+    db
+      .query<{ n: number }, SQLQueryBindings[]>(
+        "SELECT count(*) AS n FROM whiteboard_documents d" + where,
+      )
+      .get(...bindings)?.n ?? 0;
+  const order =
+    expression === null
+      ? "ORDER BY d.updated_at DESC, d.path ASC"
+      : "ORDER BY score, d.updated_at DESC, d.path ASC";
+  // The FTS columns are (document_id, path, text); only the body column is weighted.
+  const rankJoin =
+    expression === null
+      ? "NULL AS score"
+      : "(SELECT bm25(whiteboard_fts, 0.0, 0.0, 1.0) FROM whiteboard_fts WHERE whiteboard_fts.document_id = d.id AND whiteboard_fts MATCH ?) AS score";
+  const params = expression === null ? bindings : [expression, ...bindings];
   return db
-    .query<IndexRow, SQLQueryBindings[]>(
-      `SELECT ${SUMMARY_SELECT}
-         FROM whiteboard_documents d${where}
-        ORDER BY d.updated_at DESC, d.path ASC
-        LIMIT ?`,
+    .query<RankedRow, SQLQueryBindings[]>(
+      "SELECT " +
+        SUMMARY_SELECT +
+        ", " +
+        rankJoin +
+        "\n         FROM whiteboard_documents d" +
+        where +
+        "\n        " +
+        order +
+        "\n        LIMIT ?",
     )
-    .all(...bindings)
-    .map(summaryOf);
+    .all(...params, parsed.limit ?? 50)
+    .map((row) => ({ ...summaryOf(row), score: row.score, total }));
+}
+
+/**
+ * The index is rebuildable, so a shape the previous build wrote is replaced by rebuilding it
+ * rather than by a schema migration: content lives in the Markdown files, never here.
+ */
+function ensureIndexShape(db: Database): void {
+  const columns = db
+    .query<{ name: string }, []>("SELECT name FROM pragma_table_info('whiteboard_documents')")
+    .all()
+    .map((column) => column.name);
+  if (columns.length === 0 || columns.includes("previous_path")) return;
+  db.exec("DROP TABLE whiteboard_documents");
+  db.exec("DROP TABLE whiteboard_fts");
+  db.exec(WHITEBOARD_SCHEMA_SQL);
+}
+
+/** Escapes the LIKE wildcards in a literal prefix so a path is matched exactly. */
+function likePrefix(value: string): string {
+  return value.replace(/[%_\\]/g, (match) => "\\" + match);
+}
+
+export type GroupCount = {
+  readonly path: string;
+  readonly count: number;
+  readonly updatedAt: string | null;
+};
+
+/** Directories one level under `prefix`, each with how many documents sit beneath it. */
+export function groupCounts(db: Database, prefix: string): GroupCount[] {
+  const trimmed = prefix.trim().replace(/^\/+/, "");
+  const base = trimmed.length === 0 ? "" : prefixOf(trimmed) + "/";
+  const rows = db
+    .query<{ path: string; updated_at: string }, [string]>(
+      "SELECT path, updated_at FROM whiteboard_documents WHERE path LIKE ? ESCAPE '\\'",
+    )
+    .all(likePrefix(base) + "%");
+  const groups = new Map<string, GroupCount>();
+  for (const row of rows) {
+    const rest = row.path.slice(base.length);
+    const slash = rest.indexOf("/");
+    if (slash <= 0) continue;
+    const child = base + rest.slice(0, slash);
+    const existing = groups.get(child);
+    groups.set(
+      child,
+      existing === undefined
+        ? { path: child, count: 1, updatedAt: row.updated_at }
+        : {
+            path: child,
+            count: existing.count + 1,
+            updatedAt:
+              existing.updatedAt !== null && existing.updatedAt > row.updated_at
+                ? existing.updatedAt
+                : row.updated_at,
+          },
+    );
+  }
+  return [...groups.values()].toSorted((left, right) => left.path.localeCompare(right.path));
+}
+
+/** Documents beneath a prefix; the prefix itself counts when it names a document. */
+export function countUnder(db: Database, prefix: string): number {
+  const base = prefixOf(prefix);
+  return (
+    db
+      .query<{ n: number }, [string, string]>(
+        "SELECT count(*) AS n FROM whiteboard_documents WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+      )
+      .get(base + ".md", likePrefix(base) + "/%")?.n ?? 0
+  );
+}
+
+/**
+ * Resolves paths that may predate a layout move: a document is found by its current path or
+ * by the path it was reindexed from, because a citation names the path it was written with.
+ */
+export function idsForPaths(db: Database, paths: readonly string[]): Map<string, string> {
+  const found = new Map<string, string>();
+  if (paths.length === 0) return found;
+  const wanted = new Set(paths);
+  const rows = db
+    .query<{ id: string; path: string; previous_path: string | null }, []>(
+      "SELECT id, path, previous_path FROM whiteboard_documents",
+    )
+    .all();
+  for (const row of rows) {
+    if (wanted.has(row.path)) found.set(row.path, row.id);
+    if (row.previous_path !== null && wanted.has(row.previous_path))
+      found.set(row.previous_path, row.id);
+  }
+  return found;
 }
 
 export function pathForDocument(db: Database, id: string): string | null {

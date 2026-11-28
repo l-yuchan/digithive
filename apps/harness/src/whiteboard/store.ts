@@ -10,7 +10,14 @@ import {
   stableJson,
   writeDocumentFile,
 } from "./document";
-import { indexWhiteboard, pathForDocument, queryIndex } from "./sqlite-index";
+import {
+  countUnder,
+  groupCounts,
+  idsForPaths,
+  indexWhiteboard,
+  pathForDocument,
+  queryIndex,
+} from "./sqlite-index";
 import { projectOperationalDocuments } from "./projector";
 import { WhiteboardUpdateSchema, WhiteboardWriteSchema, normalizeDocumentPath } from "./schema";
 import {
@@ -20,6 +27,7 @@ import {
   type WhiteboardDocument,
   type WhiteboardKind,
   type WhiteboardListInput,
+  type WhiteboardMap,
   type WhiteboardSource,
   type WhiteboardStore,
   type WhiteboardSummary,
@@ -152,5 +160,60 @@ export function createWhiteboardStore(db: Database, root: string): WhiteboardSto
     return { ...document, hash: sha256Hex(content) };
   }
 
-  return { root: absoluteRoot, refresh, list, read, write, update };
+  return {
+    root: absoluteRoot,
+    refresh,
+    list,
+    map,
+    entries: (input) =>
+      groupCounts(db, input.group).map((group) => ({
+        path: group.path,
+        kind: "group" as const,
+        title: group.path.slice(group.path.lastIndexOf("/") + 1),
+        count: group.count,
+        children: groupCounts(db, group.path).length,
+        updatedAt: group.updatedAt,
+      })),
+    groupExists: (prefix) => groupCounts(db, prefix).length > 0 || countUnder(db, prefix) > 0,
+    resolvePath,
+    read,
+    write,
+    update,
+  };
+
+  /** `ls`: the groups beneath a prefix, plus what changed most recently under it. */
+  function map(input: { readonly group?: string } = {}): WhiteboardMap {
+    refresh();
+    const group = input.group ?? "";
+    const total =
+      group.length === 0
+        ? (db.query<{ n: number }, []>("SELECT count(*) AS n FROM whiteboard_documents").get()?.n ??
+          0)
+        : countUnder(db, group);
+    return {
+      total,
+      groups: groupCounts(db, group).map((entry) => ({
+        path: entry.path,
+        kind: "group",
+        title: entry.path.slice(entry.path.lastIndexOf("/") + 1),
+        count: entry.count,
+        children: groupCounts(db, entry.path).length,
+        updatedAt: entry.updatedAt,
+      })),
+      recent: queryIndex(db, { ...(group.length === 0 ? {} : { group }), limit: 10 }),
+    };
+  }
+
+  /**
+   * A path that no longer exists is resolved through the path the document used to have, so
+   * a reference written before a layout move keeps naming the same document.
+   */
+  function resolvePath(path: string): string | null {
+    refresh();
+    if (readDocumentFile(absoluteRoot, path) !== null) return path;
+    const canonical = path.endsWith(".md") ? path : path + ".md";
+    const ids = idsForPaths(db, [path, canonical]);
+    const id = ids.get(path) ?? ids.get(canonical);
+    return id === undefined ? null : pathForDocument(db, id);
+  }
 }

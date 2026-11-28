@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { isRecord, type WhiteboardDraft } from "./document";
-import { clean, draft, iso, parseJson, stringField } from "./projection-format";
+import { documentIdForOrigin } from "./document";
+import { clean, datedPath, draft, iso, parseJson, stringField } from "./projection-format";
 
 type WorkflowRow = {
   id: string;
@@ -23,7 +24,8 @@ export function workflowDrafts(db: Database, nowIso: string): WhiteboardDraft[] 
     .map((row) =>
       draft({
         originKey: `workflow:${row.id}`,
-        directory: "commitments/workflows",
+        directory: "workspaces",
+        leaf: `workspaces/${documentIdForOrigin(`workflow:${row.id}`)}.md`,
         kind: "commitment",
         title: row.title,
         source: { type: "workflow", workflowId: row.id },
@@ -66,7 +68,13 @@ export function runDrafts(db: Database, nowIso: string): WhiteboardDraft[] {
     .map((row) =>
       draft({
         originKey: `run:${row.id}`,
-        directory: "commitments/runs",
+        directory: "runs",
+        leaf: datedPath({
+          group: "runs",
+          title: row.workflow_title ?? clean(row.goal, row.id),
+          at: row.created_at,
+          id: documentIdForOrigin(`run:${row.id}`),
+        }),
         kind: "commitment",
         title: row.workflow_title ?? clean(row.goal, row.id),
         source: {
@@ -119,7 +127,8 @@ export function scheduleDrafts(db: Database, nowIso: string): WhiteboardDraft[] 
     .map((row) =>
       draft({
         originKey: `schedule:${row.id}`,
-        directory: "watches/schedules",
+        directory: "schedules",
+        leaf: `schedules/${documentIdForOrigin(`schedule:${row.id}`)}.md`,
         kind: "watch",
         title: clean(row.workflow_title, `스케줄 ${row.id}`),
         source: { type: "schedule", scheduleId: row.id, workflowId: row.workflow_id },
@@ -157,7 +166,8 @@ export function briefingDrafts(db: Database, nowIso: string): WhiteboardDraft[] 
       const references = isRecord(content) ? (content["references"] ?? null) : null;
       return draft({
         originKey: `briefing:${row.id}`,
-        directory: "threads/briefings",
+        directory: "briefings",
+        leaf: `briefings/${row.created_at.slice(0, 10)}-${row.slot.replace(":", "")}.md`,
         kind: "thread",
         title: `브리핑 ${row.slot}`,
         source: { type: "briefing", briefingId: row.id, slot: row.slot, runId: row.run_id },

@@ -1,6 +1,20 @@
 import type { Database } from "bun:sqlite";
-import type { WhiteboardDraft } from "./document";
-import { draft, iso, parseJson } from "./projection-format";
+import { documentIdForOrigin, type WhiteboardDraft } from "./document";
+import { datedPath, draft, iso, parseJson } from "./projection-format";
+
+/** The biome-first group each collected source lives under (2026-11-28 layout). */
+const RECORD_GROUPS: Readonly<Record<string, string>> = {
+  gmail: "records/inbox",
+  calendar: "records/calendar",
+  canvas: "records/courses",
+};
+
+/** LMS items carry "과목 <name>" in their detail; that name becomes the course folder. */
+function courseOf(detail: string | null): string | null {
+  const match = /^과목\s+(.+?)\s+·/.exec(detail ?? "") ?? /^과목\s+(.+)$/.exec(detail ?? "");
+  const name = match?.[1]?.trim() ?? "";
+  return name.length > 0 && name !== "-" ? name : null;
+}
 
 type SyncRow = {
   account_id: string;
@@ -26,10 +40,18 @@ export function syncDrafts(db: Database, nowIso: string): WhiteboardDraft[] {
         ORDER BY i.source, i.at, i.item_id`,
     )
     .all();
-  return rows.map((row) =>
-    draft({
+  return rows.map((row) => {
+    const group = RECORD_GROUPS[row.source] ?? `records/${row.source}`;
+    return draft({
       originKey: `sync:${row.source}:${row.account_id}:${row.item_id}`,
-      directory: `records/${row.source}`,
+      directory: group,
+      leaf: datedPath({
+        group,
+        title: row.title,
+        at: row.at,
+        id: documentIdForOrigin(`sync:${row.source}:${row.account_id}:${row.item_id}`),
+        course: row.source === "canvas" ? courseOf(row.detail) : null,
+      }),
       kind: "record",
       title: row.title,
       source: {
@@ -52,8 +74,8 @@ export function syncDrafts(db: Database, nowIso: string): WhiteboardDraft[] {
         ...(row.at === null ? [] : [`- 시각: ${row.at}`]),
         ...(row.url === null ? [] : [`- URL: ${row.url}`]),
       ].join("\n"),
-    }),
-  );
+    });
+  });
 }
 
 type MemoryRow = {
@@ -77,7 +99,13 @@ export function memoryDrafts(db: Database, nowIso: string): WhiteboardDraft[] {
     .map((row) =>
       draft({
         originKey: `memory:${row.id}`,
-        directory: "threads/memories",
+        directory: "notes",
+        leaf: datedPath({
+          group: "notes",
+          title: row.text,
+          at: row.created_at,
+          id: documentIdForOrigin(`memory:${row.id}`),
+        }),
         kind: "thread",
         title: `메모리 · ${row.kind}`,
         source: {
@@ -121,7 +149,8 @@ export function fileDrafts(db: Database, nowIso: string): WhiteboardDraft[] {
     .map((row) =>
       draft({
         originKey: `file:${row.id}`,
-        directory: "records/files",
+        directory: "resources",
+        leaf: `resources/${documentIdForOrigin(`file:${row.id}`)}.md`,
         kind: "record",
         title: row.name,
         source: {

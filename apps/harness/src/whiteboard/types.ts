@@ -40,6 +40,31 @@ export type WhiteboardListInput = {
   readonly query?: string;
   readonly kind?: WhiteboardKind;
   readonly limit?: number;
+  /**
+   * Filesystem-style navigation (2026-11-28): `group` narrows to a path prefix such as
+   * `records/inbox`, `source` to the record's provenance type, and `after`/`before` to an
+   * updated-time window. They compose with `query`, which ranks (BM25) instead of filtering.
+   */
+  readonly group?: string;
+  readonly source?: string;
+  readonly after?: string;
+  readonly before?: string;
+};
+
+/** One navigable node of the tree: a directory (with counts) or a document. */
+export type WhiteboardEntry = {
+  readonly path: string;
+  readonly kind: WhiteboardKind | "group";
+  readonly title: string;
+  readonly count: number;
+  readonly children: number;
+  readonly updatedAt: string | null;
+};
+
+export type WhiteboardMap = {
+  readonly total: number;
+  readonly groups: readonly WhiteboardEntry[];
+  readonly recent: readonly WhiteboardSummary[];
 };
 
 export type WhiteboardWriteInput = {
@@ -61,9 +86,19 @@ export type WhiteboardUpdateInput = {
 };
 
 export type WhiteboardStore = {
+  /** Absolute directory the documents live in. */
+  readonly root: string;
   /** Reconcile disk into the index, then materialize every operational source. */
   refresh(): void;
   list(input?: WhiteboardListInput): WhiteboardSummary[];
+  /** Counts per group (one level of the given prefix) — the answer to `ls`. */
+  map(input?: { readonly group?: string }): WhiteboardMap;
+  /** Children of one group, each with the number of documents beneath it. */
+  entries(input: { readonly group: string }): WhiteboardEntry[];
+  /** Whether a resolved path prefix names a non-empty group. */
+  groupExists(prefix: string): boolean;
+  /** Resolves a path (old layout included) to the document's canonical path. */
+  resolvePath(path: string): string | null;
   read(id: string): WhiteboardDocument | null;
   write(input: WhiteboardWriteInput): WhiteboardDocument;
   update(input: WhiteboardUpdateInput): WhiteboardDocument;

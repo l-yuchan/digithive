@@ -2,7 +2,8 @@ import type { Database, SQLQueryBindings } from "bun:sqlite";
 import type { ConversationEvent } from "../core/contracts";
 import { parseEntryEvents } from "../core/contracts";
 import type { WhiteboardDraft } from "./document";
-import { draft } from "./projection-format";
+import { documentIdForOrigin } from "./document";
+import { datedPath, draft } from "./projection-format";
 
 class UnexpectedConversationEventError extends Error {
   constructor(readonly event: never) {
@@ -49,6 +50,14 @@ export function conversationDrafts(db: Database, now: string): WhiteboardDraft[]
     const text = parseEntryEvents(row.payload_json).map(eventMarkdown).join("\n\n");
     return draft({
       directory: "records/conversations",
+      // Kept by source (not under records/inbox) so a conversation record can never be
+      // mistaken for collected mail; the leaf still names its date and session.
+      leaf: datedPath({
+        group: "records/conversations",
+        title: row.session_title,
+        at: row.created_at,
+        id: documentIdForOrigin(row.id),
+      }),
       originKey: row.id,
       kind: "record",
       title: `${row.session_title} · ${row.role || row.kind}`,
