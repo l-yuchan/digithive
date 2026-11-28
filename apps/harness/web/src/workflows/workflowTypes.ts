@@ -11,7 +11,6 @@ export const CAPABILITY_GROUPS = [
   "schedule.write",
   "memory.read",
   "memory.write",
-  "mail.read",
   "mail.send",
   "account.read",
   "files.read",

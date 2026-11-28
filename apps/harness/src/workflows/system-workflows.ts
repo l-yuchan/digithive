@@ -142,6 +142,28 @@ function installBriefing(db: Database, now: number): void {
   }
 }
 
+/**
+ * Applies the shipped briefing executor to a database whose definition predates the digest
+ * starter (e.g. upgraded from the build that still held `{"kind":"agent"}`). Idempotent, so
+ * the runtime can run it at start the way it installs the jobs; a no-op on a fresh database.
+ */
+export function ensureBriefingExecutor(db: Database, now = Date.now()): boolean {
+  const row = db
+    .query<{ executor_json: string }, [string]>(
+      "SELECT executor_json FROM workflows WHERE id = ? LIMIT 1",
+    )
+    .get(BRIEFING_WORKFLOW_ID);
+  if (!row) return false;
+  const desired = JSON.stringify(BRIEFING_EXECUTOR);
+  if (row.executor_json === desired) return false;
+  db.query("UPDATE workflows SET executor_json=?,updated_at=? WHERE id=?").run(
+    desired,
+    new Date(now).toISOString(),
+    BRIEFING_WORKFLOW_ID,
+  );
+  return true;
+}
+
 /** V16 calls this inside its transaction; existing runs keep their old snapshots. */
 export function installSystemWorkflows(db: Database, now = Date.now()): void {
   installBriefing(db, now);

@@ -45,16 +45,22 @@ describe("workflow definition contract", () => {
     const granted = RunExecutorSchema.parse({
       kind: "script",
       path: "jobs/report.ts",
-      capabilities: ["mail.read", "workflow.run"],
+      capabilities: ["memory.read", "workflow.run"],
     });
     expect(granted.kind === "script" && granted.capabilities).toEqual([
-      "mail.read",
+      "memory.read",
       "workflow.run",
     ]);
     expect(
       RunExecutorSchema.safeParse({ kind: "script", path: "x.ts", capabilities: ["root"] }).success,
     ).toBe(false);
-    expect(CAPABILITY_GROUPS).toHaveLength(10);
+    // Reading personal data live is gone (2026-11-28): scripts collect through account.read,
+    // agents read the whiteboard, and `mail.read` is no longer a capability at all.
+    expect(
+      RunExecutorSchema.safeParse({ kind: "script", path: "x.ts", capabilities: ["mail.read"] })
+        .success,
+    ).toBe(false);
+    expect(CAPABILITY_GROUPS).toHaveLength(9);
     expect(CAPABILITY_GROUPS).toContain("account.read");
     expect(CAPABILITY_GROUPS).toContain("mail.send");
   });

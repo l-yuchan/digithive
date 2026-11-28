@@ -6,7 +6,6 @@ import { openDatabase } from "./store/db";
 import { EventLog } from "./events/log";
 import { createRegistry } from "./tools/registry";
 import { builtinTools, WORK_POLICY } from "./tools/builtins";
-import { personalTools } from "./tools/personal";
 import { scheduleTools } from "./tools/schedules";
 import { workflowTools } from "./tools/workflows";
 import { memoryTools } from "./tools/memory";
@@ -30,6 +29,7 @@ import { z } from "zod";
 import { searchConfigFromEnv } from "./search";
 import type { SearchConfig } from "./search";
 import { createWhiteboardTools } from "./runtime/whiteboard-tools";
+import { ensureBriefingExecutor } from "./workflows/system-workflows";
 import type { WhiteboardStore } from "./whiteboard/types";
 
 const here = import.meta.dir;
@@ -133,6 +133,9 @@ export function createRuntime(config: HarnessConfig): {
   installJobs(config.scriptsRoot);
   const db = openDatabase(config.dbPath);
   const events = new EventLog(db);
+  // A definition written by an older build keeps its shape after an upgrade; the briefing's
+  // executor (persona, rounds, digest starter) is shipped, so it is applied here every start.
+  if (ensureBriefingExecutor(db)) console.log("briefing: definition executor updated");
   const {
     whiteboard,
     evidence,
@@ -206,7 +209,6 @@ export function createRuntime(config: HarnessConfig): {
   });
   const tools = createRegistry([
     ...builtinTools({ root: config.workspaceRoot }),
-    ...personalTools(googleDeps),
     ...workflowTools({
       db,
       events,

@@ -16,7 +16,6 @@ type Props = {
 const CAPABILITIES: readonly { id: CapabilityGroup; label: string; access: string }[] = [
   { id: "workflow.read", label: "워크플로 읽기", access: "읽기" },
   { id: "memory.read", label: "기억 읽기", access: "읽기" },
-  { id: "mail.read", label: "메일 읽기", access: "읽기" },
   { id: "files.read", label: "파일 읽기", access: "읽기" },
   { id: "account.read", label: "계정·켜진 정보 읽기", access: "읽기" },
   { id: "mail.send", label: "알림 보내기·브리핑 만들기", access: "쓰기" },

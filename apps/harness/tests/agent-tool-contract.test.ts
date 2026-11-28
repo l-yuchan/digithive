@@ -21,6 +21,12 @@ test("new agents can publish whiteboard briefings but cannot run deterministic c
     expect(names).toContain("briefing_publish");
     expect(names).toContain("whiteboard_read");
     expect(names).not.toContain("briefing_compose");
+    // Personal data is not an agent tool any more (2026-11-28): the board is the source.
+    expect(names).not.toContain("gmail_search");
+    expect(names).not.toContain("personal_data_search");
+    // Collection stays a script reach (it reads collection state, not personal content).
+    expect(names).toContain("account_list");
+    expect(names).toContain("source_collect");
   } finally {
     harness.close();
     rmSync(root, { recursive: true, force: true });

@@ -28,7 +28,6 @@ import { collectSources, type SyncSourcesDeps } from "../src/integrations/sync";
 import { syncStates } from "../src/integrations/normalize";
 import { handleAccountRequest } from "../src/server/account-routes";
 import { handleWorkflowRequest } from "../src/server/workflow-routes";
-import { personalTools } from "../src/tools/personal";
 
 const SECRET = "accounts-test-secret";
 const NOW = Date.parse("2026-11-25T10:00:00.000Z");
@@ -50,18 +49,6 @@ const AccountsBody = z.object({
   ),
   googleConfigured: z.boolean(),
   canvasConfigured: z.boolean(),
-});
-
-const SearchBody = z.object({
-  items: z.array(z.object({ accountId: z.string(), item_id: z.string() })),
-  states: z.array(z.object({ accountId: z.string(), enabled: z.boolean() })),
-  state: z.object({ accountId: z.string(), enabled: z.boolean() }).nullable(),
-});
-
-const GmailSearchBody = z.object({
-  messages: z.array(z.object({ id: z.string(), accountId: z.string(), detail: z.string() })),
-  errors: z.array(z.object({ accountId: z.string(), error: z.string() })),
-  accounts: z.array(z.object({ id: z.string() })),
 });
 
 const ErrorBody = z.object({ error: z.string() });
@@ -322,24 +309,17 @@ describe("account-scoped sync", () => {
         error: "source_disabled",
       }),
     ]);
-    const search = personalTools(deps).find((tool) => tool.name === "personal_data_search");
-    const body = SearchBody.parse(
-      JSON.parse(
-        (await search?.execute({ source: "gmail", query: "메일", accountId: a }, { runId: "r" })) ??
-          "{}",
-      ),
-    );
-    expect(body.items).toEqual([]);
-    expect(body.states).toEqual([expect.objectContaining({ accountId: a, enabled: false })]);
+    // The switch stops collection; the items already collected stay on the board.
+    const kept = db
+      .query<{ n: number }, SQLQueryBindings[]>(
+        "SELECT count(*) AS n FROM sync_items WHERE account_id=? AND source='gmail'",
+      )
+      .get(a);
+    expect(kept?.n).toBe(1);
 
     expect(setSourceEnabled(db, a, "gmail", true)).toMatchObject({ enabled: true });
-    const again = SearchBody.parse(
-      JSON.parse(
-        (await search?.execute({ source: "gmail", query: "메일", accountId: a }, { runId: "r" })) ??
-          "{}",
-      ),
-    );
-    expect(again.items).toHaveLength(1);
+    const again = await collectSources(syncDeps, { accountId: a, sources: ["gmail"] });
+    expect(again).toEqual([expect.objectContaining({ source: "gmail", ok: true })]);
   });
 
   test("one failing token does not disturb the other account's tokens or items", async () => {
@@ -592,85 +572,24 @@ describe("account API and tools", () => {
     expect(listed.find((account) => account.email === "live@example.com")?.connected).toBe(true);
   });
 
-  test("personal_data_search excludes a disabled source even when it is targeted", async () => {
+  // Removed 2026-11-28 with the personal-data tools: agents read the board instead, so the switch
+  // means "keep collecting" and collected items stay readable. This replaces those two cases.
+  test("turning collection off keeps collected items readable", async () => {
     const db = fresh();
-    const events = new EventLog(db);
     const a = addGoogle(db, "a@example.com", "sub-a", "at-a");
-    const b = addGoogle(db, "b@example.com", "sub-b", "at-b");
-    const insert = db.query(
+    db.query(
       "INSERT INTO sync_items(account_id,source,item_id,title,at,detail,url,updated_at) VALUES (?,?,?,?,?,?,?,?)",
-    );
-    insert.run(a, "gmail", "same", "회의 A", "2026-11-25T00:00:00.000Z", "공유", null, "x");
-    insert.run(b, "gmail", "same", "회의 B", "2026-11-25T00:00:00.000Z", "공유", null, "x");
-    const tool = personalTools(
-      googleDeps(
-        db,
-        events,
-        fakeFetch(() => json({ error: "unused" }, 404)),
-      ),
-    ).find((entry) => entry.name === "personal_data_search");
-    ok(tool, "personal_data_search registered");
-    expect(tool.conversation).toBe(true);
-
-    const search = async (accountId?: string) => {
-      const raw: unknown = JSON.parse(
-        await tool.execute(
-          { source: "gmail", query: "회의", ...(accountId ? { accountId } : {}) },
-          { runId: "test" },
-        ),
-      );
-      return SearchBody.parse(raw);
-    };
-
-    expect((await search()).items.map((item) => item.accountId).toSorted()).toEqual(
-      [a, b].toSorted(),
-    );
-    setSourceEnabled(db, b, "gmail", false);
-    expect((await search()).items.map((item) => item.accountId)).toEqual([a]);
-    const explicit = await search(b);
-    expect(explicit.items).toEqual([]);
-    expect(explicit.state).toMatchObject({ accountId: b, enabled: false });
-
-    saveTokens(db, SECRET, a, {
-      accessToken: "at-a",
-      refreshToken: null,
-      expiresAt: LATER,
-      scope: null,
-    });
-    const gmailStates = syncStates(db)
-      .filter((row) => row.source === "gmail")
-      .map((row) => row.accountId);
-    expect(gmailStates).toContain(a);
-    expect(gmailStates).toContain(b);
-  });
-
-  test("gmail_search reports per-account results and failures without choosing one account", async () => {
-    const db = fresh();
-    const events = new EventLog(db);
-    const healthy = addGoogle(db, "ok@example.com", "sub-ok", "at-ok", LATER);
-    addGoogle(db, "bad@example.com", "sub-bad", "expired", 0, "rt-bad");
-    const fetchImpl = fakeFetch((url, init) => {
-      if (url.hostname === "oauth2.googleapis.com") return json({ error: "invalid_grant" }, 400);
-      const auth = bearer(init);
-      if (url.pathname === "/gmail/v1/users/me/messages") return json({ messages: [{ id: "m1" }] });
-      return json({
-        id: "m1",
-        internalDate: "1795500000000",
-        snippet: auth === "Bearer at-ok" ? "건강한 계정" : "실패 계정",
-      });
-    });
-    const tool = personalTools(googleDeps(db, events, fetchImpl)).find(
-      (entry) => entry.name === "gmail_search",
-    );
-    ok(tool, "gmail_search registered");
-    const raw: unknown = JSON.parse(
-      await tool.execute({ query: "회의", limit: 2 }, { runId: "test" }),
-    );
-    const result = GmailSearchBody.parse(raw);
-    expect(result.messages.map((message) => message.accountId)).toEqual([healthy]);
-    expect(result.messages[0]?.detail).toBe("건강한 계정");
-    expect(result.accounts).toHaveLength(2);
-    expect(result.errors.some((entry) => entry.error.startsWith("oauth_http_"))).toBe(true);
+    ).run(a, "gmail", "same", "회의 A", "2026-11-25T00:00:00.000Z", "공유", null, "x");
+    setSourceEnabled(db, a, "gmail", false);
+    const kept = db
+      .query<{ title: string }, SQLQueryBindings[]>(
+        "SELECT title FROM sync_items WHERE account_id=? AND source='gmail'",
+      )
+      .all(a);
+    expect(kept).toEqual([{ title: "회의 A" }]);
+    expect(
+      syncStates(db).find((row) => row.source === "gmail" && row.accountId === a),
+    ).toMatchObject({ enabled: false });
   });
 
   test("PATCH toggles only the addressed source and DELETE removes only that account", async () => {

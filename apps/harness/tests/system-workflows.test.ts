@@ -5,6 +5,7 @@ import { getWorkflow } from "../src/workflows/workflow-store";
 import {
   BRIEFING_AGENT_INSTRUCTION,
   BRIEFING_WORKFLOW_ID,
+  ensureBriefingExecutor,
   DAILY_SEARCH_TRIGGER,
   DAILY_SEARCH_WORKFLOW_ID,
 } from "../src/workflows/system-workflows";
@@ -16,6 +17,28 @@ function binding(db: Database, id: string) {
     )
     .get(id);
 }
+
+test("a briefing definition from an older build is upgraded in place at start", () => {
+  const db = new Database(":memory:");
+  try {
+    migrate(db);
+    // Given the shape the previous build deployed (no persona, rounds or starter).
+    db.query('UPDATE workflows SET executor_json=\'{"kind":"agent"}\' WHERE id=?').run(
+      BRIEFING_WORKFLOW_ID,
+    );
+    // When the runtime applies the shipped executor.
+    expect(ensureBriefingExecutor(db)).toBe(true);
+    // Then the instance carries the digest starter and its own round budget.
+    expect(getWorkflow(db, BRIEFING_WORKFLOW_ID)?.executor).toMatchObject({
+      starter: "briefing-digest",
+      maxToolRounds: 16,
+    });
+    // And a second start changes nothing.
+    expect(ensureBriefingExecutor(db)).toBe(false);
+  } finally {
+    db.close();
+  }
+});
 
 test("fresh databases contain both system agents and their daily bindings", () => {
   // Given an empty database opened through the real migration chain.
